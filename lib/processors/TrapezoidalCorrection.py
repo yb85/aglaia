@@ -199,6 +199,24 @@ class TrapezoidalCorrection(AbstractImageProcessor):
                          advanced=True),
     }
 
+    @classmethod
+    def replay_transform(cls, params, in_wh):
+        """Keystone perspective → the stamped homography, rescaled if the
+        replay source size differs from the forward pass."""
+        import numpy as np
+
+        from lib.processors.replay_transform import AffineTransform
+        w, h = in_wh
+        H = np.array(params["H"], dtype=np.float64)
+        canvas_w, canvas_h = params["canvas_wh"]
+        src_w, src_h = params["src_wh"]
+        sx, sy = w / src_w, h / src_h
+        S_in = np.array([[1 / sx, 0, 0], [0, 1 / sy, 0], [0, 0, 1]], dtype=np.float64)
+        S_out = np.array([[sx, 0, 0], [0, sy, 0], [0, 0, 1]], dtype=np.float64)
+        H_scaled = S_out @ H @ S_in
+        return AffineTransform(H_scaled,
+                          (int(round(canvas_w * sx)), int(round(canvas_h * sy))))
+
     def __init__(self, options: TrapezoidalOption):
         super().__init__(options)
         self.opt = options

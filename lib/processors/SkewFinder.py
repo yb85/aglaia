@@ -48,6 +48,22 @@ class SkewFinder(AbstractImageProcessor):
     DEFAULT_MIN_ANGLE = 0.1
     DEFAULT_ACCURACY = 0.1
 
+    @classmethod
+    def replay_transform(cls, params, in_wh):
+        """Rigid rotation about the (size-scaled) centre → affine 3×3."""
+        import cv2
+        import numpy as np
+
+        from lib.processors.replay_transform import AffineTransform
+        w, h = in_wh
+        cx, cy = params["center_xy"]
+        sw, sh = params["wh"]
+        cx *= w / sw
+        cy *= h / sh
+        M = cv2.getRotationMatrix2D((cx, cy), -float(params["angle_deg"]), 1.0)
+        H = np.vstack([M, [0.0, 0.0, 1.0]]).astype(np.float64)
+        return AffineTransform(H, (w, h))
+
     def __init__(self, options: SkewFinderOption):
         super().__init__(options)
         self.max_angle = options.max_angle

@@ -87,6 +87,31 @@ class MarginSetter(AbstractImageProcessor):
                         advanced=True),
     }
 
+    @classmethod
+    def apply_replay(cls, buf, mask, params, ctx):
+        """Crop to content, then pad the stamped left/right/top/bottom margin,
+        enforcing the dewarp-width floor — matches the forward pass."""
+        in_w = buf.shape[1]
+        cropped, bbox = _crop_to_content(buf)
+        x0, y0, w0, h0 = bbox
+        cropped_mask = mask[y0:y0 + h0, x0:x0 + w0]
+        l, r, t, b = params["ltrb_px"]
+        if (l, r, t, b) == (0, 0, 0, 0):
+            out, out_mask = cropped, cropped_mask
+        else:
+            border_val = 255 if cropped.ndim == 2 else (255, 255, 255)
+            out = cv2.copyMakeBorder(cropped, t, b, l, r,
+                                     cv2.BORDER_CONSTANT, value=border_val)
+            out_mask = cv2.copyMakeBorder(cropped_mask, t, b, l, r,
+                                          cv2.BORDER_CONSTANT, value=0)
+        # Width floor: dewarping a curved page can only widen it; cropping
+        # whitespace + a tight pad must not shrink below the dewarp output.
+        min_w = int(params.get("min_width_px", in_w))
+        if out.shape[1] < min_w:
+            out = _enforce_width_floor(out, min_w, fill=255)
+            out_mask = _enforce_width_floor(out_mask, min_w, fill=0)
+        return out, out_mask
+
     def __init__(self, options: MarginSetterOption):
         super().__init__(options)
         self.opt = options

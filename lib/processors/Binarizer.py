@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from dataclasses import dataclass, field, make_dataclass
 from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.utils import to_gray, to_rgb
+from lib.processors.utils import to_gray, to_rgb, is_binary
 from lib.processors.abstraction import (
     AbstractImageProcessor, AbstractProcessorOption, ReplayTrait, _fmt_value,
 )
@@ -249,6 +249,82 @@ class Binarizer(AbstractImageProcessor):
         bits.append(f"morpho_close: {getattr(o, 'morpho_close', '')}")
         bits.append(f"roi_shrink: {getattr(o, 'roi_shrink', '')}")
         return "\n".join(bits)
+
+    @classmethod
+    def apply_replay(cls, buf, mask, params, ctx):
+        """Last-pass binarisation, ROI-aware. `method` selects:
+          * `wolf++` — mask-aware Wolf (`wolf_masked`) when the ROI mask has
+            missing values; plain doxapy Wolf when the full frame is in-bounds.
+          * `wolf`   — plain doxapy Wolf, post-mask white wipe outside ROI.
+          * else (sauvola, niblack, …) — doxapy with the post-mask wipe.
+        """
+        import os
+
+        # Already binary → the threshold is idempotent and a second morpho
+        # close would erode glyphs. Pass through (this also makes stacked
+        # PIXEL_VALUE steps a no-op after the first).
+        if is_binary(buf):
+            return buf, mask
+
+        dpi = ctx.dpi
+        debug_dir = ctx.debug_dir
+        debug_tag = ctx.debug_tag
+        if debug_dir and debug_tag:
+            os.makedirs(debug_dir, exist_ok=True)
+        else:
+            debug_dir = None
+
+        gray = cv2.cvtColor(buf, cv2.COLOR_BGR2GRAY) if buf.ndim == 3 else buf
+        effective_mask = mask if (mask is not None and mask.any()) else \
+            np.full(gray.shape, 255, dtype=np.uint8)
+
+        if debug_dir is not None:
+            cv2.imwrite(os.path.join(debug_dir, f"{debug_tag}_0_input.png"), gray)
+            overlay = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            cnts, _ = cv2.findContours(effective_mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(overlay, cnts, -1, (0, 0, 255), 2)
+            cv2.putText(overlay,
+                        f"window={params.get('window')} k={params.get('k')} dpi={dpi}",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.imwrite(os.path.join(debug_dir, f"{debug_tag}_1_input_roi.png"), overlay)
+
+        method = str(params.get("method", "wolf++")).lower()
+        window = int(params.get("window", 30))
+        k = float(params.get("k", 0.25))
+
+        # `wolf++` opts into the mask-aware path only when the mask actually
+        # has missing values; on full-coverage frames it has no edge to
+        # protect, so plain doxapy Wolf does the work (same as `wolf`).
+        has_missing = (mask is not None and mask.any()
+                       and int(np.count_nonzero(mask)) < mask.size)
+        if method == "wolf++" and has_missing:
+            bw = wolf_masked(gray, effective_mask, window, k=k)
+        else:
+            doxa_method = "wolf" if method in ("wolf", "wolf++") else method
+            try:
+                import doxapy as dx  # noqa: F401
+            except Exception:
+                _, bw = cv2.threshold(gray, 0, 255,
+                                      cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            else:
+                opt = BinarizerOption(
+                    method=doxa_method, window=window, k=k, roi_shrink=0,
+                )
+                img = ImageBuffer(gray, ImageType.GRAY, dpi=dpi, filestem="replay",
+                                  path=None, parent=None)
+                bw = cls(opt).process(img).buffer
+            bw = np.where(effective_mask > 0, bw, 255).astype(bw.dtype)
+
+        # Same post-binarize closing the forward pass applied; reads from
+        # replay_params so a yaml change re-takes effect on the next replay.
+        morpho_n = int(params.get("morpho_close", 0) or 0)
+        if morpho_n > 0:
+            bw = morpho_close(bw, morpho_n)
+
+        if debug_dir is not None:
+            cv2.imwrite(os.path.join(debug_dir, f"{debug_tag}_2_bw.png"), bw)
+        return bw, mask
 
     def __init__(self, options: BinarizerOption):
         super().__init__(options)

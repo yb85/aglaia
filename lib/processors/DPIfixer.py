@@ -30,6 +30,19 @@ class DPIfixer(AbstractImageProcessor):
                       "If the buffer's DPI is above this, downsample to it."),
     }
 
+    @classmethod
+    def replay_transform(cls, params, in_wh):
+        """Uniform DPI scale → an affine (diagonal) 3×3, src→dst."""
+        import numpy as np
+
+        from lib.processors.replay_transform import AffineTransform
+        w, h = in_wh
+        in_w, in_h = params["in_wh"]
+        out_w, out_h = params["out_wh"]
+        sx, sy = out_w / in_w, out_h / in_h
+        H = np.array([[sx, 0, 0], [0, sy, 0], [0, 0, 1]], dtype=np.float64)
+        return AffineTransform(H, (int(round(w * sx)), int(round(h * sy))))
+
     def __init__(self, options: DPIfixerOption):
         super().__init__(options)
         self.min_dpi = options.min_dpi

@@ -19,7 +19,12 @@ import numpy as np
 from lib.ImageBuffer import ImageBuffer
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from lib.processors.option_specs import ParamSpec
+    from lib.processors.replay_transform import (
+        AffineTransform, ReplayContext, SampleMapTransform,
+    )
 
 
 class ReplayTrait(Enum):
@@ -140,6 +145,38 @@ class AbstractImageProcessor(ABC):
     # in the pipeline card's one-line "essential" description. Empty →
     # the base falls back to the first few algorithm fields.
     _ESSENTIAL_PARAMS: ClassVar[tuple] = ()
+
+    # ── replay contract (read by lib.workers.Replay) ───────────────────
+    # A processor self-describes how it re-applies in end-of-chain replay,
+    # so the engine never needs to special-case it (and a plugin joins
+    # replay with zero edits to Replay.py). Which method you implement is
+    # dictated by REPLAY_TRAIT:
+    #
+    #   COORDINATE   → replay_transform(): describe the transform as a composable
+    #                  geometric primitive (AffineTransform / SampleMapTransform). The
+    #                  engine fuses contiguous COORDINATE warps into one
+    #                  interpolation. Touch NO pixels here.
+    #   PIXEL_VALUE  → apply_replay(): act on pixels (binarise, morphology).
+    #   ROI          → apply_replay(): act on pixels (crop+pad margin).
+    #
+    # The forward pass stamps the needed values into the output's
+    # meta["replay_params"]; both methods receive that dict.
+    @classmethod
+    def replay_transform(cls, params: dict,
+                    in_wh: "tuple[int, int]") -> "AffineTransform | SampleMapTransform":
+        """COORDINATE processors only: the composable warp for an input of
+        size ``in_wh = (w, h)``. Must be analytic (params + size, no pixels)."""
+        raise NotImplementedError(
+            f"{cls.__name__} is REPLAY_TRAIT.COORDINATE but has no replay_transform()")
+
+    @classmethod
+    def apply_replay(cls, buf: "np.ndarray", mask: "np.ndarray",
+                     params: dict, ctx: "ReplayContext",
+                     ) -> "tuple[np.ndarray, np.ndarray]":
+        """PIXEL_VALUE / ROI processors only: re-apply the step to (buf, mask)
+        and return the new (buf, mask)."""
+        raise NotImplementedError(
+            f"{cls.__name__} has no apply_replay()")
 
     def __init_subclass__(cls, **kwargs):
         """Validate the plugin contract when a processor class is defined.

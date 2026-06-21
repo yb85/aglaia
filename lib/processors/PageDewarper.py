@@ -513,6 +513,80 @@ class PageDewarper(AbstractImageProcessor):
             step_opts["camera_matrix_resolution"] = None
         return step_opts
 
+    @classmethod
+    def replay_transform(cls, params, in_wh):
+        """Nonlinear sheet remap → a backward sampling map. The map is
+        analytic in the fitted sheet params, so the engine folds any upstream
+        affine into its source coords for a single interpolation."""
+        from lib.processors.replay_transform import SampleMapTransform
+        return SampleMapTransform(lambda in_hw: cls._replay_sample_map(in_hw, params))
+
+    @staticmethod
+    def _sample_grid(ref_h, ref_w, *, params, page_dims_w, page_dims_h,
+                     model_dims, decimate, zoom, model, n_modes, focal,
+                     support, support_y, support_decay, grading, flip):
+        """The arc-length-uniform backward sampling grid, shared by the
+        forward remap and by replay so both build pixel-identical geometry.
+
+        Returns ``(image_points, grid_shape, target_w, target_h, w_small,
+        h_small)`` — the projected sample points (still at decimated grid
+        resolution) plus the output sizing. Each caller does its own
+        reshape/resize tail (their float dtypes differ at the LSB). ``ref_h,
+        ref_w`` is the (padded) reference size for sizing + norm→pixel."""
+        from page_dewarp.dewarp import norm2pix, round_nearest_multiple
+
+        from lib.processors.sheet_models import arclength_x, project_xy_model
+        target_h = round_nearest_multiple(0.5 * page_dims_h * zoom * ref_h, decimate)
+        # Arc-length-uniform x grid: width sized from the sheet's arc length,
+        # x samples spaced uniformly in s (else the steep gutter side comes
+        # out horizontally stretched by sqrt(1+z'^2)).
+        arc_xs, arc_s = arclength_x(params, page_dims_w, model=model,
+                                    n_modes=n_modes, model_dims=model_dims,
+                                    support=support, support_decay=support_decay,
+                                    grading=grading, flip=flip)
+        arc_total = float(arc_s[-1])
+        target_w = round_nearest_multiple(
+            target_h * arc_total / page_dims_h, decimate)
+        h_small, w_small = int(target_h / decimate), int(target_w / decimate)
+        page_x = np.interp(np.linspace(0.0, arc_total, w_small), arc_s, arc_xs)
+        page_y = np.linspace(0, page_dims_h, h_small)
+        gx, gy = np.meshgrid(page_x, page_y)
+        page_xy = np.hstack((gx.flatten().reshape((-1, 1)),
+                             gy.flatten().reshape((-1, 1)))).astype(np.float32)
+        image_points = project_xy_model(
+            page_xy, params.astype(np.float32), model=model, n_modes=n_modes,
+            model_dims=model_dims, focal_length=focal, support=support,
+            support_y=support_y, support_decay=support_decay,
+            grading=grading, flip=flip)
+        image_points = norm2pix((ref_h, ref_w), image_points, False)
+        return image_points, gx.shape, target_w, target_h, w_small, h_small
+
+    @staticmethod
+    def _replay_sample_map(in_hw, params):
+        """Backward sampling map for a stamped dewarp step → ``(im_x, im_y,
+        pad_px)``, sampling the input padded by ``pad_px`` white px on every
+        side. Thin wrapper over the shared ``_sample_grid``."""
+        pad_px = int(params["pad_px"])
+        in_h, in_w = int(in_hw[0]), int(in_hw[1])
+        page_dims = np.array(params["page_dims"], dtype=np.float32)
+        image_points, shp, target_w, target_h, _, _ = PageDewarper._sample_grid(
+            in_h + 2 * pad_px, in_w + 2 * pad_px,
+            params=np.array(params["params"], dtype=np.float32),
+            # page_dims_w float()-cast (arclength), page_dims_h kept raw —
+            # mirrors the pre-extraction dtype mix exactly (byte-identical).
+            page_dims_w=float(page_dims[0]), page_dims_h=page_dims[1],
+            model_dims=params["model_dims"], decimate=int(params["decimate"]),
+            zoom=float(params["zoom"]), model=str(params["sheet_model"]),
+            n_modes=int(params["spline_modes"]), focal=float(params["focal_length"]),
+            support=params["support_x"], support_y=params["support_y"],
+            support_decay=params["support_decay"],
+            grading=float(params["knot_grading"]), flip=bool(params["binding_flip"]))
+        im_x = image_points[:, 0, 0].reshape(shp)
+        im_y = image_points[:, 0, 1].reshape(shp)
+        im_x = cv2.resize(im_x, (target_w, target_h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+        im_y = cv2.resize(im_y, (target_w, target_h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+        return im_x, im_y, pad_px
+
     def __init__(self, options: DewarpOption):
         super().__init__(options)
 
@@ -1238,48 +1312,22 @@ class PageDewarper(AbstractImageProcessor):
                       f"rms {_kp_rms(params_initial):.5f}->"
                       f"{_kp_rms(params):.5f}{_flat_note}", flush=True)
 
-            # 5. Remapping
+            # 5. Remapping — shared arc-length grid (same code path replay
+            # uses, so the live remap and a replayed remap are pixel-identical).
             zoom = 1.0
             decimate = self.cfg.REMAP_DECIMATE
+            image_points, grid_shape, target_w, target_h, w_small, h_small = \
+                self._sample_grid(
+                    img.shape[0], img.shape[1], params=params,
+                    page_dims_w=page_dims[0], page_dims_h=page_dims[1],
+                    model_dims=model_dims, decimate=decimate, zoom=zoom,
+                    model=self.sheet_model, n_modes=self.spline_modes,
+                    focal=self.focal_length, support=support_x,
+                    support_y=support_y, support_decay=support_decay,
+                    grading=self.knot_grading, flip=flat_flip)
 
-            target_h = 0.5 * page_dims[1] * zoom * img.shape[0]
-            target_h = round_nearest_multiple(target_h, decimate)
-            # Arc-length-uniform x grid: output width sized from the
-            # sheet's arc length and x samples spaced uniformly in s —
-            # otherwise text near the steep (gutter) side comes out
-            # horizontally stretched by √(1+z′²).
-            arc_xs, arc_s = sheet_models.arclength_x(
-                params, page_dims[0], model=self.sheet_model,
-                n_modes=self.spline_modes, model_dims=model_dims,
-                support=support_x, support_decay=support_decay,
-                grading=self.knot_grading, flip=flat_flip)
-            arc_total = float(arc_s[-1])
-            target_w = round_nearest_multiple(
-                target_h * arc_total / page_dims[1], decimate)
-
-            h_small, w_small = int(target_h / decimate), int(target_w / decimate)
-
-            page_x = np.interp(np.linspace(0.0, arc_total, w_small),
-                               arc_s, arc_xs)
-            page_y = np.linspace(0, page_dims[1], h_small)
-            gx, gy = np.meshgrid(page_x, page_y)
-
-            page_xy = np.hstack((gx.flatten().reshape((-1, 1)), gy.flatten().reshape((-1, 1)))).astype(np.float32)
-
-            params_f32 = params.astype(np.float32)
-            # Model-aware projection with EXPLICIT focal — the library
-            # project_xy reads the global cfg, which used to hold the
-            # default 1.2 here instead of the fitted focal.
-            image_points = sheet_models.project_xy_model(
-                page_xy, params_f32, model=self.sheet_model,
-                n_modes=self.spline_modes, model_dims=model_dims,
-                focal_length=self.focal_length, support=support_x,
-                support_y=support_y, support_decay=support_decay,
-                grading=self.knot_grading, flip=flat_flip)
-            image_points = norm2pix(img.shape, image_points, False)
-
-            im_x_dec = image_points[:, 0, 0].reshape(gx.shape).astype(np.float32)
-            im_y_dec = image_points[:, 0, 1].reshape(gx.shape).astype(np.float32)
+            im_x_dec = image_points[:, 0, 0].reshape(grid_shape).astype(np.float32)
+            im_y_dec = image_points[:, 0, 1].reshape(grid_shape).astype(np.float32)
 
             im_x = cv2.resize(im_x_dec, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
             im_y = cv2.resize(im_y_dec, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
@@ -1401,28 +1449,17 @@ class PageDewarper(AbstractImageProcessor):
             "pad_px": int(pad_px),
             "zoom": float(1.0),
             "decimate": int(self.cfg.REMAP_DECIMATE),
-            # Version flag: replay must rebuild the same arc-length-
-            # uniform x grid. Absent on pre-arclen nodes → legacy grid.
-            "arc_len": True,
-            # Sheet-model versioning. Absent on old nodes → cylindrical
-            # + library-default focal (1.2 — what the old remap used).
             "sheet_model": self.sheet_model,
             "spline_modes": int(self.spline_modes),
             "model_dims": [float(model_dims[0]), float(model_dims[1])],
             "focal_length": float(self.focal_length),
-            # Twist-model data support in page-x: outside it the surface
-            # is tangent-extended (no phantom margin curl). Absent on old
-            # nodes → unclamped evaluation (legacy behaviour).
+            # Twist-model data support: page-x tangent-extended outside the
+            # support (no phantom margin curl), page-y η-clamped at its edge.
             "support_x": [float(support_x[0]), float(support_x[1])],
-            # …and in page-y: outside it the twist factor is frozen at
-            # its edge value (η clamp). Absent on old nodes → unclamped.
             "support_y": [float(support_y[0]), float(support_y[1])],
-            # Decay length λ of the x extension (page-x units). Absent
-            # on old nodes → pure tangent (legacy, unbounded).
+            # Decay length λ of the page-x tangent extension.
             "support_decay": float(support_decay),
-            # flat_spline surface geometry: graded knot vector + binding
-            # flip. Absent on old nodes → uniform knots, no flip (the
-            # outer penalty is fit-time only — nothing to replay).
+            # flat_spline surface geometry: graded knot vector + binding flip.
             "knot_grading": float(self.knot_grading),
             "binding_flip": bool(flat_flip),
         }
