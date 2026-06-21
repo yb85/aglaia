@@ -305,6 +305,7 @@ def run(cfg: CliConfig) -> int:
     try:
         # Inputs
         expected_branches = 0
+        n_caught = 0
         if cfg.source == "pdfs":
             print(f"Importing {len(cfg.inputs)} PDF(s)…")
             enqueue_pdf_files(
@@ -344,10 +345,20 @@ def run(cfg: CliConfig) -> int:
             ).fetchone()["n"]
         finally:
             conn.close()
-        expected_branches = max(n_scans, n_branches)
-        print(f"Waiting for {expected_branches} scan(s) to finish processing…")
-        _wait_for_chain(log_queue, total_expected=expected_branches,
-                        timeout_s=DEFAULT_TIMEOUT_S)
+        if cfg.source == "project":
+            # Re-open: only the scans `catchup` actually re-enqueued emit
+            # branch_ready. An already-complete project re-enqueues nothing
+            # (n_caught == 0), so waiting for the full scan count would block
+            # for DEFAULT_TIMEOUT_S (1 h) on events that never come.
+            expected_branches = n_caught
+        else:
+            expected_branches = max(n_scans, n_branches)
+        if expected_branches:
+            print(f"Waiting for {expected_branches} scan(s) to finish processing…")
+            _wait_for_chain(log_queue, total_expected=expected_branches,
+                            timeout_s=DEFAULT_TIMEOUT_S)
+        else:
+            print("Nothing to process — pipeline objective already in DB.")
     finally:
         try:
             chain.stop()
