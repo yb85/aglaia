@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardware access Aglaïa actually uses at runtime. The matching
+       NS*UsageDescription strings live in Info.plist (set by the spec).
+       Without these entries the hardened-runtime app crashes the first
+       time it touches the device, regardless of the plist prompts. -->
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <key>com.apple.security.device.microphone</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+
+  <!-- Python + JAX/MLX + PyMuPDF + JBIG2 native libs are not Apple-signed,
+       and PyInstaller's bundled CPython JITs bytecode pages. Without
+       these three relaxations the hardened runtime kills the app at
+       launch with EXC_BAD_ACCESS / library-validation errors. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- Surya runs the bundled `llama-server` subprocess; the hardened
+       runtime would otherwise block dlopen on its sibling libraries. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

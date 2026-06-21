@@ -1,0 +1,84 @@
+name: book_curved_x2
+pipeline:
+- name: dpi_clamp_input
+  processor: DPIfixer
+  options:
+    min_dpi: 100
+    max_dpi: 300
+- name: capture_deskew
+  processor: SkewFinder
+  options:
+    max_angle: 30
+    min_angle: 0.5
+    accuracy: 0.1
+    apply_rotation: true
+    k_cluster: 0
+- name: pages_2ppf
+  processor: PageDetector
+  options:
+    margin_mm: 2
+    max_pages: 2
+    rescale_threshold: 0.01
+    processing_dpi: 100.0
+    backend: auto
+    min_contrast: 0.7
+- name: dpi_normalize_output
+  processor: DPIfixer
+  options:
+    min_dpi: 300
+    max_dpi: 300
+- name: pages_bw
+  processor: Binarizer
+  options:
+    method: wolf++
+    window_mm_wolf: 5
+    k_wolf: 0.25
+    roi_shrink: 10
+    morpho_close: 2
+- name: pages_deskew
+  processor: SkewFinder
+  options:
+    max_angle: 5
+    min_angle: 0.1
+    accuracy: 0.1
+    apply_rotation: true
+    k_cluster: 2
+- name: pages_trap
+  processor: TrapezoidalCorrection
+  options:
+    line_source: connectivity
+    min_line_count: 4
+    line_join_mm: 4.0
+    kernel_char_mult: 1.5
+    thickness_char_mult: 3.0
+    edge_max_length_char_mult: 3.0
+    margin_mm: 3.0
+    zhang_he_min_skew: 0.05
+    zhang_he_max_drift: 0.15
+    max_baseline_tilt_deg: 35.0
+    max_aspect_ratio: 5.0
+- name: pages_dewarp
+  processor: PageDewarper
+  options:
+    backend: auto
+    max_oob: 400
+    min_spans: 4
+    min_span_width_ratio: 0.2
+    kernel_char_mult: 1.5
+    thickness_char_mult: 3.0
+    edge_max_length_char_mult: 3.0
+    page_margin_mm: 5
+    dewarp_margin: 5.0
+    remap_decimate: 4
+    shear_cost: 40.0
+    cubic_cost: 0.0
+    focal_length: 1.3
+    processing_dpi: 150
+    sheet_model: cylindrical
+    twist: false
+    spline_modes: 4
+- name: output_margin
+  processor: MarginSetter
+  options:
+    margin_mm: 5
+replay: true

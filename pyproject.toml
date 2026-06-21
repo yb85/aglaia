@@ -1,0 +1,127 @@
+[project]
+name = "aglaia"
+version = "0.1.0"
+description = "Webcam book scanner for macOS — capture, dewarp, binarize, OCR to searchable PDF/Markdown."
+readme = "README.md"
+license = { file = "LICENSE" }   # PolyForm Shield License 1.0.0 (source-available, no-compete)
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "doxapy>=0.9.4",
+    "jax>=0.9.0",
+    "jaxlib>=0.9.0",
+    "ml-dtypes>=0.5.4",
+    "numpy>=1.26.0, <2.1.0",
+    "opencv-python-headless>=4.8.0",
+    "page-dewarp>=0.2.7",
+    "pikepdf>=10.0.0",
+    "pillow>=10.0.0",
+    "platformdirs>=4.3.0",
+    "psutil>=7.2.2",
+    "pypdfium2>=4.30.0",
+    "python-slugify>=8.0.0",
+    "pyyaml>=6.0.0",
+    "rich>=13.0.0",
+    "scipy>=1.11.0",
+    "surya-ocr>=0.20.0",
+    # Paddle OCR engine — pulls in paddleocr + paddlepaddle (CPU). Heavy
+    # but stable; matches what we benched.
+    "paddleocr[doc-parser]>=3.6.0",
+    "paddlepaddle>=3.2.1",
+    "mlx-vlm>=0.6.0",
+]
+
+[project.optional-dependencies]
+# Cross-platform GUI (PySide6 + theme). Decoupled from `macos` so a
+# CLI-only / headless install (the base dependencies) stays slim — no
+# Qt download. The capture GUI on macOS needs `gui` + `macos` together.
+gui = [
+    "pyside6>=6.7.0",
+    "pyqtdarktheme>=2.1.0",
+]
+# Cross-platform offline voice control (Linux/Windows; macOS uses Apple
+# Speech). Constrained Vosk + a small downloaded model. Optional.
+voice = [
+    # vosk dropped macOS wheels after 0.3.44 (universal2; runs on arm64).
+    # Linux/Windows keep the newer release.
+    "vosk>=0.3.45; sys_platform != 'darwin'",
+    "vosk==0.3.44; sys_platform == 'darwin'",
+    "sounddevice>=0.4.6",
+]
+macos = [
+    "pyobjc-framework-avfoundation>=10.0",
+    "pyobjc-framework-cocoa>=10.0",
+    "pyobjc-framework-speech>=10.0",
+    "pyobjc-framework-vision>=10.0",
+    # MLX backend for PageDewarper. Required on arm64 macOS to avoid
+    # JAX-CPU host-pool leak (workers ballooning to 14–58 GB during
+    # cubic-sheet optimisation). Disabled outside arm64 by the marker.
+    "mlx>=0.20; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+package = [
+    # macOS .app bundle builder. Used via `uv run pyinstaller Aglaia.spec`.
+    "pyinstaller>=6.10.0",
+]
+cuda = [
+    # CUDA 12 wheels for JAX — speeds up PageDewarper optimisation on NVIDIA GPUs.
+    # Install via: uv sync --extra cuda
+    "jax[cuda12]>=0.9.0",
+]
+jbig2 = [
+    # Native JBIG2 encoder for PDF export. Build the wheel locally with
+    #   cd aglaia_jbig2 && uv run maturin develop --release
+    "aglaia_jbig2",
+]
+cloud = [
+    # Cloud OCR card — Mistral Document AI (OCR) over HTTPS. `keyring`
+    # stores the API key in the OS keychain (macOS Keychain / Windows
+    # Credential Locker / Linux Secret Service), with a plaintext
+    # APP_DATA/.env fallback when no keychain backend is available
+    # (headless Linux/Windows).
+    "mistralai>=1.0.0",
+    "keyring>=24.0.0",
+]
+# Optional `keyring` backends — install one to keep the Mistral key in a
+# password manager instead of the OS keychain. keyring auto-discovers any
+# installed backend (highest-priority wins); no code change needed.
+#   uv sync --extra cloud --extra keyring-bitwarden
+keyring-bitwarden = [
+    "bitwarden-keyring>=0.3.1",   # secrets in BitWarden (needs `bw` CLI)
+]
+keyring-1password = [
+    "onepassword-keyring>=0.1.1",  # secrets in 1Password (needs `op` CLI)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lib*", "scanproj*"]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.13.3",
+]
+
+# aglaia_jbig2 lives in-tree, built locally with maturin. Without this
+# block uv can't resolve it (PyPI has nothing under that name) and the
+# whole sync errors out even when the jbig2 extra isn't requested,
+# because uv walks every platform split.
+[tool.uv.sources]
+aglaia_jbig2 = { path = "./aglaia_jbig2", editable = true }
+
+# Resolver overrides — used to break unsolvable cross-package version
+# conflicts when the install must satisfy multiple "tested with"
+# windows. ``transformers>=5.5,<5.10`` matches mlx-vlm 0.6.x's actual
+# tested band; surya-ocr 0.20 transitively allows huggingface_hub<1
+# which clashes with transformers 5.x's huggingface_hub>=1.5 floor —
+# overriding lets the resolver pick a compatible huggingface_hub.
+[tool.uv]
+override-dependencies = [
+    "transformers>=5.5,<5.10",
+    "huggingface-hub>=1.5",
+]

@@ -1,0 +1,47 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+#env files
+.env
+
+#data and misc
+data/
+misc/
+
+#log and lock files
+*.log
+*.lock
+
+#model files
+*.pb
+*.onnx
+model/
+models/
+
+#JAX persistent compilation cache
+.jax_cache/
+
+#system files
+._*
+.DS_Store
+
+# Built native modules (rebuilt via maturin develop)
+aglaia_jbig2/aglaia_jbig2/*.so
+aglaia_jbig2/target/
+aglaia_jbig2/Cargo.lock
+
+# Bundled llama-server binaries — fetched by scripts/fetch_llama_server.py
+# at build time. Too large for git, deterministic regen from GitHub releases.
+vendor/llama-server/
+
+# Compiled translation binaries — regenerated from .ts via scripts/i18n_compile.sh
+lib/i18n/qm/*.qm
+spike_jbig2/target/

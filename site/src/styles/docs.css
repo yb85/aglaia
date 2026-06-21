@@ -1,0 +1,40 @@
+/* Docs theme = landing page palette. Deep navy bg, light text, blue
+   accents — applied to BOTH themes so the docs always read of-a-piece
+   with the marketing site (and the light-ink wordmark pops on dark). */
+
+:root,
+:root[data-theme='light'] {
+  /* gray scale: 1 = lightest (headings) … 6 = darkest (panels) */
+  --sl-color-white: #f3f7fb;
+  --sl-color-gray-1: #e8eef5;
+  --sl-color-gray-2: #c7d3e0;
+  --sl-color-gray-3: #aab8c8;   /* body text */
+  --sl-color-gray-4: #6b7d90;
+  --sl-color-gray-5: #1b2735;   /* hairlines / raised surfaces */
+  --sl-color-gray-6: #0e141d;   /* sidebar / cards */
+  --sl-color-black: #0a0e14;
+
+  /* surfaces */
+  --sl-color-bg: #0a0e14;
+  --sl-color-bg-nav: #0b1018;
+  --sl-color-bg-sidebar: #0c1119;
+  --sl-color-bg-inline-code: #16202c;
+  --sl-color-hairline: #141d29;
+  --sl-color-hairline-shade: #1b2735;
+  --sl-color-hairline-light: #233244;
+
+  /* blue accents — landing #6fa8df / bright #8fd0ff */
+  --sl-color-text-accent: #8fd0ff;
+  --sl-color-accent-low: #16202c;
+  --sl-color-accent: #4f9dde;
+  --sl-color-accent-high: #cfe6fa;
+
+  --sl-font: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
+}
+
+.site-title { font-weight: 700; }
+/* Brighter tag on the dark masthead, matching the landing accent. */
+.site-title .brand-tag { color: #8fd0ff; }
+/* The theme toggle is removed, so Starlight's social-icons divider
+   dangles with nothing after it — drop it. */
+.social-icons::after { display: none !important; }

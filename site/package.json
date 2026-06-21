@@ -1,0 +1,20 @@
+{
+  "name": "aglaia-site",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "sync-docs": "node scripts/sync-docs.mjs",
+    "dev": "npm run sync-docs && astro dev",
+    "build": "npm run sync-docs && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.30.0",
+    "astro": "^5.1.0",
+    "astro-mermaid": "^1.0.3",
+    "lenis": "^1.1.18",
+    "mermaid": "^11.4.0",
+    "sharp": "^0.33.5"
+  }
+}

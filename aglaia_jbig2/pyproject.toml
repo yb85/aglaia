@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.4"]
+build-backend = "maturin"
+
+[project]
+name = "aglaia_jbig2"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "JBIG2 encoder bindings for Aglaïa PDF export"
+license = { text = "MIT OR Apache-2.0" }
+
+[tool.maturin]
+module-name = "aglaia_jbig2._native"
+features = ["pyo3/extension-module"]
+python-source = "."

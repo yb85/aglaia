@@ -1,0 +1,42 @@
+# these argument values will override the defaults, 
+#they will themselves be overridden by CLI arguments :
+# see @lib/proc/Initializer.py:DEFAULT_ARGS for default values
+args:
+  make_pdf: false
+  camera_id: 0
+  voice_control: true
+  workers: 6
+  pdf_workers: 4
+
+# you can override default settings such as keybindings and voice commands here
+# see @lib/proc/Initializer.py:DEFAULT_CONFIG for default values
+config:
+  # processing: removed upsampling_dpi
+
+  # Layout and Dewarp options are now defined in config/pipelines/book_curved_x2.yaml
+  keycontrols:
+    scan:
+      - Space
+      - S
+    trash:
+      - Backspace
+      - D
+    rotate:
+      - R
+  voicecontrols:
+    scan:
+      - scan
+      - check
+      - next
+      - photo
+    trash:
+      - trash
+      - delete
+      - cancel
+    quit:
+      - done
+      - quit
+    debounce_time: 2
+  paths:
+    raw_dir: "00_INPUT"
+    output_dir: "XX_OUTPUT"

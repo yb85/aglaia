@@ -1,0 +1,66 @@
+name: book_flat_x2
+# Flat-page-first variant: TrapezoidalCorrection replaces the final
+# SkewFinder + PageDewarper combo for projects where pages don't bend.
+# Drop in for posters, single sheets, whiteboards, photographed flatbed
+# scans.
+pipeline:
+- name: dpi_clamp_input
+  processor: DPIfixer
+  options:
+    min_dpi: 100
+    max_dpi: 300
+- name: capture_deskew
+  processor: SkewFinder
+  options:
+    max_angle: 30
+    min_angle: 0.5
+    accuracy: 0.1
+    apply_rotation: true
+    k_cluster: 0
+- name: pages_2ppf
+  processor: PageDetector
+  options:
+    margin_mm: 5
+    max_pages: 2
+    rescale_threshold: 0.01
+    processing_dpi: 150
+    backend: auto
+    min_contrast: 0.7
+- name: dpi_normalize_output
+  processor: DPIfixer
+  options:
+    min_dpi: 300
+    max_dpi: 300
+- name: pages_bw
+  processor: Binarizer
+  options:
+    method: wolf++
+    window_mm_wolf: 5
+    k_wolf: 0.25
+    roi_shrink: 5
+    morpho_close: 2
+    # Defer binarisation to the chain tail so geometric warps run on
+    # colour pixels: one single threshold after all interpolation.
+- name: pages_deskew
+  processor: SkewFinder
+  options:
+    max_angle: 10
+    min_angle: 0.1
+    accuracy: 0.05
+    apply_rotation: true
+    k_cluster: 0
+- name: pages_keystone
+  processor: TrapezoidalCorrection
+  options:
+    line_source: connectivity
+    min_line_count: 4
+    line_join_mm: 4.0
+    kernel_char_mult: 1.5
+    thickness_char_mult: 3.0
+    edge_max_length_char_mult: 3.0
+    margin_mm: 3
+    max_baseline_tilt_deg: 35
+- name: output_margin
+  processor: MarginSetter
+  options:
+    margin_mm: 15

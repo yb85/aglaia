@@ -1,0 +1,666 @@
+---
+const GITHUB = 'https://github.com/yb85/aglaia';
+const LATEST = `${GITHUB}/releases/latest`;
+const KOFI = 'https://ko-fi.com/yb_85';
+
+// Icons match the app sidebar tabs (lucide): camera, sliders-horizontal,
+// scan-text (all stroke) and export (fill).
+const steps = [
+  { n: '01', t: 'Capture / Import', d: 'Point your phone or webcam at the page and shoot — hands-free with voice control, no flatbed, no app-switching. Already have files? Import your PDFs and images straight in.',
+    svg: '<path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/><circle cx="12" cy="13" r="3"/>' },
+  { n: '02', t: 'Process', d: 'Isolate the text content, straighten it, and remove perspective and page-curvature distortion. Make your text pop with advanced binarization techniques.',
+    svg: '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>' },
+  { n: '03', t: 'Read', d: 'Fast and coarse or slow and precise; local (Apple Vision, Surya, PaddleOCR-VL) or cloud-based (Mistral OCR) — Aglaïa takes care of your needs.',
+    svg: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/>' },
+  { n: '04', t: 'Export', d: 'A clean, searchable PDF for your digital archives or printouts? A well-structured Markdown file to feed your favorite LLM workflows? Aglaïa gives you what you need.',
+    fill: true, svg: '<path d="m16.95 5.968l-1.414 1.414L13 4.846v12.196h-2V4.847L8.465 7.382L7.05 5.968L12 1.018z"/><path d="M5 20.982v-10h4v-2H3v14h18v-14h-6v2h4v10z"/>' },
+];
+
+// lucide icons (inner SVG): square-terminal, blocks, plug
+const powers = [
+  { t: 'Full CLI automation', d: 'Run the end-to-end pipeline from the command line.',
+    svg: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/>' },
+  { t: 'Versatile plugin system', d: 'The task at hand gets specific? Build your own processing elements in Python.',
+    svg: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>' },
+  { t: 'Freedom to choose', d: 'Have a favorite OCR provider? Need to export to cloud storage? Write your own adapters.',
+    svg: '<rect width="7" height="7" x="14" y="3" rx="1"/><path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H7"/>' },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aglaïa — powerful, fast & free book scanner</title>
+    <meta name="description" content="From your phone camera to a curated, searchable PDF — at your desk, in the library, or wherever you are. No flatbed, no scanning rig. Just you, your laptop and your phone." />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+  </head>
+  <body>
+    <header class="nav" id="nav">
+      <a class="brand" href="/">
+        <img class="brand__logo" src="/aglaia-dark.png" width="84" height="34" alt="Aglaïa" />
+        <span class="brand__tag">BOOKSCANNER</span>
+      </a>
+      <nav>
+        <a href="/docs">Docs</a>
+        <a href={GITHUB}>GitHub</a>
+        <a class="nav-tip" href={KOFI} target="_blank" rel="noopener" aria-label="Tip the developer">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
+          Tip
+        </a>
+        <a class="btn btn--sm" href={LATEST} data-download>Download</a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- HERO -->
+      <section class="hero">
+        <div class="hero__glow" data-parallax="0.18"></div>
+        <div class="hero__inner">
+          <img class="hero__logo" src="/aglaia-dark.png" width="420" height="172" fetchpriority="high" decoding="async" alt="Aglaïa" />
+          <p class="eyebrow reveal">The powerful, fast &amp; free book scanner</p>
+          <h1 class="reveal">Give your books<br /><span>the digital life<br />they deserve.</span></h1>
+          <p class="lede reveal">
+            <span class="lede__l1">From your phone camera to a curated, searchable PDF</span>
+            <span class="lede__l2">At your desk, in the library, or wherever you are.</span>
+            <span class="lede__l3">No flatbed, no bulky rig: just you, your laptop and your phone.</span>
+          </p>
+          <div class="cta reveal">
+            <a class="btn" href={LATEST} data-download>Download for macOS</a>
+            <a class="btn btn--ghost" href="/docs">Read the docs →</a>
+          </div>
+          <p class="fineprint reveal">Linux and Windows versions coming soon…</p>
+          <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
+            <span class="tip__heart" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
+            </span>
+            <span class="tip__label">Tip the developer</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- PROBLEM -->
+      <section class="band">
+        <div class="band__bg" aria-hidden="true">
+          <div class="band__slide" style="background-image:url(/landing/band-slide-1.webp)"></div>
+          <div class="band__slide" style="background-image:url(/landing/band-slide-2.webp)"></div>
+          <div class="band__slide" style="background-image:url(/landing/band-slide-3.webp)"></div>
+          <div class="band__slide" style="background-image:url(/landing/band-slide-4.webp)"></div>
+          <div class="band__slide" style="background-image:url(/landing/band-slide-5.webp)"></div>
+        </div>
+        <div class="band__inner reveal">
+          <h2>You don't have to settle<br />for <span>crufty book photos.</span></h2>
+          <p class="band__lead">You don't have to endure <span class="hl">endless flatbed scanning</span> sessions either.</p>
+          <p>Curved pages, skew, perspective, uneven illumination, <br class="brk" />and dozens of issues that make you go « eewww… » when you look at your documents. <br class="brk" />Aglaïa turns the camera and the laptop you already have into a proper scanner. <br class="brk" /><span class="hl hl--glow">All automatic. Fully customizable.</span></p>
+        </div>
+      </section>
+
+      <!-- BEFORE / AFTER SWIPES -->
+      <section class="compare">
+        <div class="compare__head reveal">
+          <h2><span>3</span> scanning challenges,<br /><span>1</span> standard pipeline to rule them all…</h2>
+          <p class="compare__note">The following examples were all run with default settings. No fiddling needed.</p>
+        </div>
+        <div class="compare__grid compare__grid--3">
+          <figure class="ba-item reveal">
+            <div class="ba" style="--pos:52%">
+              <img class="ba__img" src="/landing/before.webp" width="760" height="601"
+                   alt="A book spread photographed at a desk under overhead light." />
+              <div class="ba__after">
+                <img class="ba__img" src="/landing/after.webp" width="760" height="601"
+                     alt="The same spread after Aglaïa: two flat, deskewed, dewarped pages." />
+              </div>
+              <span class="ba__divider" aria-hidden="true"></span>
+              <span class="ba__tag ba__tag--l">before</span>
+              <span class="ba__tag ba__tag--r">after</span>
+              <input class="ba__range" type="range" min="0" max="100" value="52" aria-label="Reveal the processed page" />
+            </div>
+            <figcaption><b>Easy mode</b> 😁 at a desk with overhead lights</figcaption>
+          </figure>
+          <figure class="ba-item reveal">
+            <div class="ba" style="--pos:52%">
+              <img class="ba__img" src="/landing/lit-before.webp" width="760" height="590"
+                   alt="A book spread under uneven light — one page in shadow, the other bright." />
+              <div class="ba__after">
+                <img class="ba__img" src="/landing/lit-after.webp" width="760" height="590"
+                     alt="The same spread after Aglaïa: even, clean, binarized text edge to edge." />
+              </div>
+              <span class="ba__divider" aria-hidden="true"></span>
+              <span class="ba__tag ba__tag--l">before</span>
+              <span class="ba__tag ba__tag--r">after</span>
+              <input class="ba__range" type="range" min="0" max="100" value="52" aria-label="Reveal the processed page" />
+            </div>
+            <figcaption><b>Medium mode</b> 🤨 on a library chair, uneven illumination</figcaption>
+          </figure>
+          <figure class="ba-item reveal">
+            <div class="ba" style="--pos:52%">
+              <img class="ba__img" src="/landing/curl-before.webp" width="760" height="574"
+                   alt="A thick book whose pages curl steeply into the spine." />
+              <div class="ba__after">
+                <img class="ba__img" src="/landing/curl-after.webp" width="760" height="574"
+                     alt="The same spread after Aglaïa: the curl flattened, baselines straight." />
+              </div>
+              <span class="ba__divider" aria-hidden="true"></span>
+              <span class="ba__tag ba__tag--l">before</span>
+              <span class="ba__tag ba__tag--r">after</span>
+              <input class="ba__range" type="range" min="0" max="100" value="52" aria-label="Reveal the processed page" />
+            </div>
+            <figcaption><b>Hard mode</b> 😭 thick book, extreme page curl</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- PIPELINE -->
+      <section class="flow">
+        <div class="flow__intro">
+          <h2 class="reveal">A powerful pipeline architecture</h2>
+          <p class="reveal">Whether you're scanning books, spiral-bound reports, or loose sheets of paper, there's a specially curated pipeline for you.</p>
+        </div>
+        <div class="flow__steps">
+          {steps.map((s) => (
+            <article class="step reveal">
+              <div class="step__lead">
+                <svg class="step__ic" viewBox="0 0 24 24" width="64" height="64"
+                     fill={s.fill ? 'currentColor' : 'none'}
+                     stroke={s.fill ? 'none' : 'currentColor'}
+                     stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true" set:html={s.svg} />
+              </div>
+              <div>
+                <h3>{s.t}</h3>
+                <p>{s.d}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <!-- CONTINUITY CAMERA -->
+      <section class="continuity">
+        <div class="continuity__copy reveal">
+          <h2>Scan anywhere with the <span>continuity camera</span></h2>
+          <p>Put your phone on your desk, your book on a chair, <i>et voilà</i> !</p>
+          <p>With a typical capacity of 2–4 pages processed per second and a <span>sub-2&nbsp;seconds latency per scan</span>, you may not turn the pages fast enough to overwhelm Aglaïa.</p>
+        </div>
+        <figure class="continuity__demo reveal">
+          <img src="/landing/usage.webp" width="760" height="874" loading="lazy" alt="Overhead diagram: a person at a laptop, an iPhone on a stand acting as the camera, pointed at an open book propped on a chair." />
+        </figure>
+      </section>
+
+      <!-- SMART REPLAY -->
+      <section class="replay">
+        <div class="replay__copy reveal">
+          <h2 class="replay__quip">How much resolution do you want? <span>— Yes!</span></h2>
+          <p class="replay__sub">Smart replay — no iterative distortion.</p>
+          <p>Deskew, keystone correction and dewarp each <em>resample</em> the
+            image. Chain them naïvely and every pass softens and warps the
+            pixels a little more — glyph edges crumble.</p>
+          <p>Aglaïa <b>keeps track of the operations</b> and at the end composes
+            the <b>perfect blend of geometric and morphological transforms</b> to
+            give you the <b>sharpest result</b>.</p>
+        </div>
+        <div class="replay__demo reveal">
+          <figure class="rp rp--bad">
+            <img src="/landing/replay-distorted.webp" width="500" height="502" loading="lazy" alt="Text glyphs degraded and jagged from repeated per-step resampling." />
+            <figcaption>Sequential processing</figcaption>
+          </figure>
+          <figure class="rp rp--good">
+            <img src="/landing/replay-restored.webp" width="500" height="500" loading="lazy" alt="The same glyphs, crisp and clean, from a single replayed warp." />
+            <figcaption>Smart replay</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- PIPELINE SLIDESHOW -->
+      <section class="gallery">
+        <div class="gallery__head reveal">
+          <h2>Watch a page take shape.</h2>
+          <p>Every stage is persisted, inspectable and replayable.</p>
+        </div>
+        <div class="gallery__strip reveal">
+          <figure class="shot"><img src="/landing/stage-1-detect.webp" height="760" loading="lazy" alt="Layout detection boxes the two pages of the spread and splits them." /><figcaption><b>1 · Detect</b> — split the spread into pages</figcaption></figure>
+          <figure class="shot"><img src="/landing/stage-2-binarize.webp" height="760" loading="lazy" alt="The page binarized: crisp black text on white." /><figcaption><b>2 · Binarize</b> — crisp black on white</figcaption></figure>
+          <figure class="shot"><img src="/landing/stage-3-trapezoid.webp" height="760" loading="lazy" alt="Trapezoidal keystone correction with the fitted column quad overlaid." /><figcaption><b>3 · Keystone</b> — remove perspective</figcaption></figure>
+          <figure class="shot"><img src="/landing/stage-4-dewarp.webp" height="760" loading="lazy" alt="Page dewarp flattens the curved sheet and straightens the baselines." /><figcaption><b>4 · Dewarp</b> — flatten page curvature</figcaption></figure>
+          <figure class="shot"><img src="/landing/stage-5-final.webp" height="760" loading="lazy" alt="The final clean rectified page, ready for OCR and export." /><figcaption><b>5 · Done</b> — straight, clean, ready for OCR</figcaption></figure>
+        </div>
+        <p class="gallery__hint reveal">scroll →</p>
+      </section>
+
+      <!-- POWER FEATURES -->
+      <section class="features">
+        <h2 class="reveal"><span>Simple</span>, but not simplistic</h2>
+        <p class="features__sub reveal">Unleash the computer-vision and data-science nerd within you.</p>
+        <div class="grid">
+          {powers.map((f) => (
+            <article class="feature reveal">
+              <svg class="feature__ic" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={f.svg} />
+              <h3>{f.t}</h3>
+              <p>{f.d}</p>
+            </article>
+          ))}
+        </div>
+
+        <div class="code reveal">
+          <div class="code__tabs">
+            <button class="code__tab is-active" data-tab="uv" type="button">Install with uv</button>
+            <button class="code__tab" data-tab="brew" type="button">Install with Homebrew</button>
+            <button class="code__copy" type="button" aria-label="Copy">Copy</button>
+          </div>
+          <pre class="code__panel is-active" data-panel="uv"><code># clone, then sync with the extras you want
+git clone https://github.com/yb85/aglaia.git &amp;&amp; cd aglaia
+
+uv sync --extra gui --extra macos   # macOS GUI: Vision, Speech, MLX dewarp
+# add any of:
+#   --extra jbig2    # smallest searchable PDFs (JBIG2 encoder, needs Rust)
+#   --extra cloud    # Mistral cloud OCR
+#   --extra cuda     # NVIDIA GPU dewarp (Linux)
+
+uv run python aglaia.py ~/scans/my-book</code></pre>
+          <pre class="code__panel" data-panel="brew"><code># add the Aglaïa tap, then install the app
+brew tap yb85/aglaia https://github.com/yb85/aglaia
+brew install --cask aglaia</code></pre>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="final">
+        <div class="final__inner reveal">
+          <h2>Digitize your shelf.</h2>
+          <p>Free, source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, and yours to extend.</p>
+          <div class="cta">
+            <a class="btn btn--lg" href={LATEST} data-download>Download for macOS</a>
+            <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
+          </div>
+          <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>Aglaïa · bibli.cc</span>
+      <nav>
+        <a href="/docs">Docs</a>
+        <a href={GITHUB}>Source</a>
+        <a href={KOFI}>Tip</a>
+      </nav>
+    </footer>
+
+    <script>
+      // Reveal-on-scroll FIRST and independent of anything that can throw,
+      // so the page content always appears even if smooth-scroll init fails.
+      const revealEls = [...document.querySelectorAll('.reveal')];
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+        }
+      }, { threshold: 0.18 });
+      revealEls.forEach((el) => io.observe(el));
+      // Failsafe: if the observer never fires (some browsers/extensions),
+      // reveal everything shortly after load.
+      addEventListener('load', () => setTimeout(
+        () => revealEls.forEach((el) => el.classList.add('in')), 1000));
+
+      // Before/after swipes — each drives its own clip divider, and hides a
+      // corner label once its image is mostly slid away.
+      document.querySelectorAll<HTMLElement>('.ba').forEach((ba) => {
+        const r = ba.querySelector<HTMLInputElement>('.ba__range');
+        const sync = () => {
+          const v = +(r?.value ?? 50);
+          ba.style.setProperty('--pos', v + '%');
+          ba.classList.toggle('ba--no-before', v < 16);
+          ba.classList.toggle('ba--no-after', v > 84);
+        };
+        r?.addEventListener('input', sync);
+        sync();
+      });
+
+      // Smooth scroll + parallax — progressive enhancement; a failure here
+      // must never block the reveal above, so it's dynamically imported and
+      // fully guarded.
+      try {
+        const { default: Lenis } = await import('lenis');
+        const lenis = new Lenis({ lerp: 0.1, wheelMultiplier: 1 });
+        function raf(time: number) { lenis.raf(time); requestAnimationFrame(raf); }
+        requestAnimationFrame(raf);
+        const nav = document.getElementById('nav');
+        const layers = [...document.querySelectorAll<HTMLElement>('[data-parallax]')];
+        lenis.on('scroll', ({ scroll }: { scroll: number }) => {
+          nav?.classList.toggle('nav--solid', scroll > 24);
+          for (const el of layers) {
+            const f = parseFloat(el.dataset.parallax || '0');
+            el.style.transform = `translate3d(0, ${scroll * f}px, 0)`;
+          }
+        });
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) lenis.destroy();
+      } catch (err) {
+        console.warn('Aglaïa: smooth-scroll init failed; continuing without it', err);
+      }
+
+      // Install code tabs + copy.
+      document.querySelectorAll<HTMLElement>('.code__tab').forEach((t) => {
+        t.addEventListener('click', () => {
+          const k = t.dataset.tab;
+          document.querySelectorAll('.code__tab').forEach((x) => x.classList.toggle('is-active', x === t));
+          document.querySelectorAll<HTMLElement>('.code__panel').forEach((p) =>
+            p.classList.toggle('is-active', p.dataset.panel === k));
+        });
+      });
+      const copyBtn = document.querySelector<HTMLButtonElement>('.code__copy');
+      copyBtn?.addEventListener('click', async () => {
+        const panel = document.querySelector('.code__panel.is-active code');
+        if (!panel) return;
+        try {
+          await navigator.clipboard.writeText(panel.textContent || '');
+          copyBtn.textContent = 'Copied';
+          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1400);
+        } catch { /* clipboard blocked — no-op */ }
+      });
+    </script>
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; }
+      html { -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
+        color: #e8eef5; background: #0a0e14; overflow-x: hidden;
+      }
+      a { color: inherit; text-decoration: none; }
+      h1, h2, h3 { line-height: 1.05; letter-spacing: -0.02em; margin: 0; }
+      .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1); }
+      .reveal.in { opacity: 1; transform: none; }
+      /* Never hide content from reduced-motion users. */
+      @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+    </style>
+
+    <style>
+      .nav {
+        position: fixed; inset: 0 0 auto 0; z-index: 50;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 15px clamp(20px, 5vw, 64px) 28px;
+        /* Always-on semi-opaque backdrop that fades to transparent so the
+           nav stays readable over page content without a hard edge. */
+        background: linear-gradient(to bottom,
+          rgba(8,12,18,.94) 0%, rgba(8,12,18,.80) 44%, rgba(8,12,18,0) 100%);
+        -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+        /* Fade the whole layer (gradient + backdrop blur) to nothing at the
+           bottom so there's no hard blur-box seam line. */
+        -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+        mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+        transition: background .3s, backdrop-filter .3s, border-color .3s;
+        border-bottom: 1px solid transparent;
+        pointer-events: none;   /* let clicks pass through the transparent fade */
+      }
+      .nav > * { pointer-events: auto; }
+      .nav--solid { background: rgba(8,12,18,.92); backdrop-filter: blur(12px); }
+      .brand { display: inline-flex; align-items: flex-end; gap: 7px; }
+      .brand__logo { height: 34px; width: auto; display: block;
+        filter: drop-shadow(0 0 10px rgba(120,180,240,.35)); }
+      /* Baseline-align the all-caps tag with the wordmark: bottom-align
+         the row, then lift the tag by ~the descender depth so its baseline
+         sits on the wordmark baseline (eyeballed against the 34px logo —
+         nudge translateY / font-size to taste). */
+      .brand__tag { color: #6fa8df; font-weight: 300; font-size: 1.15rem;
+        letter-spacing: .18em; line-height: 1; transform: translateY(-6px); }
+      .nav nav { display: flex; gap: clamp(14px, 3vw, 32px); align-items: center; font-size: .95rem; color: #aab8c8; }
+      .nav nav a:hover { color: #fff; }
+      .nav-tip { display: inline-flex; align-items: center; gap: 5px;
+        color: #f43f5e; font-weight: 600;
+        filter: drop-shadow(0 0 6px rgba(244,63,94,.4)); }
+      .nav-tip:hover { color: #ff5d77; }
+
+      .btn {
+        --bg: linear-gradient(180deg, #5aa9e6, #3d7fc4);
+        display: inline-block; padding: 12px 22px; border-radius: 12px;
+        background: var(--bg); color: #fff; font-weight: 600;
+        box-shadow: 0 8px 30px -10px #3d7fc4; transition: transform .2s, box-shadow .2s;
+      }
+      .btn:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -12px #3d7fc4; }
+      .btn--sm { padding: 8px 16px; border-radius: 10px; font-size: .9rem; }
+      .btn--lg { padding: 16px 30px; font-size: 1.05rem; }
+      .btn--ghost { background: transparent; color: #cfe0f2; box-shadow: none; border: 1px solid #2a3850; }
+      .btn--ghost:hover { border-color: #4f8fd0; background: #121a26; }
+
+      .hero { position: relative; min-height: 100svh; display: grid; place-items: center; padding: 132px 20px 80px; overflow: hidden; }
+      .hero__glow {
+        position: absolute; top: -18%; left: 50%; width: 1100px; height: 1100px; translate: -50% 0;
+        background: radial-gradient(circle at 50% 38%, rgba(79,143,208,.32), rgba(79,143,208,0) 60%);
+        filter: blur(20px); z-index: 0; pointer-events: none;
+      }
+      .hero__inner { position: relative; z-index: 2; max-width: 880px; text-align: center; }
+      .hero__logo {
+        width: clamp(240px, 38vw, 420px); height: auto; margin: 0 auto 26px;
+        filter: drop-shadow(0 0 28px rgba(120,180,240,.45)) drop-shadow(0 0 60px rgba(79,143,208,.25));
+      }
+      .eyebrow { text-transform: uppercase; letter-spacing: .16em; font-size: .78rem; color: #6fa8df; margin: 0 0 16px; }
+      .hero h1 { font-size: clamp(2.2rem, 6vw, 4.6rem); font-weight: 800; }
+      .hero h1 span { background: linear-gradient(90deg, #8fd0ff, #4f8fd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .lede { font-size: clamp(1.05rem, 2.2vw, 1.3rem); max-width: 660px; margin: 22px auto 0; line-height: 1.55; }
+      .lede span { display: block; }
+      /* subtle bright/dim/bright alternation so the block reads as steps */
+      .lede__l1, .lede__l3 { color: #cfddec; }
+      .lede__l2 { color: #8ea2b7; }
+      .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+      .fineprint { margin-top: 18px; color: #6c7c90; font-size: .9rem; }
+
+      .tip {
+        display: inline-flex; align-items: center; gap: 10px; margin-top: 30px;
+        padding: 9px 18px; border: 1px solid #3a2730; border-radius: 999px;
+        background: rgba(40,20,28,.32); backdrop-filter: blur(6px);
+        transition: border-color .2s, background .2s;
+      }
+      .tip:hover { border-color: #f43f5e; background: rgba(60,24,34,.5); }
+      .tip__heart { display: inline-flex; color: #f43f5e;
+        filter: drop-shadow(0 0 8px rgba(244,63,94,.7)) drop-shadow(0 0 16px rgba(244,63,94,.4)); }
+      .tip__label { font-size: .98rem; color: #f43f5e; font-weight: 700; }
+
+      .hero__stage { position: relative; z-index: 1; display: flex; gap: 16px; margin-top: 104px; flex-wrap: wrap; justify-content: center; }
+      .card {
+        width: 200px; height: 132px; border-radius: 16px; display: grid; place-items: center;
+        font-size: .85rem; color: #c8d6e6; border: 1px solid #233247; background: #0f1722;
+        box-shadow: 0 30px 60px -30px #000;
+      }
+      .card--raw { rotate: -6deg; background: linear-gradient(160deg,#171f2b,#0e141d); }
+      .card--mid { translate: 0 -14px; background: linear-gradient(160deg,#15202e,#0e141d); }
+      .card--out { rotate: 6deg; border-color: #356093; background: linear-gradient(160deg,#16273a,#0e141d); }
+
+      .band { position: relative; overflow: hidden; padding: clamp(80px, 14vh, 180px) 20px; display: grid; place-items: center; }
+      /* Crossfading slideshow of processed pages, faded behind the copy.
+         The container is taller than the band and masked top+bottom so it
+         dissolves into the neighbouring sections (no hard frame). */
+      .band__bg { position: absolute; inset: 0; z-index: 0; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 34%, #000 66%, transparent 100%);
+        mask-image: linear-gradient(to bottom, transparent 0%, #000 34%, #000 66%, transparent 100%); }
+      .band__slide { position: absolute; inset: 0; background: center/cover no-repeat;
+        opacity: 0; will-change: transform, opacity;
+        animation: bandSlide 36s ease-in-out infinite; }
+      .band__slide:nth-child(1) { animation-delay: 0s; }
+      .band__slide:nth-child(2) { animation-delay: -7.2s; }
+      .band__slide:nth-child(3) { animation-delay: -14.4s; }
+      .band__slide:nth-child(4) { animation-delay: -21.6s; }
+      .band__slide:nth-child(5) { animation-delay: -28.8s; }
+      @keyframes bandSlide {
+        0%   { opacity: 0;   transform: scale(1.05) translate(-1.5%, -1%); }
+        5%   { opacity: .18; }
+        20%  { opacity: .18; }
+        26%  { opacity: 0;   transform: scale(1.18) translate(1.5%, 1%); }
+        100% { opacity: 0;   transform: scale(1.20) translate(1.5%, 1%); }
+      }
+      .band::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+        background: radial-gradient(ellipse 72% 70% at 50% 50%, rgba(10,14,20,.45), rgba(10,14,20,.12)); }
+      @media (prefers-reduced-motion: reduce) { .band__slide { animation: none; opacity: .12; } }
+      .band__inner { position: relative; z-index: 2; max-width: 780px; text-align: center; }
+      .band h2 { font-size: clamp(1.8rem, 4.5vw, 3rem); font-weight: 800; }
+      .band h2 span { color: #8fd0ff; }
+      .band .hl { color: #8fd0ff; }
+      .band .hl--glow { font-weight: 600;
+        animation: hlGlow 3.4s ease-in-out infinite; }
+      @keyframes hlGlow {
+        0%, 100% { text-shadow: 0 0 10px rgba(143,208,255,.40), 0 0 22px rgba(143,208,255,.18); }
+        50%      { text-shadow: 0 0 16px rgba(143,208,255,.75), 0 0 42px rgba(143,208,255,.40); }
+      }
+      @media (prefers-reduced-motion: reduce) { .band .hl--glow { animation: none; text-shadow: 0 0 14px rgba(143,208,255,.5); } }
+      .band__lead { color: #cdd9e7; font-size: 1.2rem; margin-top: 14px; font-weight: 600; }
+      .band p { color: #aebccd; font-size: 1.12rem; line-height: 1.6; margin-top: 16px; }
+      /* Preferred line breaks: honored on wide screens, dropped on narrow
+         so the paragraph reflows instead of double-breaking. */
+      @media (max-width: 760px) { .band .brk { display: none; } }
+
+      .flow { max-width: 1100px; margin: 0 auto; padding: 60px 20px; display: grid; gap: 48px; grid-template-columns: 1fr; }
+      .flow__intro h2 { font-size: clamp(1.8rem,4vw,2.8rem); font-weight: 800; }
+      .flow__intro p { color: #94a6ba; margin-top: 12px; font-size: 1.1rem; }
+      .flow__steps { display: grid; gap: 18px; }
+      .step { display: grid; grid-template-columns: 96px 1fr; gap: 22px; align-items: center; padding: 28px; border: 1px solid #1b2735; border-radius: 18px; background: linear-gradient(180deg,#0f1722,#0c1119); }
+      .step__lead { display: flex; align-items: center; justify-content: center; }
+      .step__ic { display: block; color: #8fd0ff; filter: drop-shadow(0 0 9px rgba(143,208,255,.55)); }
+      .step h3 { font-size: 1.35rem; margin-bottom: 8px; }
+      .step p { color: #a6b6c8; line-height: 1.55; margin: 0; }
+      @media (min-width: 860px) { .flow { grid-template-columns: .8fr 1.2fr; align-items: start; } .flow__intro { position: sticky; top: 120px; } }
+
+      .features { max-width: 1100px; margin: 0 auto; padding: clamp(60px,10vh,120px) 20px; text-align: center; }
+      .features h2 { font-size: clamp(1.8rem,4vw,2.8rem); font-weight: 800; }
+      .features h2 span { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .features__sub { color: #94a6ba; font-size: 1.1rem; margin: 12px 0 44px; }
+      .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); text-align: left; }
+      .feature { padding: 28px; border: 1px solid #1b2735; border-radius: 18px; background: #0e141d; transition: transform .25s, border-color .25s; }
+      .feature:hover { transform: translateY(-4px); border-color: #335f93; }
+      .feature__ic { display: block; color: #8fd0ff; margin-bottom: 14px;
+            filter: drop-shadow(0 0 9px rgba(143,208,255,.55)); }
+      .feature h3 { font-size: 1.2rem; margin-bottom: 10px; color: #d8e6f5; }
+      .feature p { color: #a0b1c4; line-height: 1.55; margin: 0; }
+
+      .code { max-width: 860px; margin: 48px auto 0; text-align: left; border: 1px solid #1b2735; border-radius: 16px; overflow: hidden; background: #0c1119; box-shadow: 0 30px 60px -40px #000; }
+      .code__tabs { display: flex; align-items: center; gap: 4px; padding: 8px 8px 0; border-bottom: 1px solid #1b2735; background: #0e141d; }
+      .code__tab { appearance: none; border: 0; background: transparent; color: #8ea2b7; font: inherit; font-size: .9rem; font-weight: 600; padding: 10px 16px; border-radius: 10px 10px 0 0; cursor: pointer; }
+      .code__tab:hover { color: #cfe0f2; }
+      .code__tab.is-active { color: #fff; background: #0c1119; box-shadow: inset 0 -2px 0 #4f8fd0; }
+      .code__copy { margin-left: auto; appearance: none; border: 1px solid #2a3850; background: transparent; color: #8ea2b7; font: inherit; font-size: .78rem; font-weight: 600; padding: 5px 12px; border-radius: 8px; cursor: pointer; }
+      .code__copy:hover { color: #cfe0f2; border-color: #4f8fd0; }
+      .code__panel { display: none; margin: 0; padding: 20px 22px; overflow-x: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; line-height: 1.7; color: #cdd9e7; }
+      .code__panel.is-active { display: block; }
+
+      .final { padding: clamp(90px,16vh,200px) 20px; display: grid; place-items: center; text-align: center; }
+      .final__inner { max-width: 680px; }
+      .final h2 { font-size: clamp(2rem,5.5vw,3.6rem); font-weight: 800; }
+      .final p { color: #aebccd; margin-top: 14px; font-size: 1.15rem; }
+      .final .asterisk { color: #9cc4ec; text-decoration: none; }
+      .final .license { margin-top: 22px; font-size: .82rem; color: #6c7c90; }
+      .final .license a { color: #6fa8df; }
+
+      .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 40px clamp(20px,5vw,64px); border-top: 1px solid #161f2b; color: #6c7c90; font-size: .9rem; }
+      .foot nav { display: flex; gap: 22px; }
+      .foot a:hover { color: #cfe0f2; }
+
+      /* Phones: don't force a full-viewport hero (the stacked vignettes
+         already make it tall) and trim the big section paddings so there
+         isn't a yawning gap before the next section. */
+      @media (max-width: 760px) {
+        .hero { min-height: auto; padding: 104px 20px 36px; }
+        .hero__stage { margin-top: 44px; gap: 12px; }
+        .band { padding: 48px 20px; }
+        .flow { padding: 36px 20px; gap: 28px; }
+        .features { padding: 48px 20px; }
+        .final { padding: 64px 20px; }
+      }
+
+      /* Small phones: let the lede flow as continuous prose instead of
+         three blocks (each block would wrap to 2 lines = 6). The colour
+         alternation still distinguishes the three segments. */
+      @media (max-width: 600px) {
+        .lede span { display: inline; }
+        .brand__tag { display: none; }   /* logo only — nav too cramped */
+        .nav .btn--sm { display: none; } /* drop the nav Download too */
+      }
+
+      /* ── before / after swipe ─────────────────────────────────── */
+      .compare { max-width: 1200px; margin: 0 auto; padding: clamp(40px, 7vh, 88px) 20px 40px; }
+      .compare__head { text-align: center; max-width: 820px; margin: 0 auto 26px; }
+      .compare__head h2 { font-size: clamp(1.8rem, 4.5vw, 3rem); font-weight: 800; }
+      .compare__head h2 span { color: #8fd0ff; text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .compare__note { color: #8295a8; font-size: .82rem; margin-top: 8px; }
+      .compare__grid { display: grid; gap: 22px; align-items: start; }
+      .compare__grid--3 { grid-template-columns: repeat(3, 1fr); }
+      @media (max-width: 880px) { .compare__grid--3 { grid-template-columns: 1fr; gap: 28px; max-width: 560px; margin: 0 auto; } }
+      .ba-item { margin: 0; }
+      .ba-item figcaption { text-align: center; color: #a6b6c8; font-size: .9rem; margin-top: 11px; }
+      .ba-item figcaption b { color: #e8eef5; }
+      .ba { position: relative; margin: 0; border-radius: 16px; overflow: hidden;
+            border: 1px solid #1b2735; box-shadow: 0 40px 80px -50px #000;
+            user-select: none; touch-action: pan-y;
+            aspect-ratio: 13 / 10; }   /* uniform height across all three swipes */
+      .ba__img { position: absolute; inset: 0; display: block;
+            width: 100%; height: 100%; object-fit: cover; }
+      .ba__after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--pos)); }
+      .ba__after .ba__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .ba__divider { position: absolute; top: 0; bottom: 0; left: var(--pos);
+            width: 2px; transform: translateX(-1px); background: #8fd0ff;
+            box-shadow: 0 0 12px #8fd0ff88; pointer-events: none; }
+      .ba__divider::after { content: ""; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); width: 40px; height: 40px;
+            border-radius: 50%; box-shadow: 0 8px 22px -8px #000;
+            background: #8fd0ff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2306121f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 8 4 4-4 4'/%3E%3Cpath d='M2 12h20'/%3E%3Cpath d='m6 8-4 4 4 4'/%3E%3C/svg%3E") center / 22px 22px no-repeat; }
+      .ba__range { position: absolute; inset: 0; width: 100%; height: 100%;
+            margin: 0; opacity: 0; cursor: ew-resize; }
+      .ba__tag { position: absolute; bottom: 12px; font-size: .7rem; letter-spacing: .14em;
+            text-transform: uppercase; padding: 4px 11px; border-radius: 999px;
+            background: rgba(10,14,20,.72); color: #cdd9e7; pointer-events: none;
+            -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+            transition: opacity .22s ease; }
+      .ba__tag--l { left: 12px; } .ba__tag--r { right: 12px; }
+      .ba--no-before .ba__tag--l, .ba--no-after .ba__tag--r { opacity: 0; }
+
+      /* ── pipeline slideshow strip ─────────────────────────────── */
+      .gallery { padding: 40px 0 16px; }
+      .gallery__head { text-align: center; max-width: 720px; margin: 0 auto 20px; padding: 0 20px; }
+      .gallery__head h2 { font-size: clamp(1.8rem, 4.5vw, 3rem); font-weight: 800; }
+      .gallery__head p { color: #a6b6c8; margin-top: 12px; line-height: 1.55; }
+      .gallery__strip { display: flex; gap: 18px; overflow-x: auto; scroll-snap-type: x mandatory;
+            padding: 8px clamp(20px, 6vw, 64px) 16px; }
+      .shot { flex: 0 0 auto; scroll-snap-align: center; margin: 0;
+            display: flex; flex-direction: column; gap: 10px; }
+      .shot img { height: min(56vh, 500px); width: auto; border-radius: 12px;
+            border: 1px solid #1b2735; background: #fff; box-shadow: 0 24px 50px -40px #000; }
+      .shot figcaption { color: #a6b6c8; font-size: .92rem; text-align: center; max-width: 30ch; }
+      .shot b { color: #e8eef5; }
+      .gallery__hint { text-align: center; color: #8a9bad; font-size: .78rem; letter-spacing: .12em; margin-top: 4px; }
+
+      /* ── smart replay ─────────────────────────────────────────── */
+      .continuity { max-width: 980px; margin: 0 auto; padding: 64px 20px;
+            display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
+      .continuity__copy h2 { font-size: clamp(1.8rem, 4.5vw, 3rem); font-weight: 800; }
+      .continuity__copy h2 span { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .continuity__copy p { color: #a6b6c8; line-height: 1.6; margin-top: 16px; font-size: 1.05rem; }
+      .continuity__copy p span { color: #8fd0ff; font-weight: 600;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .continuity__demo { margin: 0; }
+      .continuity__demo img { width: 100%; height: auto; display: block; border-radius: 14px;
+            background: #fff; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+      @media (max-width: 760px) { .continuity { grid-template-columns: 1fr; gap: 28px; } }
+
+      .replay { max-width: 980px; margin: 0 auto; padding: 64px 20px;
+            display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
+      .replay__copy h2 { font-size: clamp(1.7rem, 4vw, 2.6rem); font-weight: 800; }
+      .replay__copy p { color: #a6b6c8; line-height: 1.6; margin-top: 14px; }
+      .replay__copy b { color: #e8eef5; }
+      .replay__quip span { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .replay__sub { text-transform: uppercase; letter-spacing: .14em; font-size: .8rem; color: #6fa8df; margin: 12px 0 0; }
+      .replay__demo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .rp { margin: 0; }
+      .rp img { width: 100%; height: auto; display: block; border-radius: 10px;
+            image-rendering: pixelated; }
+      .rp--bad img { box-shadow: 0 0 0 2px #c0504d88; }
+      .rp--good img { box-shadow: 0 0 0 2px #4f8fd0aa; }
+      .rp figcaption { text-align: center; font-size: .82rem; margin-top: 8px; color: #a6b6c8; }
+      .rp--bad figcaption { color: #e08a86; }
+      @media (max-width: 760px) { .replay { grid-template-columns: 1fr; gap: 28px; } }
+    </style>
+  </body>
+</html>

@@ -1,0 +1,40 @@
+# these argument values will override the defaults, 
+#they will themselves be overridden by CLI arguments :
+# see @lib/proc/Initializer.py:DEFAULT_ARGS for default values
+args:
+  make_pdf: false
+  camera_id: 0
+  voice_control: true
+  workers: 6
+  pdf_workers: 4
+
+# you can override default settings such as keybindings and voice commands here
+# see @lib/proc/Initializer.py:DEFAULT_CONFIG for default values
+config:
+  # processing: removed upsampling_dpi
+
+  # Layout and Dewarp options are now defined in config/pipelines/book_curved_x2.yaml
+  keycontrols:
+    # Quit and "close tab" use platform-standard shortcuts
+    # (⌘Q / Ctrl+Q, ⌘W / Ctrl+W). They are wired in MainWindow via
+    # QKeySequence.StandardKey and not configurable here.
+    scan:
+      - Space
+      - S
+    trash:
+      - Backspace
+      - D
+    rotate:
+      - R
+  # Two universal command words — easy to pronounce across cultures and
+  # acoustically very distinct (low confusion under constrained ASR).
+  # "photo" → capture a scan; "delete" → trash the last scan.
+  voicecontrols:
+    scan:
+      - photo
+    trash:
+      - delete
+    debounce_time: 1
+  paths:
+    raw_dir: "00_INPUT"
+    output_dir: "XX_OUTPUT"

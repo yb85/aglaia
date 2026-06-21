@@ -1,0 +1,60 @@
+element_name	param_name	param_type	description	isAdvanced	default_value
+DPIfixer	min_dpi	bounded_int	If the buffer's DPI is below this, upsample to it.	false	100
+DPIfixer	max_dpi	bounded_int	If the buffer's DPI is above this, downsample to it.	false	300
+SkewFinder	max_angle	bounded_float	Search range in degrees (±). Coarse search runs in 1° steps then refines.	false	30.0
+SkewFinder	min_angle	bounded_float	Apply rotation only when detected skew exceeds this (degrees).	false	0.1
+SkewFinder	accuracy	bounded_float	Fine-search angle step in degrees.	false	0.1
+SkewFinder	apply_rotation	bool	If false, only records meta.skew without rotating.	false	true
+SkewFinder	k_cluster	bounded_int	0 = white border. >1 = k-means cluster count for background colour detection.	false	0
+PageDetector	margin_mm	bounded_float	Padding around each detected text bbox before cropping.	false	2.0
+PageDetector	max_layouts	bounded_int	Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap).	false	2
+PageDetector	rescale_threshold	bounded_float	Minimum DPI scale-factor delta to trigger a resize.	false	0.01
+PageDetector	roi_margin_mm	bounded_float	ROI margin (≤ margin_mm) propagated downstream for Binarizer masking.	false	1.0
+PageDetector	processing_dpi	bounded_float	Downsample to this DPI for detection; full-res used for cropping. Empty = no downscale.	false
+PageDetector	merge_threshold	bounded_float	Column-merge score cutoff for combining horizontally-overlapping boxes.	true	0.6
+PageDetector	merge_gap_weight	bounded_float	Weight of the inter-box gap term in the merge score.	true	0.4
+PageDetector	merge_width_weight	bounded_float	Weight of the width-similarity term in the merge score.	true	0.6
+PageDetector	merge_gap_norm_cap	bounded_float	Cap on the normalized inter-box gap used in the merge score.	true	0.15
+PageDetector	backend	enum	Text detector backend. auto = apple_vision on macOS else east → dbnet → heuristic.	false	auto
+PageDetector	min_contrast	bounded_float	Reject layouts whose (p95−p5) pixel range is below this fraction of the max across all merged layouts in the scan. Polarity-agnostic, robust to sparse text. Legitimate text > 0.7; bleed-through < 0.5. 0 = disabled.	false	0.7
+Binarizer	method	enum	Binarization algorithm (doxapy: wolf++/wolf/sauvola/niblack/nick/… plus otsu). gray keeps grayscale; none passes through.	false	wolf++
+Binarizer	window_mm_wolf	bounded_float	Wolf-family window in mm. Each doxa family has its own window_mm_<family> / window_px_<family> / k_<family> (e.g. window_mm_sauvola, k_sauvola).	false	3.2
+Binarizer	k_wolf	bounded_float	Wolf-family threshold bias. Higher = whiter. Per-family k_<family> exists for each algorithm.	false	0.5
+Binarizer	roi_shrink	bounded_int	If meta.roi is set, erode the mask N iterations before applying.	false	0
+Binarizer	morpho_close	bounded_int	Morphological close (0–10) after thresholding.	false	0
+TrapezoidalCorrection	line_source	enum	Where to source text-line bboxes from.	false	connectivity
+TrapezoidalCorrection	min_line_count	bounded_int	Below this many detected lines, fall back to passthrough.	false	4
+TrapezoidalCorrection	line_join_mm	bounded_float	Horizontal MORPH_CLOSE kernel for line bridging (mm at page DPI). Fallback when <30 char-like CCs available.	false	4.0
+TrapezoidalCorrection	kernel_char_mult	bounded_float	Adaptive MORPH_CLOSE kernel width = mult × median char height. Bridges words into full-line spans.	false	2.0
+TrapezoidalCorrection	thickness_char_mult	bounded_float	TEXT_MAX_THICKNESS = mult × median char height (≈ ascender + x-height + descender). Drops multi-line bridged blobs.	false	3.0
+TrapezoidalCorrection	edge_max_length_char_mult	bounded_float	EDGE_MAX_LENGTH = mult × median char height. Max Euclidean gap between adjacent cinfos the span-builder will link. 3 ≈ one wide justified word gap + margin.	false	3.0
+TrapezoidalCorrection	ransac_trials	bounded_int	RANSAC trials for the column-edge fits (per-side) and the horizontal VP fit.	false	200
+TrapezoidalCorrection	ransac_angle_eps_deg	bounded_float	RANSAC inlier tolerance for the VP fit (degrees).	false	0.3
+TrapezoidalCorrection	margin_mm	bounded_float	Extra padding around the rectified column quad.	false	3.0
+TrapezoidalCorrection	interp	enum	Remap interpolation mode. auto = nearest on BW inputs, cubic otherwise.	false	auto
+TrapezoidalCorrection	min_quad_area_ratio	bounded_float	Reject if column-quad covers less of the crop than this.	false	0.1
+TrapezoidalCorrection	zhang_he_min_skew	bounded_float	Skip Zhang-He metric upgrade when quad is nearly axis-aligned.	false	0.05
+TrapezoidalCorrection	zhang_he_max_drift	bounded_float	Reject ZH aspect if it drifts more than this fraction from bbox aspect.	false	0.15
+TrapezoidalCorrection	max_baseline_tilt_deg	bounded_float	Reject if median baseline tilt exceeds this.	false	35.0
+TrapezoidalCorrection	max_aspect_ratio	bounded_float	Sanity cap on recovered w/h.	false	5.0
+TrapezoidalCorrection	debug	bool	Save VP/line overlay as debug image to meta.	false	false
+TrapezoidalCorrection	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	false	false
+PageDewarper	backend	enum	Optimizer backend. auto = MLX → padded JAX → Powell. mlx forces Apple Metal (MLX) on top of padded JAX. jax skips MLX, uses padded JAX L-BFGS-B. powell uses SciPy Powell (no JAX/MLX).	false	auto
+PageDewarper	max_oob	bounded_float	Reject the dewarp if remap goes more than this many pixels out of bounds. Bumped to 400 because the page outline (footer + page number area) routinely extrapolates 200-300 px below the last detected span — benign white fringe, not a real failure.	false	400.0
+PageDewarper	min_spans	bounded_int	Minimum span count to run the cubic fit. Below this, the optimizer is under-constrained and passthrough is safer.	false	4
+PageDewarper	min_span_width_ratio	bounded_float	Drop spans whose width is less than this fraction of the widest span in the scan. Cuts page-number / author-line / footer fragments that bias the cubic fit toward false curvature; keep ≥ the footnote block so the fit's support reaches the page bottom (else footnotes get extrapolated/fanned). 0 = disabled.	false	0.2
+PageDewarper	page_margin_mm	bounded_float	Mask margin in mm — defines the page-extent rectangle for span detection.	false	5.0
+PageDewarper	dewarp_margin	bounded_float	Pre-dewarp white padding around the crop (mm).	false	5.0
+PageDewarper	remap_decimate	bounded_int	Decimation factor for the remap grid. Lower = sharper but slower.	false	4
+PageDewarper	shear_cost	bounded_float	Penalty on rvec[0]² (camera tilt). Does NOT regularize cubic α/β; use cubic_cost for that.	false	40.0
+PageDewarper	cubic_cost	bounded_float	L2 penalty on cubic slopes α, β. 0 = page-dewarp default (no regularizer). Previously needed at 1.0 to mask a span-linking bug that produced phantom curl on flat pages; with that bug fixed (see EDGE_MAX_LENGTH = 3·h_med, span_mask isolation) the regularizer biases real curl out — leave at 0. Crank it up only if a real input over-curls.	false	0.0
+PageDewarper	focal_length	bounded_float	Normalized camera focal length. Overridden by calibration if present.	false	1.3
+PageDewarper	line_join_mm	bounded_float	Horizontal MORPH_CLOSE kernel fallback (mm at analysis DPI). Used when <30 char-like CCs available.	false	4.0
+PageDewarper	kernel_char_mult	bounded_float	Adaptive MORPH_CLOSE kernel width = mult × median char height. Bridges words into full-line spans.	false	2.0
+PageDewarper	thickness_char_mult	bounded_float	TEXT_MAX_THICKNESS = mult × median char height (≈ ascender + x-height + descender). Drops multi-line bridged blobs.	false	3.0
+PageDewarper	edge_max_length_char_mult	bounded_float	EDGE_MAX_LENGTH = mult × median char height. Max Euclidean gap between adjacent cinfos the span-builder will link. 3 ≈ one wide justified word gap + margin.	false	3.0
+PageDewarper	processing_dpi	bounded_float	Downsample to this DPI for span analysis; full-res for the remap.	false	150.0
+PageDewarper	debug	bool	Save intermediate visualisations as debug_artifacts.	false	false
+PageDewarper	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	false	false
+MarginSetter	margin_mm	string	CSS-style margin in mm. "10" all sides; "10 20" V H; "10 20 30 40" L R T B.	false	5
+MarginSetter	margin_px	string	Same as margin_mm but in pixels (overrides margin_mm when set).	false	

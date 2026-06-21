@@ -1,0 +1,19 @@
+[package]
+name = "aglaia_jbig2"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Aglaïa JBIG2 PDF-embedding bindings (PyO3 wrapper over jbig2enc-rust)"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+jbig2enc-rust = { version = "0.5", features = ["cc-analysis", "symboldict", "refine", "parallel"] }
+ndarray = "0.16"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
