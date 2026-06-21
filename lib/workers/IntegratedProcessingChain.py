@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Type
 
 from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.abstraction import AbstractImageProcessor
+from lib.processors.abstraction import AbstractImageProcessor, ReplayTrait
 from lib.workers.chain_abstraction import SimpleChainElement
 
 # Auto-discovered registry — adding a processor only needs its file in `lib/processors/`.
@@ -430,7 +430,7 @@ class IntegratedProcessingChain:
         from PIL import Image as _PILImage
         from lib.storage.db import open_db, in_transaction
         from lib.storage.persister import Persister
-        from lib.storage.repo import NodeRepo, BranchRepo, ImageRepo
+        from lib.storage.repo import NodeRepo, BranchRepo, ImageRepo, StepOverrideRepo
 
         conn = open_db(db_path)
         persister = Persister(conn)
@@ -577,9 +577,55 @@ class IntegratedProcessingChain:
 
         def run_pipeline(buf: ImageBuffer, start_idx: int):
             current = buf
+            # Per-page processor disable: the layout's skip set, keyed
+            # (branch_path, step_idx). A disabled step is bypassed with a
+            # passthrough node instead of running the processor (see below).
+            # Loaded once per run; resumed branch workers re-enter here and
+            # reload their own (branch-specific) set.
+            disabled_steps: set[tuple[str, int]] = (
+                StepOverrideRepo(conn).map_for_scan(int(current.scan_id))
+                if current.scan_id is not None else set()
+            )
             for i in range(start_idx, N):
                 config = elements_config[i]
                 processor = processors[i]
+                # Per-page disable: skip this processor for this layout. Emit
+                # a passthrough node (same image — dedups to the parent's
+                # image_id — no process(), no replay stamp) so the node tree
+                # stays contiguous and downstream runs on the un-transformed
+                # image; Replay auto-excludes it (nothing stamped). Only
+                # COORDINATE/PIXEL_VALUE processors are skippable: ROI /
+                # branch-emitting steps (PageDetector) would restructure the
+                # branch tree, so they're locked in the UI and ignored here.
+                trait = getattr(type(processor), "REPLAY_TRAIT", None)
+                skippable = trait in (ReplayTrait.COORDINATE, ReplayTrait.PIXEL_VALUE)
+                if skippable and (current.branch_path or "", i + 1) in disabled_steps:
+                    pass_buf = ImageBuffer(
+                        current.buffer, current.type, dpi=current.dpi,
+                        filestem=current.filestem, scan_id=current.scan_id,
+                        pipeline_version_id=current.pipeline_version_id,
+                        depth=current.depth + 1,
+                        branch_label=current.branch_label,
+                        branch_path=current.branch_path,
+                        parent_node_id=current.parent_node_id,
+                    )
+                    pass_buf.meta["disabled"] = True
+                    pass_buf.meta["status"] = 1
+                    nid, iid = persist_step(pass_buf, config, i + 1,
+                                            current.parent_node_id, 0.0, 1)
+                    pass_buf.parent_node_id = nid
+                    emit_event(pass_buf, nid, None, config.instance_name,
+                               image_id=iid, parent_node_id=current.parent_node_id)
+                    if log_queue is not None:
+                        log_queue.put(("log_info",
+                            f"[{current.filestem}] {config.processor_name}: "
+                            "disabled (passthrough)"))
+                    # `disabled` marks THIS node only — don't let it ride the
+                    # buffer onto downstream steps' meta (they'd render as
+                    # disabled too). The node row already has it (persisted).
+                    pass_buf.meta.pop("disabled", None)
+                    current = pass_buf
+                    continue
                 start_t = time.time()
                 old_type = current.type
                 # Snapshot replay stamp BEFORE in-place mutation; used to clear

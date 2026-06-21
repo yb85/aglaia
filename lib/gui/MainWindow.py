@@ -27,7 +27,9 @@ from lib.workers.Calibrator import Calibrator, load_calibration, save_calibratio
 from lib.workers.Initializer import load_pipeline_def, pipeline_step_descriptions
 from lib.storage.db import db_session
 from lib.storage.persister import Persister, make_thumb
-from lib.storage.repo import ScanRepo, NodeRepo, ImageRepo, ThumbRepo, OcrRepo
+from lib.storage.repo import (
+    ScanRepo, NodeRepo, ImageRepo, ThumbRepo, OcrRepo, StepOverrideRepo,
+)
 from lib.gui.PipelineEditorWidget import PipelineEditorDialog
 from lib.workers.OcrWorker import OcrWorker
 from lib.gui.sidebar import SidebarPanel
@@ -193,8 +195,11 @@ class MainWindow(QMainWindow):
     # Broadcast: per-layout selected stage / visibility changed in DB.
     # All three scan views subscribe and resync their UI. Single source
     # of truth = `branches` table; one signal per kind of change.
-    branch_chosen_changed = Signal(int, str, int)        # scan_id, branch_label, node_id
     branch_visibility_changed = Signal(int, str, bool)   # scan_id, branch_label, hidden
+    # Per-page processor disable: a step toggled on/off for one layout.
+    # Replaces exit-stage navigation. Views dim/undim the cell immediately;
+    # the scan reruns from raw (worker re-applies the override per branch).
+    step_disabled_changed = Signal(int, str, int, bool)  # scan_id, branch_path, step_idx, disabled
     # Fired after any write that affects OCR staleness (chosen_node_id
     # move, OCR run inserted as fresh, OCR forced). Single broadcast =
     # every view + bottom-bar OCR frame resyncs from DB.
@@ -300,7 +305,7 @@ class MainWindow(QMainWindow):
         # are clamped down to that upper bound. A new fit_zoom below
         # global*(1-tol) becomes the new global and triggers broadcast.
         display_cfg = self.args.config.get("display", {})
-        self._card_max_width_px = int(display_cfg.get("card_max_width_px", 150))
+        self._card_max_width_px = int(display_cfg.get("card_max_width_px", 260))
         self._zoom_tolerance = float(display_cfg.get("zoom_tolerance", 0.2))
         self._global_zoom: Optional[float] = None
         
@@ -528,8 +533,8 @@ class MainWindow(QMainWindow):
         self._scans_gallery = None
         # Single-source-of-truth broadcast: any view's selection/visibility
         # change writes to DB then re-emits; whichever view is live resyncs.
-        self.branch_chosen_changed.connect(self._on_branch_chosen_changed)
         self.branch_visibility_changed.connect(self._on_branch_visibility_changed)
+        self.step_disabled_changed.connect(self._on_step_disabled_changed)
         # OCR state changes fan out to badges + bottom-bar OCR frame.
         self.ocr_state_changed.connect(self._on_ocr_state_changed)
         scans_h.addWidget(self._scans_stack, 1)
@@ -912,9 +917,12 @@ class MainWindow(QMainWindow):
         widget.delete_requested.connect(self.delete_scan)
         widget.debug_requested.connect(self._open_debug_viewer)
         widget.final_zoom_observed.connect(self._on_card_final_zoom)
-        # Per-stem selection / visibility events → DB so gallery + table
-        # see the same state when the user comes from the grid card.
-        widget.selection_changed.connect(self._on_card_selection_changed)
+        # Per-page disable: round stage-toggle → flip override + rerun.
+        # State for the toggle + band comes from a per-scan provider.
+        widget.step_states_provider = self.cell_disable_states
+        widget.step_toggle_requested.connect(self.toggle_step_disabled)
+        # Visibility (eye) still writes branches.trashed_at so gallery +
+        # table see the same hide state. (selection_changed is vestigial.)
         widget.visibility_changed.connect(self._on_card_visibility_changed)
         if self._global_zoom is not None:
             widget.set_global_zoom(self._global_zoom)
@@ -3288,67 +3296,6 @@ class MainWindow(QMainWindow):
             return None
         return None
 
-    def _gallery_branch_chosen(self, scan_id: int,
-                                branch_label: str) -> Optional[int]:
-        """Return the currently chosen `node_id` for `(scan_id, branch)`,
-        or None when no branches row exists yet."""
-        try:
-            with db_session(str(self.db_path)) as conn:
-                # `branch_label` here is the leaf token (A, B, …). Match
-                # the branch whose `branch_path` ends with it (handles
-                # nested branches: "A.1" → leaf "1").
-                if branch_label:
-                    row = conn.execute(
-                        "SELECT chosen_node_id FROM branches "
-                        "WHERE scan_id = ? "
-                        "  AND (branch_path = ? OR branch_path LIKE ?)"
-                        " LIMIT 1",
-                        (int(scan_id), str(branch_label),
-                         f"%.{branch_label}"),
-                    ).fetchone()
-                else:
-                    row = conn.execute(
-                        "SELECT chosen_node_id FROM branches "
-                        "WHERE scan_id = ? AND (branch_path = '' OR branch_path IS NULL)"
-                        " LIMIT 1",
-                        (int(scan_id),),
-                    ).fetchone()
-                if row and row["chosen_node_id"] is not None:
-                    return int(row["chosen_node_id"])
-        except Exception:
-            return None
-        return None
-
-    def _gallery_selected_resolve(self, scan_id: int
-                                    ) -> list[tuple[str, Optional[int], Optional[int]]]:
-        """For 'Show selected' mode: per-branch list of the chosen node.
-
-        Returns `[(branch_leaf_label, image_id, node_id), …]` — one entry
-        per branches row, image = chosen_node's image (each branch can
-        currently be parked on a different stage)."""
-        try:
-            with db_session(str(self.db_path)) as conn:
-                rows = conn.execute(
-                    "SELECT b.branch_path, n.image_id, n.id AS node_id "
-                    "FROM branches b "
-                    "JOIN nodes n ON n.id = b.chosen_node_id "
-                    "WHERE b.scan_id = ? "
-                    "ORDER BY b.branch_path ASC",
-                    (int(scan_id),),
-                ).fetchall()
-                out: list[tuple[str, Optional[int], Optional[int]]] = []
-                for r in rows:
-                    bp = str(r["branch_path"] or "")
-                    leaf = bp.split(".")[-1] if bp else ""
-                    out.append((
-                        leaf,
-                        int(r["image_id"]) if r["image_id"] is not None else None,
-                        int(r["node_id"]) if r["node_id"] is not None else None,
-                    ))
-                return out
-        except Exception:
-            return []
-
     def _gallery_branch_trashed(self, scan_id: int,
                                   branch_label: str) -> bool:
         """True iff the matching branches row has `trashed_at IS NOT NULL`.
@@ -3377,29 +3324,6 @@ class MainWindow(QMainWindow):
         """Gallery eye toggle → central writer (persists + broadcasts)."""
         self.set_branch_visibility(int(scan_id), str(branch_label),
                                      bool(trashed))
-
-    def _gallery_set_branch_chosen(self, scan_id: int,
-                                    branch_label: str, node_id: int) -> None:
-        """Gallery star → central writer (persists + broadcasts)."""
-        self.set_branch_chosen(int(scan_id), str(branch_label), int(node_id))
-        # Mirror the new selection into the grid widget's per-stem
-        # `current_idx`. Without this, switching from gallery → grid /
-        # table shows the OCR badge as stale (DB chose changed) but the
-        # displayed miniature still points at the old step.
-        self._sync_grid_current_idx_from_chosen(scan_id, branch_label, node_id)
-        try:
-            self._refresh_ocr_ui()
-        except Exception:
-            pass
-        # NOTE: do NOT call `_refresh_alt_views_if_visible()` here. The
-        # gallery is the active view; that helper calls
-        # `gallery.reload(jump_to_latest=True)` which resets stage_idx via
-        # `default_stage_provider` (the first branch's chosen stage) and
-        # yanks the user away from the stage they just starred. The
-        # gallery's own `_present()` (already invoked by `_on_star_clicked`)
-        # is the only repaint we need while in gallery mode. The table /
-        # grid views rebuild from scratch on view-switch via
-        # `_on_view_mode_clicked` — they don't need a side-channel refresh.
 
     def _broadcast_scan_set_changed(self) -> None:
         """Scan set mutated (deleted, reordered, imported) → rebuild only the
@@ -3441,25 +3365,30 @@ class MainWindow(QMainWindow):
             pass
 
     # ── broadcast subscribers ─────────────────────────────────────
-    def _on_branch_chosen_changed(self, scan_id: int, branch_label: str,
-                                    node_id: int) -> None:
-        """DB chosen_node_id changed → resync all three views from DB."""
-        # Grid: update items[stem]["current_idx"] + repaint card.
-        self._sync_grid_current_idx_from_chosen(scan_id, branch_label, node_id)
-        # Table: rebuild affected scan's row (cheap full refresh).
+    def _on_step_disabled_changed(self, scan_id: int, branch_path: str,
+                                     step_idx: int, disabled: bool) -> None:
+        """A step was toggled → repaint the active view's stage state now.
+
+        Optimistic: the disabled marker shows immediately; the scan's
+        rerun (triggered by the same writer) repopulates thumbnails as
+        nodes land, and the grid's live image events refresh those."""
         if getattr(self, "_view_mode", "grid") == "list":
             try:
                 self._scans_table.refresh()
             except Exception:
                 pass
-        # Gallery: re-`_present` if it's the focused scan. Avoid reload
-        # (reload re-picks stage and clobbers the user's view).
-        if getattr(self, "_view_mode", "grid") == "gallery":
+        elif getattr(self, "_view_mode", "grid") == "gallery":
             try:
-                if self._scans_gallery.focused_scan_id() == int(scan_id):
-                    self._scans_gallery._present()
+                self._scans_gallery.reload()
             except Exception:
                 pass
+        else:
+            w = self.scan_widgets_by_scan.get(int(scan_id))
+            if w is not None:
+                try:
+                    w.refresh_composite()
+                except Exception:
+                    pass
 
     def _on_branch_visibility_changed(self, scan_id: int, branch_label: str,
                                          hidden: bool) -> None:
@@ -3503,36 +3432,6 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    def _on_table_select_requested(self, scan_id: int, stem: str) -> None:
-        """Table cell click = select-as-chosen for the row's leaf node.
-        Resolves stem → branch_label, finds the leaf node_id from the
-        scan widget's items, delegates to ``set_branch_chosen``."""
-        w = self.scan_widgets_by_scan.get(int(scan_id))
-        if w is None:
-            return
-        items = getattr(w, "items", {}) or {}
-        entry = items.get(stem)
-        if entry is None:
-            return
-        nodes = entry.get("nodes") or {}
-        history = entry.get("history") or []
-        leaf_step = history[-1] if history else None
-        node_id = (nodes.get(leaf_step) or {}).get("node_id") if leaf_step else None
-        if node_id is None:
-            for info in nodes.values():
-                if info.get("node_id") is not None:
-                    node_id = info["node_id"]
-                    break
-        if node_id is None:
-            return
-        raw_stem = getattr(w, "raw_filestem", "")
-        if stem and raw_stem and stem.startswith(raw_stem + "_"):
-            suffix = stem[len(raw_stem) + 1:]
-            branch_label = suffix.split("_")[-1] if "_" in suffix else suffix
-        else:
-            branch_label = ""
-        self.set_branch_chosen(int(scan_id), str(branch_label), int(node_id))
-
     def _on_table_trash_requested(self, scan_id: int, stem: str,
                                      hidden: bool) -> None:
         """Table view eye toggle → central writer. The caller passes the
@@ -3549,41 +3448,9 @@ class MainWindow(QMainWindow):
         self.set_branch_visibility(int(scan_id), str(branch_label),
                                      bool(hidden))
 
-    # ── single source of truth: branch chosen / visibility ───────
-    def set_branch_chosen(self, scan_id: int, branch_label: str,
-                            node_id: int) -> None:
-        """Authoritative writer for `branches.chosen_node_id`.
-
-        Persists, recomputes `ocr_runs.is_stale` for the scan (single
-        source of truth maintenance), then broadcasts. All views resync
-        from DB on the broadcast — no scattered staleness logic."""
-        try:
-            with db_session(str(self.db_path)) as conn:
-                if branch_label:
-                    conn.execute(
-                        "UPDATE branches SET chosen_node_id = ?, "
-                        " updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-                        " WHERE scan_id = ? "
-                        "   AND (branch_path = ? OR branch_path LIKE ?)",
-                        (int(node_id), int(scan_id),
-                         str(branch_label), f"%.{branch_label}"),
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE branches SET chosen_node_id = ?, "
-                        " updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-                        " WHERE scan_id = ? "
-                        "   AND (branch_path = '' OR branch_path IS NULL)",
-                        (int(node_id), int(scan_id)),
-                    )
-                # Maintain ocr_runs.is_stale to match the new chosen.
-                OcrRepo(conn).recompute_stale_for_scan(int(scan_id))
-                conn.commit()
-        except Exception:
-            return
-        self.branch_chosen_changed.emit(int(scan_id), str(branch_label),
-                                          int(node_id))
-        self.ocr_state_changed.emit()
+    # ── single source of truth: branch visibility ───────────────
+    # (chosen_node_id is no longer user-writable — it tracks the rerun
+    #  terminal; per-page output is shaped by `step_overrides`.)
 
     def set_branch_visibility(self, scan_id: int, branch_label: str,
                                  hidden: bool) -> None:
@@ -3637,10 +3504,117 @@ class MainWindow(QMainWindow):
                 rows = all_rows
         return [int(r["id"]) for r in rows]
 
-    # Slim adapters — keep old names so legacy wiring keeps working.
-    def _on_card_selection_changed(self, scan_id: int, branch_label: str,
-                                     node_id: int) -> None:
-        self.set_branch_chosen(scan_id, branch_label, node_id)
+    # ── per-page processor disable ───────────────────────────────
+    @staticmethod
+    def _proc_toggleable(processor_name) -> bool:
+        """True iff a processor may be per-page disabled — only linear
+        COORDINATE / PIXEL_VALUE steps. ROI / branch-emitting (PageDetector)
+        and untagged steps are locked: toggling them would restructure the
+        branch tree."""
+        try:
+            from lib.processors.registry import get_processor
+            from lib.processors.abstraction import ReplayTrait
+            info = get_processor(processor_name)
+            trait = getattr(info.processor_cls, "REPLAY_TRAIT", None) if info else None
+            return trait in (ReplayTrait.COORDINATE, ReplayTrait.PIXEL_VALUE)
+        except Exception:
+            return False
+
+    def node_toggleable(self, processor_name) -> bool:
+        """Public alias for views deciding whether to show an active toggle."""
+        return self._proc_toggleable(processor_name)
+
+    def _node_override_key(self, conn, node_id: int):
+        """(branch_path, step_idx, processor_name) for a node, or None.
+
+        `branch_path` is the node's `branch_label` (or "" for pre-split
+        trunk steps) — matches the worker's `current.branch_path` for the
+        non-nested splits PageDetector produces. (Nested A.1 branches would
+        need the full ancestry path; deferred — see issue #68.)"""
+        row = conn.execute(
+            "SELECT scan_id, branch_label, step_idx, processor_name "
+            "FROM nodes WHERE id = ?", (int(node_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return (int(row["scan_id"]), str(row["branch_label"] or ""),
+                int(row["step_idx"]), row["processor_name"])
+
+    def step_disabled_for_node(self, node_id: int) -> bool:
+        try:
+            with db_session(str(self.db_path)) as conn:
+                key = self._node_override_key(conn, int(node_id))
+                if key is None:
+                    return False
+                scan_id, bp, sidx, _ = key
+                return StepOverrideRepo(conn).is_disabled(scan_id, bp, sidx)
+        except Exception:
+            return False
+
+    def disabled_steps_for_layout(self, scan_id: int, branch_path: str) -> set:
+        """Disabled `step_idx`s visible on (scan, layout): trunk ("") +
+        this branch. Used by the grid band + table strip to render state."""
+        try:
+            with db_session(str(self.db_path)) as conn:
+                allset = StepOverrideRepo(conn).map_for_scan(int(scan_id))
+            bp = str(branch_path or "")
+            return {s for (b, s) in allset if b == "" or b == bp}
+        except Exception:
+            return set()
+
+    def set_step_disabled(self, scan_id: int, node_id: int, disabled: bool) -> None:
+        """Authoritative writer for `step_overrides`. Persists the toggle,
+        broadcasts for instant cell feedback, then reruns the scan from raw
+        (the worker re-applies the override per branch; `chosen_node_id`
+        lands on the new terminal automatically). No-op for locked steps."""
+        bp = ""
+        sidx = -1
+        try:
+            with db_session(str(self.db_path)) as conn:
+                key = self._node_override_key(conn, int(node_id))
+                if key is None:
+                    return
+                ks, bp, sidx, pname = key
+                if not self._proc_toggleable(pname):
+                    return
+                StepOverrideRepo(conn).set(int(scan_id), bp, sidx, bool(disabled))
+                conn.commit()
+        except Exception:
+            return
+        self.step_disabled_changed.emit(int(scan_id), bp, int(sidx), bool(disabled))
+        cb = self._reprocess_snaps_callback
+        if cb is not None:
+            try:
+                cb({int(scan_id)})
+            except Exception:
+                pass
+
+    def toggle_step_disabled(self, scan_id: int, node_id: int) -> None:
+        """Flip a step's disabled state for its layout (view click handler)."""
+        self.set_step_disabled(int(scan_id), int(node_id),
+                                not self.step_disabled_for_node(int(node_id)))
+
+    def cell_disable_states(self, scan_id: int) -> dict:
+        """`{node_id: (toggleable, disabled)}` for every node of a scan —
+        one query, so a view can render its whole stage strip without a
+        per-cell DB round-trip."""
+        out: dict[int, tuple[bool, bool]] = {}
+        try:
+            with db_session(str(self.db_path)) as conn:
+                disabled = StepOverrideRepo(conn).map_for_scan(int(scan_id))
+                rows = conn.execute(
+                    "SELECT id, branch_label, step_idx, processor_name "
+                    "FROM nodes WHERE scan_id = ?", (int(scan_id),),
+                ).fetchall()
+                for r in rows:
+                    bp = str(r["branch_label"] or "")
+                    out[int(r["id"])] = (
+                        self._proc_toggleable(r["processor_name"]),
+                        (bp, int(r["step_idx"])) in disabled,
+                    )
+        except Exception:
+            pass
+        return out
 
     def _on_card_visibility_changed(self, scan_id: int, branch_label: str,
                                       hidden: bool) -> None:
@@ -3874,7 +3848,8 @@ class MainWindow(QMainWindow):
         is_gallery = (mode == "gallery")
         for w in (self._thumb_slider, self._icon_lbl_search):
             w.setVisible(not is_gallery)
-        self._chk_show_selected.setVisible(is_gallery)
+        # "Show selected" mode retired with exit-stage nav — always hidden.
+        self._chk_show_selected.setVisible(False)
 
     def _on_view_mode_clicked(self, btn) -> None:
         self.set_view_mode(btn.property("view_mode"))
@@ -3887,11 +3862,12 @@ class MainWindow(QMainWindow):
                 get_snap_widgets=lambda: self.scan_widgets_by_scan,
                 thumb_loader=self.thumb_loader,
                 ocr_state_provider=self._ocr_branch_state_map,
+                cell_states_provider=self.cell_disable_states,
             )
             t.delete_requested.connect(self.delete_scan)
             t.debug_requested.connect(self._open_debug_viewer)
             t.trash_requested.connect(self._on_table_trash_requested)
-            t.select_requested.connect(self._on_table_select_requested)
+            t.step_toggle_requested.connect(self.toggle_step_disabled)
             # Drag-grip reorder reuses the grid card-drop handler.
             t.card_dropped.connect(self._on_card_dropped)
             # Seed the thumb-row height from the current zoom slider so a
@@ -3915,17 +3891,12 @@ class MainWindow(QMainWindow):
                 stage_resolver=self._gallery_stage_resolve,
                 thumb_loader=self.thumb_loader,
                 default_stage_provider=self._gallery_default_stage,
-                branch_chosen_provider=self._gallery_branch_chosen,
-                branch_chosen_writer=self._gallery_set_branch_chosen,
+                cell_states_provider=self.cell_disable_states,
+                step_toggle_writer=self.toggle_step_disabled,
                 branch_trashed_provider=self._gallery_branch_trashed,
                 branch_trashed_writer=self._gallery_set_branch_trashed,
-                selected_resolver=self._gallery_selected_resolve,
             )
             g.debug_requested.connect(self._open_debug_viewer)
-            try:
-                g.set_show_selected(self._chk_show_selected.isChecked())
-            except Exception:
-                pass
             self._scans_stack.addWidget(g)
             self._scans_gallery = g
         return self._scans_gallery

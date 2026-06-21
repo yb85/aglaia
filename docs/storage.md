@@ -10,7 +10,7 @@ Single SQLite file per project: `<workspace>/<slug>.agl`.
 lib/storage/
   __init__.py          re-exports
   db.py                open_db / ensure_schema / PRAGMAs
-  schema/0001_initial.sql … 0005_backfill_ocr_stale.sql   (applied in order)
+  schema/0001_initial.sql … 0010_step_overrides.sql   (applied in order)
   repo.py              ProjectRepo / PipelineRepo / CalibrationRepo /
                        ImageRepo / ThumbRepo / ScanRepo / NodeRepo /
                        BranchRepo / OcrRepo / DebugRepo
@@ -28,7 +28,8 @@ lib/storage/
 | `thumbs` | Per-image rasterized thumbnail (one per `max_dim`, e.g. 256). |
 | `scans` | One row per capture root (webcam frame or PDF page). Soft-delete via `deleted_at`. |
 | `nodes` | One row per pipeline-step output. Self-FK forms a tree. |
-| `branches` | Per-branch user-selectable output. Independent step-back/forward per branch. Soft-delete via `trashed_at`. |
+| `branches` | One row per terminal branch. `chosen_node_id` (the export node) now always tracks `terminal_node_id` — per-page output is shaped by `step_overrides`, not by moving the chosen node. Soft-delete via `trashed_at`. |
+| `step_overrides` | Per-page-layout processor disable. A row `(scan_id, branch_path, step_idx, disabled)` makes the chain bypass that step for that layout. |
 | `ocr_runs` | One row per OCR pass over a branch: engine, languages, status, `result_json`, timestamps. `is_stale` flags a result that no longer matches the branch's current node. |
 | `debug_artifacts` | Optional debug images attached to a node (e.g. PageDewarper span overlays). |
 
@@ -76,7 +77,32 @@ Lifecycle:
 - User clicks "forward arrow" → `step_forward`. Walks one node toward `terminal_node_id`.
 - Reset → `chosen_node_id = terminal_node_id`.
 
-Sibling branches are not affected by step_back/step_forward on a peer branch.
+Sibling branches are not affected by a peer branch's overrides.
+
+> **Exit-stage navigation removed (issue #68).** The `step_back` /
+> `step_forward` / `reset_to_leaf` walk over `chosen_node_id` was replaced by
+> per-page processor disable. `chosen_node_id` is now set to the rerun
+> terminal by `upsert` and never moved by the user, so the export queries
+> (which join `chosen_node_id`) are unchanged.
+
+## Per-page processor disable (`step_overrides`)
+
+| Column | Meaning |
+|---|---|
+| `scan_id` | Owning capture |
+| `branch_path` | `""` = pre-split trunk (applies to every layout); `"A"`/`"B"` = one PageDetector layout |
+| `step_idx` | The `nodes.step_idx` of the step's output (so views map 1:1) |
+| `disabled` | `1` = skip this step for this layout. Enabling deletes the row, so a missing row == enabled |
+
+When `IntegratedProcessingChain.run_pipeline` reaches a disabled **toggleable**
+step (REPLAY_TRAIT COORDINATE/PIXEL_VALUE — ROI / branch-emitting steps like
+PageDetector are locked), it emits a **passthrough node** instead of running
+the processor: same pixels, `meta.disabled = true`, **no** `replay_kind` stamp.
+The node tree stays contiguous, downstream steps run on the un-transformed
+image, and `Replay` naturally excludes the passthrough (nothing stamped).
+Toggling a step writes the override then reruns the scan from raw
+(`reprocess_active_scans(scan_ids={id})`); the worker re-applies the override
+set per branch.
 
 ## Image + thumb dedup
 

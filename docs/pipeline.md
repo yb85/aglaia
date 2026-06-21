@@ -153,6 +153,12 @@ Replay is driven by each processor's `REPLAY_TRAIT`, not by manual ordering:
 | `PIXEL_VALUE` | Binarizer | Value op `v'=g(v, neighbourhood)`. Pushed **as late as possible** — applied once, on the final geometry, so thresholding sees rectified text and a single quantisation. |
 | `ROI` | PageDetector, MarginSetter | Changes the region (crop / branch / pad). A **fixed barrier**: replay never reorders across it, and a segment's ROI anchor image is the point replay starts from. |
 
+A step **per-page disabled** (issue #68) is bypassed with a passthrough node
+that stamps no `replay_kind`, so replay excludes it automatically — the
+downstream transforms reconstruct from the un-transformed image. If *every*
+replay-participating step on a branch is disabled, replay no-ops and the
+forward terminal stands.
+
 Replay ordering within a segment is derived: `COORDINATE` (pipeline order)
 → `PIXEL_VALUE` (last) → terminal `ROI`. Boundary/missing pixels introduced
 by a warp (rotation corners, dewarp growth) are tracked with an ROI mask

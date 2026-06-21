@@ -118,23 +118,12 @@ def test_layout_split_produces_two_branches(tmp_path):
     branches = BranchRepo(conn).by_scan(scan_id)
     assert {b["branch_path"] for b in branches} == {"A", "B"}
 
-    # Step back: A goes one step up, B unaffected
+    # Each branch's chosen == its own terminal (independent per layout).
+    # (Exit-stage step_back/forward navigation was removed with issue #68;
+    # per-page output is now shaped by step_overrides instead.)
     a_branch = next(b for b in branches if b["branch_path"] == "A")
     b_branch = next(b for b in branches if b["branch_path"] == "B")
-    b_repo = BranchRepo(conn)
-    # A's chosen is its skew leaf — step back lands on its layout node (linear), OK.
-    assert b_repo.step_back(a_branch["id"]) is True
-    # Try again — A's layout node parent is the branch point (root via heuristic).
-    # The root has no siblings to the layout node's parent, so depending on tree shape:
-    # Actually layout children's parent is the ROOT (since layout is step 1). Root has
-    # one child? With two children A0/B0 — yes, root has two children. So step_back
-    # from a layout node would cross a branch point and is refused.
-    assert b_repo.step_back(a_branch["id"]) is False
-    # B unchanged
-    assert b_repo.get(b_branch["id"])["chosen_node_id"] == b_branch["chosen_node_id"]
-
-    # Forward: A goes back to its leaf
-    assert b_repo.step_forward(a_branch["id"]) is True
-    # Reset
-    b_repo.reset_to_leaf(a_branch["id"])
+    assert a_branch["chosen_node_id"] == a_branch["terminal_node_id"]
+    assert b_branch["chosen_node_id"] == b_branch["terminal_node_id"]
+    assert a_branch["chosen_node_id"] != b_branch["chosen_node_id"]
     conn.close()

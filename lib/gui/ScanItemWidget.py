@@ -37,6 +37,7 @@ from lib.gui.colors import (
     COLOR_FONT_DIM,
     COLOR_FONT_DISABLED,
     COLOR_FONT_MUTED,
+    COLOR_FONT_PLACEHOLDER,
     COLOR_FONT_PRIMARY,
     COLOR_OUTLINE,
     COLOR_OUTLINE_BUTTON,
@@ -160,6 +161,37 @@ class _SpinnerOverlay(QWidget):
         painter.end()
 
 
+class _DisabledBand(QWidget):
+    """3px mini-map pinned to a thumbnail's top edge. Invisible until a
+    stage is disabled. `slots` = ordered [(node_id, disabled)] for the
+    layout's deactivable steps; the band splits into N equal slots and
+    paints a red square over each disabled one (faint green elsewhere)."""
+
+    def __init__(self, slots, width, parent=None):
+        super().__init__(parent)
+        self._slots = list(slots)
+        self.setFixedSize(int(width), 3)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, ev):  # noqa: N802
+        n = len(self._slots)
+        if n == 0:
+            return
+        p = QPainter(self)
+        green = QColor(COLOR_SUCCESS)
+        green.setAlpha(55)
+        p.fillRect(self.rect(), green)
+        red = QColor(COLOR_ERROR)
+        red.setAlpha(205)
+        slot_w = self.width() / n
+        for k, (_nid, dis) in enumerate(self._slots):
+            if dis:
+                x0 = int(round(k * slot_w))
+                x1 = int(round((k + 1) * slot_w))
+                p.fillRect(x0, 0, max(1, x1 - x0), self.height(), red)
+        p.end()
+
+
 class _DragHandle(QWidget):
     """Header band that initiates a card drag. Cursor is open-hand when
     hovering, closed-hand once the press passes the drag threshold. The
@@ -228,12 +260,16 @@ class ScanItemWidget(QWidget):
     # broadcasts via `set_global_zoom`.
     final_zoom_observed = Signal(int, float)
     # Emits (scan_id, branch_label, node_id) whenever the card's
-    # per-stem selection cursor moves — host writes `branches.chosen_node_id`
-    # so the gallery view sees the same state.
+    # per-stem selection cursor moves. Vestigial — exit-stage navigation
+    # was replaced by per-page disable; `_emit_selection_for` is now a
+    # no-op, so this never fires. Kept so legacy host wiring binds cleanly.
     selection_changed = Signal(int, str, int)
     # Emits (scan_id, branch_label, hidden) when the user toggles a
     # layout's eye button — host writes `branches.trashed_at`.
     visibility_changed = Signal(int, str, bool)
+    # Emits (scan_id, node_id) when the round stage-toggle is clicked —
+    # host flips the step's per-page disable + reruns the page.
+    step_toggle_requested = Signal(int, int)
 
     def __init__(self, *, scan_id: int, idx: int, raw_node_id: int, raw_image_id: int,
                  raw_filestem: str, pipeline_steps: list[str],
@@ -266,6 +302,9 @@ class ScanItemWidget(QWidget):
         self.current_history_idx = 0
         self.interacted_stem: Optional[str] = None
         self.dimmed = False
+        # Host-supplied: scan_id → {node_id: (toggleable, disabled)} for the
+        # per-page disable round-toggle + the disabled-state band.
+        self.step_states_provider = None
 
         # filestem -> {
         #   "history":   [step_name, ...],
@@ -552,6 +591,14 @@ class ScanItemWidget(QWidget):
                 w.setParent(None)
                 w.deleteLater()
 
+        # Per-page disable state for every node of this scan, one query.
+        step_states: dict = {}
+        if self.step_states_provider is not None:
+            try:
+                step_states = self.step_states_provider(int(self.scan_id)) or {}
+            except Exception:
+                step_states = {}
+
         visible_stems = self._collect_visible_stems(self.raw_filestem)
         for stem in visible_stems:
             data = self.items[stem]
@@ -583,6 +630,8 @@ class ScanItemWidget(QWidget):
             lbl.setPixmap(pix)
             lbl.setFixedSize(new_w, new_h)
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Hover tooltip = the stage this thumbnail shows.
+            lbl.setToolTip(str(actual_step))
             if node_info and node_info.get("node_id") is not None:
                 node_id = int(node_info["node_id"])
                 lbl_text = f"{stem} | {actual_step}"
@@ -660,6 +709,12 @@ class ScanItemWidget(QWidget):
                 self._add_nav_buttons(container, new_w,
                                       stem=stem if not is_root else None,
                                       is_global=is_root)
+
+            # Per-page disable: round toggle for the displayed stage +
+            # the disabled-state band (mini-map of the layout's skip set).
+            self._add_disable_toggle(container, new_w, node_info,
+                                     actual_step, step_states)
+            self._add_disabled_band(container, new_w, data, step_states)
 
             from lib.gui.widgets import make_icon_button, place_overlay
             # Layout-level hide/show: eye-off when hidden, eye when
@@ -843,6 +898,86 @@ class ScanItemWidget(QWidget):
             btn_back.clicked.connect(lambda: self.navigate_stem(stem, -1))
             btn_fwd.clicked.connect(lambda: self.navigate_stem(stem, 1))
 
+    def _add_disable_toggle(self, container, width, node_info,
+                            actual_step, states) -> None:
+        """Round overlay on the displayed stage showing its pipeline index
+        (or "R" for replay). Always shown for pipeline steps so the
+        affordance is discoverable while chevroning through stages:
+          - toggleable step (COORDINATE/PIXEL_VALUE): blue, click to
+            disable → red "✕"; click again to re-enable;
+          - locked step (raw / PageDetector / replay): dimmed grey, no
+            action (tooltip explains)."""
+        if not node_info:
+            return
+        nid = node_info.get("node_id")
+        if nid is None:
+            return
+        step = (actual_step or "")
+        if step == "raw" or not step:
+            return  # raw capture isn't a pipeline step — nothing to index
+        toggleable, disabled = states.get(int(nid), (False, False))
+        from lib.gui.widgets import place_overlay
+        from lib.gui.colors import COLOR_FONT_INVERSE as _CFI
+        from lib.gui.colors import COLOR_BG_OVERLAY_HOVER as _CLOCK
+        if "replay" in step.lower():
+            label = "R"
+        else:
+            head = step.split("_", 1)[0]
+            label = str(int(head)) if head.isdigit() else "•"
+        text = "✕" if disabled else label
+        btn = QPushButton(text, container)
+        btn.setFixedSize(22, 22)
+        if toggleable:
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            bg = COLOR_ERROR if disabled else COLOR_PRIMARY_BG_STRONG
+            hover = COLOR_ERROR if disabled else COLOR_PRIMARY
+            btn.setStyleSheet(
+                f"QPushButton{{border-radius:11px; background:{bg}; color:{_CFI}; "
+                "font-size:11px; font-weight:700; border:none;}"
+                f"QPushButton:hover{{background:{hover};}}"
+            )
+            btn.setToolTip(
+                self.tr("Step disabled for this page — click to re-enable")
+                if disabled else
+                self.tr("Click to disable this step for this page")
+            )
+            btn.clicked.connect(
+                lambda _checked=False, n=int(nid):
+                self.step_toggle_requested.emit(int(self.scan_id), n)
+            )
+        else:
+            # Locked: shown for orientation, but this step can't be skipped
+            # (it would restructure the page tree, or it's raw/replay).
+            btn.setEnabled(False)
+            btn.setStyleSheet(
+                f"QPushButton{{border-radius:11px; background:{_CLOCK}; "
+                f"color:{COLOR_FONT_PLACEHOLDER}; font-size:11px; "
+                "font-weight:700; border:none;}"
+            )
+            btn.setToolTip(self.tr("This step can't be disabled per page"))
+        place_overlay(btn, container, width // 2 - 11, 4)
+
+    def _add_disabled_band(self, container, width, data, states) -> None:
+        """Top-edge mini-map of the layout's disabled steps. Hidden when
+        nothing is disabled."""
+        slots = []
+        nodes = data.get("nodes", {})
+        for step in self.global_history:
+            ni = nodes.get(step)
+            if not ni:
+                continue
+            nid = ni.get("node_id")
+            if nid is None:
+                continue
+            toggleable, disabled = states.get(int(nid), (False, False))
+            if toggleable:
+                slots.append((int(nid), bool(disabled)))
+        if not any(dis for _n, dis in slots):
+            return
+        from lib.gui.widgets import place_overlay
+        band = _DisabledBand(slots, width, parent=container)
+        place_overlay(band, container, 0, 0)
+
     def navigate_stem(self, stem: str, delta: int):
         data = self.items.get(stem)
         if not data:
@@ -880,29 +1015,11 @@ class ScanItemWidget(QWidget):
         self.update_header()
 
     def _emit_selection_for(self, stem: str) -> None:
-        """Resolve the node_id at the stem's current step and emit
-        `selection_changed` so the host can persist `chosen_node_id`."""
-        data = self.items.get(stem)
-        if not data:
-            return
-        idx = data.get("current_idx", self.current_history_idx)
-        if idx < 0 or idx >= len(self.global_history):
-            return
-        step = self.global_history[idx]
-        node_info = data.get("nodes", {}).get(step)
-        if not node_info:
-            return
-        node_id = node_info.get("node_id")
-        if node_id is None:
-            return
-        if stem == self.raw_filestem:
-            branch_label = ""
-        else:
-            suffix = (stem[len(self.raw_filestem) + 1:]
-                      if stem.startswith(self.raw_filestem + "_") else stem)
-            branch_label = suffix.split("_")[-1] if "_" in suffix else suffix
-        self.selection_changed.emit(int(self.scan_id),
-                                     str(branch_label), int(node_id))
+        """No-op. Chevron navigation used to write `chosen_node_id`
+        (exit-stage selection); that model was replaced by per-page
+        processor disable. The chevrons now only change which stage the
+        card displays — they no longer mutate the DB."""
+        return
 
     # ───────────────────────── trash / header ───────────────────────────────
 

@@ -159,27 +159,39 @@ class _DragGrip(QWidget):
 
 class _ThumbCell(QLabel):
     """One stage's mini-thumb. 50 × thumb_h fixed; outlined when this
-    is the selected stage. Click pops the per-layout action menu.
+    is the selected stage. Click toggles the step's per-page disable
+    (toggleable steps only).
 
-    When the row is `hidden`, a crossed-eye glyph paints over the cell
-    so the user reads "hidden by user" instead of "low-light scan"."""
+    Two independent overlays: when the row is `hidden`, a crossed-eye
+    glyph reads "hidden by user"; when this step is `disabled`, a red
+    diagonal strike reads "processor skipped for this page"."""
 
     clicked = Signal()
 
     def __init__(self, pix: Optional[QPixmap], *, selected: bool,
                  stem: str, step_name: str, node_id: Optional[int],
-                 thumb_h: int, hidden: bool = False):
+                 thumb_h: int, hidden: bool = False,
+                 disabled: bool = False, toggleable: bool = True):
         super().__init__()
         self.stem = stem
         self.step_name = step_name
         self.node_id = node_id
         self._selected = selected
         self._hidden = bool(hidden)
+        self._disabled = bool(disabled)
+        self._toggleable = bool(toggleable)
         self.setFixedSize(CELL_W, thumb_h)
         if pix is not None:
             self.setPixmap(pix)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setToolTip(self.tr("{stem} · {step}").format(stem=stem, step=step_name))
+        if toggleable:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            tip = (self.tr("{stem} · {step} — click to re-enable")
+                   if disabled else
+                   self.tr("{stem} · {step} — click to disable this step"))
+        else:
+            tip = self.tr("{stem} · {step}")
+        self.setToolTip(tip.format(stem=stem, step=step_name))
         self._restyle()
 
     def set_hidden(self, hidden: bool) -> None:
@@ -190,27 +202,41 @@ class _ThumbCell(QLabel):
 
     def paintEvent(self, ev):  # noqa: N802
         super().paintEvent(ev)
-        if not self._hidden:
-            return
-        # Crossed-eye overlay so a dimmed row reads as "user hid" rather
-        # than a dark scan.
-        from lib.gui.theme import lucide_pixmap as _lp
-        glyph_size = max(12, min(self.height(), self.width()) - 8)
-        pix = _lp("eye-off", color=COLOR_FONT_ON_BUTTON, size=glyph_size)
-        pix.setDevicePixelRatio(2.0)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        # Dim the underlying thumb a touch behind the glyph.
-        p.fillRect(self.rect(), Qt.GlobalColor.transparent)
-        p.setOpacity(0.75)
-        # Centered.
-        x = (self.width() - glyph_size) // 2
-        y = (self.height() - glyph_size) // 2
-        p.drawPixmap(QPoint(x, y), pix)
-        p.end()
+        if self._disabled:
+            # Red diagonal strike + faint red wash: "this step is skipped".
+            from PySide6.QtGui import QColor as _QC, QPen as _QP
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            wash = _QC(COLOR_ERROR)
+            wash.setAlpha(40)
+            p.fillRect(self.rect(), wash)
+            pen = _QP(_QC(COLOR_ERROR))
+            pen.setWidth(2)
+            p.setPen(pen)
+            p.drawLine(3, 3, self.width() - 3, self.height() - 3)
+            p.end()
+        if self._hidden:
+            # Crossed-eye overlay so a dimmed row reads as "user hid" rather
+            # than a dark scan.
+            from lib.gui.theme import lucide_pixmap as _lp
+            glyph_size = max(12, min(self.height(), self.width()) - 8)
+            pix = _lp("eye-off", color=COLOR_FONT_ON_BUTTON, size=glyph_size)
+            pix.setDevicePixelRatio(2.0)
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            p.fillRect(self.rect(), Qt.GlobalColor.transparent)
+            p.setOpacity(0.75)
+            x = (self.width() - glyph_size) // 2
+            y = (self.height() - glyph_size) // 2
+            p.drawPixmap(QPoint(x, y), pix)
+            p.end()
 
     def _restyle(self) -> None:
-        if self._selected:
+        if self._disabled:
+            self.setStyleSheet(
+                f"QLabel{{border: 2px solid {COLOR_ERROR}; "
+                "border-radius: 2px; background: transparent;}}")
+        elif self._selected:
             self.setStyleSheet(
                 f"QLabel{{border: 2px solid {SELECTED_BORDER}; "
                 f"border-radius: 2px; background: transparent;}}")
@@ -220,7 +246,7 @@ class _ThumbCell(QLabel):
                 "border-radius: 2px; background: transparent;}}")
 
     def mousePressEvent(self, ev):  # noqa: N802
-        if ev.button() == Qt.MouseButton.LeftButton:
+        if ev.button() == Qt.MouseButton.LeftButton and self._toggleable:
             self.clicked.emit()
         super().mousePressEvent(ev)
 
@@ -231,7 +257,8 @@ class _RowWidget(QWidget):
     def __init__(self, *, stem: str, item: dict, raw_filestem: str,
                  ocr_state: str, thumb_loader, thumb_h: int,
                  global_history: Optional[list[str]] = None,
-                 on_cell_select=None, on_toggle_visibility=None,
+                 on_cell_toggle=None, cell_states: Optional[dict] = None,
+                 on_toggle_visibility=None,
                  on_debug=None,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -299,9 +326,13 @@ class _RowWidget(QWidget):
             current_step = history[-1]
         else:
             current_step = ""
+        cell_states = cell_states or {}
         for step in history:
             node_info = nodes.get(step) or {}
             image_id = node_info.get("image_id")
+            nid = node_info.get("node_id")
+            tog, dis = (cell_states.get(int(nid), (False, False))
+                        if nid is not None else (False, False))
             pix = None
             if image_id is not None:
                 # Pull a 256-px thumb (already cached in DB) — plenty
@@ -311,11 +342,13 @@ class _RowWidget(QWidget):
             sel = ((step == current_step)
                    or (history and step == history[-1] and not current_step))
             cell = _ThumbCell(pix, selected=bool(sel), stem=stem,
-                              step_name=step, node_id=node_info.get("node_id"),
-                              thumb_h=thumb_h, hidden=self._dimmed)
-            # Click = select-as-chosen. No context menu — debug lives on
-            # the magnifier button, trash on the row's eye toggle.
-            cell.clicked.connect(lambda c=cell: on_cell_select(c, self))
+                              step_name=step, node_id=nid,
+                              thumb_h=thumb_h, hidden=self._dimmed,
+                              disabled=bool(dis), toggleable=bool(tog))
+            # Click = toggle this step's per-page disable (toggleable steps
+            # only). Debug lives on the magnifier button, trash on the eye.
+            if tog and nid is not None and on_cell_toggle is not None:
+                cell.clicked.connect(lambda _nid=int(nid): on_cell_toggle(_nid))
             # Last cell's node id = the leaf the debug button targets.
             if cell.node_id is not None:
                 self._leaf_node_id = int(cell.node_id)
@@ -394,7 +427,7 @@ class _SnapBlock(QFrame):
 
     delete_requested = Signal(int)
     debug_requested = Signal(int, str)
-    select_requested = Signal(int, str)
+    step_toggle_requested = Signal(int, int)   # scan_id, node_id
     trash_requested = Signal(int, str, bool)
 
     def __init__(self, *, scan_id: int, idx: int, raw_filestem: str,
@@ -402,6 +435,7 @@ class _SnapBlock(QFrame):
                  global_history: Optional[list[str]] = None,
                  ocr_state: str = "none",
                  ocr_branch_state: Optional[dict] = None,
+                 cell_states: Optional[dict] = None,
                  bg: str = COLOR_BG, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.scan_id = scan_id
@@ -444,7 +478,8 @@ class _SnapBlock(QFrame):
                 thumb_loader=thumb_loader,
                 thumb_h=thumb_h,
                 global_history=global_history,
-                on_cell_select=self._on_cell_selected,
+                on_cell_toggle=self._on_cell_toggled,
+                cell_states=cell_states,
                 on_toggle_visibility=self._on_row_visibility_toggled,
                 on_debug=self._on_row_debug_requested,
                 parent=rows_host,
@@ -523,10 +558,10 @@ class _SnapBlock(QFrame):
         ``branch_path`` like ``A``)."""
         self.trash_requested.emit(self.scan_id, stem, bool(dimmed))
 
-    def _on_cell_selected(self, cell: _ThumbCell, row: _RowWidget) -> None:
-        """Click on a stage cell = select-as-chosen for the row's stem.
-        Debug + trash are now standalone buttons on the row."""
-        self.select_requested.emit(self.scan_id, cell.stem)
+    def _on_cell_toggled(self, node_id: int) -> None:
+        """Click on a (toggleable) stage cell = flip its per-page disable.
+        Debug + trash are standalone buttons on the row."""
+        self.step_toggle_requested.emit(self.scan_id, int(node_id))
 
     def _on_row_debug_requested(self, leaf_node_id: int, stem: str) -> None:
         self.debug_requested.emit(int(leaf_node_id), stem)
@@ -637,18 +672,21 @@ class ScansTableView(QScrollArea):
 
     delete_requested = Signal(int)
     debug_requested = Signal(int, str)
-    select_requested = Signal(int, str)
+    step_toggle_requested = Signal(int, int)   # scan_id, node_id
     trash_requested = Signal(int, str, bool)
     # scan_id, target_index — same shape as `FlowContentWidget.card_dropped`.
     card_dropped = Signal(int, int)
 
     def __init__(self, *, get_snap_widgets, thumb_loader,
-                 ocr_state_provider=None, thumb_h: int = DEFAULT_THUMB_H,
+                 ocr_state_provider=None, cell_states_provider=None,
+                 thumb_h: int = DEFAULT_THUMB_H,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._get_snap_widgets = get_snap_widgets
         self._thumb_loader = thumb_loader
         self._ocr_state_provider = ocr_state_provider
+        # scan_id → {node_id: (toggleable, disabled)} for the stage strip.
+        self._cell_states_provider = cell_states_provider
         self._thumb_h = max(MIN_THUMB_H, min(MAX_THUMB_H, int(thumb_h)))
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -678,6 +716,14 @@ class ScansTableView(QScrollArea):
         except Exception:
             return {}
 
+    def _cell_states(self, sid: int) -> dict:
+        if self._cell_states_provider is None:
+            return {}
+        try:
+            return self._cell_states_provider(int(sid)) or {}
+        except Exception:
+            return {}
+
     def _make_block(self, sid: int, w, full_ocr: dict, bg: str) -> "_SnapBlock":
         branch_state: dict[str, str] = {}
         for (msid, bp), info in full_ocr.items():
@@ -693,6 +739,7 @@ class ScansTableView(QScrollArea):
             global_history=list(getattr(w, "global_history", []) or []),
             ocr_state=str(getattr(w, "_ocr_state", "none")),
             ocr_branch_state=branch_state,
+            cell_states=self._cell_states(sid),
             bg=bg,
             # Parent straight to the eventual host — a parentless QWidget
             # flashes as a bare top-level window on macOS between
@@ -701,7 +748,7 @@ class ScansTableView(QScrollArea):
         )
         block.delete_requested.connect(self.delete_requested)
         block.debug_requested.connect(self.debug_requested)
-        block.select_requested.connect(self.select_requested)
+        block.step_toggle_requested.connect(self.step_toggle_requested)
         block.trash_requested.connect(self.trash_requested)
         return block
 

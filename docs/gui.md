@@ -68,6 +68,28 @@ Projects are a single SQLite `<slug>.agl` file — there are no per-step output 
 - Refresh timer polls every 2s for files that appeared on disk without an `image_event` (defensive against missed events).
 - `restore_state(path, type)` is called on startup for every file that was already on disk.
 
+## Per-page processor disable
+
+Replaces the old exit-stage navigation (chevron step-back/forward, gallery
+star, table select-as-chosen — all removed). Each page-layout can individually
+**disable** a toggleable processor (linear COORDINATE/PIXEL_VALUE steps;
+PageDetector and other ROI/branch-emitting steps are locked). Toggling writes a
+`step_overrides` row and reruns that scan from raw (`set_step_disabled` →
+`_reprocess_snaps_callback`); see [storage.md](storage.md#per-page-processor-disable-step_overrides).
+
+The three views surface it differently, all via `MainWindow.cell_disable_states`
+(`{node_id: (toggleable, disabled)}`) + `MainWindow.toggle_step_disabled`:
+
+- **Table** (`ScansTableView`) — primary. Click a stage cell to toggle it;
+  disabled cells get a red strike.
+- **Grid** (`ScanItemWidget`) — keeps the chevrons (display nav only now). A
+  round overlay on the displayed stage shows its pipeline index (or `R` for
+  replay) — blue = active, red `✕` = disabled; click toggles. A 3px band at the
+  thumbnail's top is a mini-map of the layout's disabled steps (one red slot per
+  disabled stage), hidden when nothing is disabled.
+- **Gallery** (`ScansGalleryView`) — a toggle (replacing the star) on the
+  current stage; left/right still walks stages.
+
 ## Calibration buttons
 
 - **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `config/camera_params.json`. Restart capture to pick up the new calibration.

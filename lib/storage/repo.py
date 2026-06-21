@@ -5,6 +5,8 @@
 # Source-available under the PolyForm Shield License 1.0.0; any use except
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
+from __future__ import annotations
+
 import hashlib
 import json
 import sqlite3
@@ -366,59 +368,10 @@ class BranchRepo:
             "SELECT * FROM branches WHERE scan_id = ? ORDER BY branch_path ASC", (scan_id,)
         ).fetchall()
 
-    def step_back(self, branch_id: int) -> bool:
-        """Move chosen one step toward root. Refuses to cross a branch point with siblings."""
-        b = self.get(branch_id)
-        if b is None:
-            return False
-        nrepo = NodeRepo(self.conn)
-        cur_node = nrepo.get(b["chosen_node_id"])
-        if cur_node is None or cur_node["parent_id"] is None:
-            return False
-        parent = nrepo.get(cur_node["parent_id"])
-        if parent is None:
-            return False
-        # Refuse if parent has other children — that means moving up would land on a node
-        # whose siblings represent other branches; ambiguous to attribute output here.
-        if nrepo.siblings_count(cur_node["id"]) > 0:
-            return False
-        self.conn.execute(
-            "UPDATE branches SET chosen_node_id = ?, updated_at = ? WHERE id = ?",
-            (parent["id"], _now(), branch_id),
-        )
-        return True
-
-    def step_forward(self, branch_id: int) -> bool:
-        """Move chosen one step toward terminal along the original chain."""
-        b = self.get(branch_id)
-        if b is None or b["chosen_node_id"] == b["terminal_node_id"]:
-            return False
-        nrepo = NodeRepo(self.conn)
-        # Walk from terminal up until we hit the chosen — the node right above on this walk is next.
-        cur = nrepo.get(b["terminal_node_id"])
-        path = []
-        while cur is not None:
-            path.append(cur["id"])
-            if cur["id"] == b["chosen_node_id"]:
-                break
-            cur = nrepo.parent_of(cur["id"])
-        if cur is None or len(path) < 2:
-            return False
-        next_id = path[-2]  # one step closer to terminal
-        self.conn.execute(
-            "UPDATE branches SET chosen_node_id = ?, updated_at = ? WHERE id = ?",
-            (next_id, _now(), branch_id),
-        )
-        return True
-
-    def reset_to_leaf(self, branch_id: int) -> None:
-        b = self.get(branch_id)
-        if b is None:
-            return
-        self.conn.execute(
-            "UPDATE branches SET chosen_node_id = terminal_node_id, updated_at = ? WHERE id = ?",
-            (_now(), branch_id),
-        )
+    # NOTE: per-page exit-stage navigation (step_back / step_forward /
+    # reset_to_leaf) was removed with issue #68 — `chosen_node_id` now
+    # always tracks the rerun terminal. Output is shaped by per-page
+    # processor disable (`step_overrides`), not by moving the chosen node.
 
     def current_export_set(self) -> list[sqlite3.Row]:
         return self.conn.execute("""
@@ -433,6 +386,61 @@ class BranchRepo:
               AND b.trashed_at IS NULL
             ORDER BY s.idx ASC, b.branch_path ASC
         """).fetchall()
+
+
+class StepOverrideRepo:
+    """Per-page-layout processor disable.
+
+    A row `(scan_id, branch_path, step_idx)` with `disabled=1` means the
+    chain skips that pipeline step for that layout — `run_pipeline` emits a
+    passthrough node (same image, no `process()`, no replay stamp) instead.
+    `branch_path=""` is the pre-split trunk (applies to every layout);
+    "A"/"B" target one PageDetector layout. `step_idx` matches
+    `nodes.step_idx` (the output index the processor would occupy).
+
+    Enabling deletes the row; disabling upserts `disabled=1`. So a missing
+    row == enabled, and `map_for_scan` is the worker's skip set.
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def set(self, scan_id: int, branch_path: str, step_idx: int, disabled: bool) -> None:
+        if disabled:
+            self.conn.execute(
+                "INSERT INTO step_overrides (scan_id, branch_path, step_idx, disabled, created_at) "
+                "VALUES (?, ?, ?, 1, ?) "
+                "ON CONFLICT(scan_id, branch_path, step_idx) DO UPDATE SET disabled = 1",
+                (scan_id, branch_path, step_idx, _now()),
+            )
+        else:
+            self.conn.execute(
+                "DELETE FROM step_overrides "
+                "WHERE scan_id = ? AND branch_path = ? AND step_idx = ?",
+                (scan_id, branch_path, step_idx),
+            )
+
+    def is_disabled(self, scan_id: int, branch_path: str, step_idx: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM step_overrides "
+            "WHERE scan_id = ? AND branch_path = ? AND step_idx = ? AND disabled = 1",
+            (scan_id, branch_path, step_idx),
+        ).fetchone()
+        return row is not None
+
+    def map_for_scan(self, scan_id: int) -> set[tuple[str, int]]:
+        """The scan's skip set: {(branch_path, step_idx), …} where disabled."""
+        return {
+            (r["branch_path"], int(r["step_idx"]))
+            for r in self.conn.execute(
+                "SELECT branch_path, step_idx FROM step_overrides "
+                "WHERE scan_id = ? AND disabled = 1",
+                (scan_id,),
+            ).fetchall()
+        }
+
+    def clear_scan(self, scan_id: int) -> None:
+        self.conn.execute("DELETE FROM step_overrides WHERE scan_id = ?", (scan_id,))
 
 
 class OcrRepo:

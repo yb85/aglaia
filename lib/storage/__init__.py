@@ -8,7 +8,7 @@
 from lib.storage.db import open_db, ensure_schema
 from lib.storage.repo import (
     ProjectRepo, PipelineRepo, CalibrationRepo,
-    ImageRepo, ThumbRepo, ScanRepo, NodeRepo, BranchRepo, DebugRepo,
+    ImageRepo, ThumbRepo, ScanRepo, NodeRepo, BranchRepo, StepOverrideRepo, DebugRepo,
 )
 from lib.storage.persister import Persister
 

@@ -34,12 +34,12 @@ from PySide6.QtWidgets import (
 
 from lib.gui.colors import (
     COLOR_BG,
+    COLOR_ERROR,
     COLOR_FONT_DIM,
     COLOR_FONT_INVERSE,
     COLOR_FONT_MUTED,
     COLOR_FONT_ON_BUTTON,
     COLOR_FONT_PLACEHOLDER,
-    COLOR_MEDAL_GOLD,
     COLOR_OUTLINE_GHOST,
     COLOR_OUTLINE_STRONG,
     COLOR_OUTLINE_SUBTLE,
@@ -115,11 +115,10 @@ class ScansGalleryView(QWidget):
                  stage_resolver: StageResolver,
                  thumb_loader: ThumbLoader,
                  default_stage_provider: Optional[DefaultStageProvider] = None,
-                 branch_chosen_provider: Optional[BranchChosenProvider] = None,
-                 branch_chosen_writer: Optional[BranchChosenWriter] = None,
+                 cell_states_provider: Optional[Callable[[int], dict]] = None,
+                 step_toggle_writer: Optional[Callable[[int, int], None]] = None,
                  branch_trashed_provider: Optional[BranchTrashedProvider] = None,
                  branch_trashed_writer: Optional[BranchTrashedWriter] = None,
-                 selected_resolver: Optional[SelectedResolver] = None,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._scans_provider = scans_provider
@@ -127,14 +126,15 @@ class ScansGalleryView(QWidget):
         self._stage_resolver = stage_resolver
         self._thumb_loader = thumb_loader
         self._default_stage_provider = default_stage_provider
-        self._branch_chosen_provider = branch_chosen_provider
-        self._branch_chosen_writer = branch_chosen_writer
+        # scan_id → {node_id: (toggleable, disabled)} for the per-page
+        # processor-disable toggle (replaces the old chosen-stage star).
+        self._cell_states_provider = cell_states_provider
+        self._step_toggle_writer = step_toggle_writer
         self._branch_trashed_provider = branch_trashed_provider
         self._branch_trashed_writer = branch_trashed_writer
-        self._selected_resolver = selected_resolver
-        # When True, each cell shows the branch's CHOSEN stage (which may
-        # differ across branches). Stage axis is meaningless in this
-        # mode → left/right chevrons hidden.
+        # Vestigial: the old "show selected stage per page" mode is gone
+        # (chosen == terminal now). Kept False so dead guards stay valid.
+        self._selected_resolver = None
         self._show_selected: bool = False
 
         self._scans: list[tuple[int, str]] = []
@@ -304,14 +304,10 @@ class ScansGalleryView(QWidget):
         return self._scans[self._scan_idx][0]
 
     def set_show_selected(self, on: bool) -> None:
-        """Toggle 'show only the chosen stage per page' mode. Hides
-        the left/right stage chevrons since the stage axis no longer
-        applies."""
-        on = bool(on)
-        if on == self._show_selected:
-            return
-        self._show_selected = on
-        self._present()
+        """No-op. The old 'show selected stage per page' mode was removed
+        with exit-stage navigation (chosen == terminal now); kept as a
+        stub so any residual caller doesn't raise."""
+        return
 
     # ── internals ──────────────────────────────────────────────────
     def _on_trash_clicked(self, branch_label: str) -> None:
@@ -364,35 +360,18 @@ class ScansGalleryView(QWidget):
         shim = _CellClickFilter(widget)
         widget.installEventFilter(shim)
 
-    def _on_star_clicked(self, branch_label: str, node_id: Optional[int]) -> None:
-        """Star toggle: marks (scan, branch, node) as chosen. The DB
-        writer is per-branch — different branches can pick different
-        stages without interfering with each other."""
-        import sys
-        if self._branch_chosen_writer is None:
-            print("[gallery] star click ignored — no writer wired", file=sys.stderr)
-            return
-        if not self._scans:
-            print("[gallery] star click ignored — empty scan list", file=sys.stderr)
-            return
-        if node_id is None:
-            print(f"[gallery] star click ignored — no node_id for {branch_label!r}",
-                  file=sys.stderr)
+    def _on_disable_toggle_clicked(self, node_id: Optional[int]) -> None:
+        """Toggle this stage's per-page disable. The writer persists the
+        override and reruns the page; the host's broadcast triggers our
+        `reload()`, so we don't repaint here (the rerun changes the node
+        tree under us)."""
+        if self._step_toggle_writer is None or not self._scans or node_id is None:
             return
         scan_id = self._scans[self._scan_idx][0]
         try:
-            self._branch_chosen_writer(int(scan_id), str(branch_label), int(node_id))
-        except Exception as e:
-            print(f"[gallery] branch_chosen_writer raised: {e}", file=sys.stderr)
+            self._step_toggle_writer(int(scan_id), int(node_id))
+        except Exception:
             return
-        print(
-            f"[gallery] chosen written: scan={scan_id} branch={branch_label!r} "
-            f"node={node_id}", file=sys.stderr,
-        )
-        self.stage_changed.emit(int(scan_id), self._stages[self._stage_idx])
-        # Repaint stars — `branch_chosen_provider` is re-queried on every
-        # `_build_cell` call so the gold fill flips immediately.
-        self._present()
 
     def _on_thumb_ready_tick(self) -> None:
         """A batch of background thumbnails finished. Re-render the current
@@ -493,12 +472,8 @@ class ScansGalleryView(QWidget):
         self._empty_lbl.hide()
         scan_id, raw_stem = self._scans[self._scan_idx]
         stage = self._stages[self._stage_idx]
-        if self._show_selected and self._selected_resolver is not None:
-            items = self._build_selected_items(scan_id)
-            stage_label = "selected"
-        else:
-            items = self._cache_get(scan_id, stage)
-            stage_label = stage
+        items = self._cache_get(scan_id, stage)
+        stage_label = stage
         if not items:
             placeholder = QLabel(self.tr("(no node for stage '{stage}')").format(stage=stage_label))
             placeholder.setStyleSheet(f"color:{COLOR_FONT_PLACEHOLDER}; font-size:13px;")
@@ -508,15 +483,16 @@ class ScansGalleryView(QWidget):
             avail_w = max(200, self._host.width() - 2 * CHEVRON_SIZE - 80)
             avail_h = max(200, self._host.height() - 120)
             per_w = max(160, avail_w // max(1, len(items)))
+            states: dict = {}
+            if self._cell_states_provider is not None:
+                try:
+                    states = self._cell_states_provider(scan_id) or {}
+                except Exception:
+                    states = {}
             for (label, pix, node_id) in items:
-                is_chosen = False
-                if self._branch_chosen_provider is not None and node_id is not None:
-                    try:
-                        chosen_nid = self._branch_chosen_provider(scan_id, label)
-                        is_chosen = (chosen_nid is not None
-                                     and int(chosen_nid) == int(node_id))
-                    except Exception:
-                        is_chosen = False
+                toggleable, is_disabled = (
+                    states.get(int(node_id), (False, False))
+                    if node_id is not None else (False, False))
                 is_trashed = False
                 if self._branch_trashed_provider is not None:
                     try:
@@ -527,31 +503,22 @@ class ScansGalleryView(QWidget):
                         is_trashed = False
                 cell = self._build_cell(label, pix, per_w, avail_h,
                                           node_id=node_id,
-                                          is_chosen=is_chosen,
+                                          is_disabled=bool(is_disabled),
+                                          toggleable=bool(toggleable),
                                           is_trashed=is_trashed)
                 self._strip_l.addWidget(cell)
         n_scans = len(self._scans)
         n_stages = len(self._stages)
-        if self._show_selected:
-            self._caption.setText(self.tr(
-                "#{scan}  {stem}   ·   "
-                "scan {idx} / {total}   ·   "
-                "showing selected stage per page"
-            ).format(
-                scan=scan_id, stem=raw_stem,
-                idx=self._scan_idx + 1, total=n_scans,
-            ))
-        else:
-            self._caption.setText(self.tr(
-                "#{scan}  {stem}   ·   "
-                "scan {scan_idx} / {snap_total}   ·   "
-                "stage '{stage}'  ({stage_idx} / {stage_total})"
-            ).format(
-                scan=scan_id, stem=raw_stem,
-                scan_idx=self._scan_idx + 1, snap_total=n_scans,
-                stage=stage,
-                stage_idx=self._stage_idx + 1, stage_total=n_stages,
-            ))
+        self._caption.setText(self.tr(
+            "#{scan}  {stem}   ·   "
+            "scan {scan_idx} / {snap_total}   ·   "
+            "stage '{stage}'  ({stage_idx} / {stage_total})"
+        ).format(
+            scan=scan_id, stem=raw_stem,
+            scan_idx=self._scan_idx + 1, snap_total=n_scans,
+            stage=stage,
+            stage_idx=self._stage_idx + 1, stage_total=n_stages,
+        ))
         # Warm adjacent.
         for off in (-1, 1):
             j = self._stage_idx + off
@@ -568,7 +535,8 @@ class ScansGalleryView(QWidget):
     def _build_cell(self, label: str, pix: Optional[QPixmap],
                     per_w: int, avail_h: int, *,
                     node_id: Optional[int] = None,
-                    is_chosen: bool = False,
+                    is_disabled: bool = False,
+                    toggleable: bool = False,
                     is_trashed: bool = False) -> QWidget:
         from lib.gui.theme import lucide_pixmap as _lp
         host = QWidget()
@@ -618,41 +586,40 @@ class ScansGalleryView(QWidget):
             # host widget instead; child buttons (star, trash) still
             # eat their own clicks first via standard child hit-test.
             self._install_cell_click(img_host, int(node_id), label)
-        # Star button — rating-style, SOLID fill. Gray when not chosen,
-        # gold when chosen. No backdrop / circle / outline — flat fill.
-        # SVG `stroke=` doesn't accept rgba() so we keep plain hex.
-        star_size = 28
-        star_color = COLOR_MEDAL_GOLD if is_chosen else COLOR_FONT_PLACEHOLDER
-        spix = _lp("star-filled", color=star_color, size=star_size)
-        spix.setDevicePixelRatio(2.0)
-        star = QToolButton(img_host)
-        star.setIcon(QPixmap(spix))
-        star.setIconSize(QSize(star_size, star_size))
-        star.setFixedSize(star_size + 4, star_size + 4)
-        star.setCursor(Qt.CursorShape.PointingHandCursor)
-        star.setAutoRaise(False)
-        star.setToolTip(
-            self.tr("Chosen output for this page") if is_chosen
-            else self.tr("Click to mark this stage as the chosen output for this page")
-        )
-        star.setStyleSheet(
-            "QToolButton{background:transparent; border:none; padding:0; margin:0;}"
-            f"QToolButton:hover{{background:{COLOR_OUTLINE_GHOST}; border-radius:4px;}}"
-        )
-        # Semi-opaque so the underlying image breathes through but the
-        # selected-gold still pops vs. the gray unselected variant.
-        from PySide6.QtWidgets import QGraphicsOpacityEffect
-        seff = QGraphicsOpacityEffect(star)
-        seff.setOpacity(0.85 if is_chosen else 0.55)
-        star.setGraphicsEffect(seff)
-        star.move(6, 6)
-        star.raise_()
-        if node_id is not None:
-            star.clicked.connect(
-                lambda _, lbl=label, nid=node_id: self._on_star_clicked(lbl, nid)
+        # Per-page disable toggle — top-left. Only shown for toggleable
+        # steps (linear COORDINATE/PIXEL_VALUE processors); a red "ban"
+        # glyph means this step is currently skipped for this page, a
+        # neutral "circle" means active. Click flips it (reruns the page).
+        if toggleable and node_id is not None:
+            tog_size = 28
+            tog_glyph = "ban" if is_disabled else "circle"
+            tog_color = COLOR_ERROR if is_disabled else COLOR_FONT_PLACEHOLDER
+            gpix = _lp(tog_glyph, color=tog_color, size=tog_size)
+            gpix.setDevicePixelRatio(2.0)
+            tog = QToolButton(img_host)
+            tog.setIcon(QPixmap(gpix))
+            tog.setIconSize(QSize(tog_size, tog_size))
+            tog.setFixedSize(tog_size + 4, tog_size + 4)
+            tog.setCursor(Qt.CursorShape.PointingHandCursor)
+            tog.setAutoRaise(False)
+            tog.setToolTip(
+                self.tr("Step disabled for this page — click to re-enable")
+                if is_disabled else
+                self.tr("Click to disable this step for this page")
             )
-        else:
-            star.setEnabled(False)
+            tog.setStyleSheet(
+                "QToolButton{background:transparent; border:none; padding:0; margin:0;}"
+                f"QToolButton:hover{{background:{COLOR_OUTLINE_GHOST}; border-radius:4px;}}"
+            )
+            from PySide6.QtWidgets import QGraphicsOpacityEffect
+            seff = QGraphicsOpacityEffect(tog)
+            seff.setOpacity(0.9 if is_disabled else 0.55)
+            tog.setGraphicsEffect(seff)
+            tog.move(6, 6)
+            tog.raise_()
+            tog.clicked.connect(
+                lambda _, nid=node_id: self._on_disable_toggle_clicked(nid)
+            )
 
         # Layout hide/show toggle — flat icon, bottom-left. Shows the
         # CURRENT state (eye-off when hidden, eye when visible). Trash
@@ -706,9 +673,28 @@ class ScansGalleryView(QWidget):
             overlay_lbl.move((cell_w - overlay_size) // 2,
                               (cell_h - overlay_size) // 2)
             overlay_lbl.raise_()
-            # Star stays interactive on top — re-raise after overlay.
-            star.raise_()
+            # Toggle/eye stay interactive on top — re-raise after overlay.
             trash_btn.raise_()
+
+        if is_disabled and not is_trashed:
+            # Faint red wash + big "ban" glyph so a disabled stage reads as
+            # "skipped" without hiding the (passthrough) image underneath.
+            from PySide6.QtWidgets import QGraphicsOpacityEffect
+            deff = QGraphicsOpacityEffect(img_lbl)
+            deff.setOpacity(0.55)
+            img_lbl.setGraphicsEffect(deff)
+            ban_size = min(96, max(48, int(cell_h * 0.35)))
+            bpix = _lp("ban", color=COLOR_ERROR, size=ban_size)
+            bpix.setDevicePixelRatio(2.0)
+            ban_lbl = QLabel(img_host)
+            ban_lbl.setPixmap(QPixmap(bpix))
+            ban_lbl.setFixedSize(ban_size, ban_size)
+            ban_lbl.setStyleSheet("background:transparent; border:none;")
+            ban_lbl.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            ban_lbl.move((cell_w - ban_size) // 2, (cell_h - ban_size) // 2)
+            ban_lbl.raise_()
 
         v.addWidget(img_host, 1, Qt.AlignmentFlag.AlignCenter)
         if label:
@@ -722,17 +708,11 @@ class ScansGalleryView(QWidget):
         # Up/down always control scan navigation.
         self._btn_up.setEnabled(self._scan_idx > 0)
         self._btn_down.setEnabled(self._scan_idx + 1 < len(self._scans))
-        # Always visible — when show-selected mode is on the stage axis
-        # is meaningless, so they stay disabled (= dimmed) instead of
-        # disappearing (avoids the layout-shift on every toggle).
+        # Left/right walk the stage axis.
         self._btn_left.show()
         self._btn_right.show()
-        if self._show_selected:
-            self._btn_left.setEnabled(False)
-            self._btn_right.setEnabled(False)
-        else:
-            self._btn_left.setEnabled(self._stage_idx > 0)
-            self._btn_right.setEnabled(self._stage_idx + 1 < len(self._stages))
+        self._btn_left.setEnabled(self._stage_idx > 0)
+        self._btn_right.setEnabled(self._stage_idx + 1 < len(self._stages))
         # Visible dim when disabled — QSS only tints the background; we
         # want the icon to fade too. One reusable opacity effect per btn.
         for btn in (self._btn_up, self._btn_down,
@@ -747,36 +727,6 @@ class ScansGalleryView(QWidget):
             eff = QGraphicsOpacityEffect(btn)
             btn.setGraphicsEffect(eff)
         eff.setOpacity(0.25 if dim else 1.0)
-
-    def _build_selected_items(self, scan_id: int
-                                ) -> list[tuple[str, Optional[QPixmap], Optional[int]]]:
-        """For show-selected mode: pull one (label, pix, node_id) per
-        branch using the chosen_node_id resolver. Bypasses the
-        stage cache because the per-cell stages may differ across
-        branches and aren't keyed by stage."""
-        if self._selected_resolver is None:
-            return []
-        try:
-            items = self._selected_resolver(scan_id) or []
-        except Exception:
-            return []
-        out: list[tuple[str, Optional[QPixmap], Optional[int]]] = []
-        for tup in items:
-            label = tup[0]
-            image_id = tup[1] if len(tup) > 1 else None
-            node_id = tup[2] if len(tup) > 2 else None
-            pix: Optional[QPixmap] = None
-            if image_id is not None:
-                try:
-                    blob = self._thumb_loader(int(image_id), GALLERY_THUMB_PX)
-                except Exception:
-                    blob = None
-                if blob:
-                    img = QImage.fromData(blob)
-                    if not img.isNull():
-                        pix = QPixmap.fromImage(img)
-            out.append((label, pix, node_id))
-        return out
 
     def _position_chevrons(self) -> None:
         """Float chevrons absolutely so they sit ABOVE the strip but

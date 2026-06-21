@@ -11,7 +11,7 @@ All processors live in `lib/processors/`. Each has:
 |---|---|---|
 | `SUMMARY: str` | yes (UI-exposed) | One-liner for the add-step menu. |
 | `OPTIONS: dict[str, ParamSpec]` | yes (UI-exposed) | Option specs; the registry's discovery gate. |
-| `REPLAY_TRAIT: ReplayTrait` | for replayable steps | `COORDINATE` / `PIXEL_VALUE` / `ROI` — drives the replay engine (see [pipeline.md](pipeline.md) → Replay pass). |
+| `REPLAY_TRAIT: ReplayTrait` | for replayable steps | `COORDINATE` / `PIXEL_VALUE` / `ROI` — drives the replay engine (see [pipeline.md](pipeline.md) → Replay pass). Also gates **per-page disable**: only COORDINATE/PIXEL_VALUE steps are toggleable; ROI / branch-emitting steps (e.g. PageDetector) are locked because skipping them would restructure the branch tree. A disabled step is bypassed with a passthrough node (see [storage.md](storage.md#per-page-processor-disable-step_overrides)). |
 | `process(buffer) -> ImageBuffer \| list[ImageBuffer] \| None` | yes | The transform. Mutate `buffer` and return it; return a list (or set `buffer.children`) to branch; return `None` to stop the branch. |
 | `replay(buffer)` | no | End-of-chain reconstruction. Default re-runs `process()`; geometric processors stamp `replay_kind`/`replay_params` so the engine fuses their warp instead. |
 | `OPTION_CLASS` | no | Explicit options dataclass; default is synthesised from `OPTIONS`. |

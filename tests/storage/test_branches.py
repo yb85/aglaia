@@ -67,59 +67,11 @@ def test_branch_upsert_initial(seeded_db):
     assert b.get(bid_b)["chosen_node_id"] == ids["B2"]
 
 
-def test_step_back_does_not_cross_branch_point(seeded_db):
-    db, pid = seeded_db
-    sid, ids = _build_split_tree(db, pid)
-    b = BranchRepo(db)
-    bid = b.upsert(sid, "A", terminal_node_id=ids["A2"])
-    # Step back A2 → A1 (linear, OK)
-    assert b.step_back(bid) is True
-    assert b.get(bid)["chosen_node_id"] == ids["A1"]
-    # A1 → A0 (linear, OK)
-    assert b.step_back(bid) is True
-    assert b.get(bid)["chosen_node_id"] == ids["A0"]
-    # A0's parent is `split` (branch point with sibling B0). Refuse.
-    assert b.step_back(bid) is False
-    assert b.get(bid)["chosen_node_id"] == ids["A0"]
-
-
-def test_step_back_branch_A_does_not_affect_branch_B(seeded_db):
-    db, pid = seeded_db
-    sid, ids = _build_split_tree(db, pid)
-    b = BranchRepo(db)
-    a = b.upsert(sid, "A", terminal_node_id=ids["A2"])
-    b_id = b.upsert(sid, "B", terminal_node_id=ids["B2"])
-    # Step A back twice
-    b.step_back(a)
-    b.step_back(a)
-    assert b.get(a)["chosen_node_id"] == ids["A0"]
-    # B unaffected
-    assert b.get(b_id)["chosen_node_id"] == ids["B2"]
-
-
-def test_step_forward(seeded_db):
-    db, pid = seeded_db
-    sid, ids = _build_split_tree(db, pid)
-    b = BranchRepo(db)
-    bid = b.upsert(sid, "A", terminal_node_id=ids["A2"])
-    b.step_back(bid); b.step_back(bid)
-    assert b.get(bid)["chosen_node_id"] == ids["A0"]
-    assert b.step_forward(bid) is True
-    assert b.get(bid)["chosen_node_id"] == ids["A1"]
-    assert b.step_forward(bid) is True
-    assert b.get(bid)["chosen_node_id"] == ids["A2"]
-    # At terminal — no further forward.
-    assert b.step_forward(bid) is False
-
-
-def test_reset_to_leaf(seeded_db):
-    db, pid = seeded_db
-    sid, ids = _build_split_tree(db, pid)
-    b = BranchRepo(db)
-    bid = b.upsert(sid, "A", terminal_node_id=ids["A2"])
-    b.step_back(bid)
-    b.reset_to_leaf(bid)
-    assert b.get(bid)["chosen_node_id"] == ids["A2"]
+# NOTE: exit-stage navigation (step_back / step_forward / reset_to_leaf)
+# was removed with issue #68 — `chosen_node_id` now always tracks the
+# rerun terminal. Per-page output is shaped by `step_overrides` (see
+# tests/test_step_overrides.py), not by moving the chosen node. The old
+# step_back/forward/reset tests were deleted with the feature.
 
 
 def test_current_export_set(seeded_db):
