@@ -1,0 +1,42 @@
+---
+// Override of Starlight's SiteTitle: the landing-page brand —
+// the Aglaïa wordmark logo + a light-blue "BOOKSCANNER" tag.
+import config from 'virtual:starlight/user-config';
+import logo from '../assets/aglaia-dark.png';
+const href = import.meta.env.BASE_URL;
+---
+<a {href} class="site-title sl-flex" aria-label={config.title}>
+  <img src={logo.src} alt={config.title} />
+  <span class="brand-tag">BOOKSCANNER</span>
+</a>
+
+<style>
+  .site-title {
+    align-items: flex-end;
+    gap: 7px;
+    text-decoration: none;
+    font: inherit;
+    color: var(--sl-color-text-accent);
+    line-height: 1;
+  }
+  .site-title img {
+    height: 2rem;
+    width: auto;
+    display: block;
+  }
+  /* Bottom-align the row, then lift the all-caps tag just enough to sit
+     on the wordmark's baseline (png carries a little bottom padding). */
+  .brand-tag {
+    color: #8fd0ff;
+    font-weight: 300;
+    font-size: 1.1rem;           /* caps ≈ the wordmark's x-height */
+    letter-spacing: 0.18em;
+    line-height: 1;
+    transform: translateY(-0.39rem);  /* baseline measured onto the wordmark's */
+    white-space: nowrap;
+  }
+  /* Logo only on narrow viewports — the masthead gets cramped. */
+  @media (max-width: 50rem) {
+    .brand-tag { display: none; }
+  }
+</style>
