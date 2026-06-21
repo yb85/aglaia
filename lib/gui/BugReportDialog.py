@@ -42,13 +42,13 @@ _SECRET_HINT = ("key", "token", "secret", "password", "api")
 
 RELEASES_URL = GIT_REPO + "/releases/latest"
 
+# The app's own update endpoint (a Cloudflare Pages Function that proxies the
+# latest GitHub release). Probing it with our telemetry User-Agent lets the
+# maintainer see the version/OS/arch spread of the install base — nothing more.
+UPDATE_ENDPOINT = "https://aglaia.bibli.cc/api/latest"
+
 _UPDATE_TTL_S = 6 * 3600      # re-check at most every 6 h
 _update_cache: dict = {"at": -1e18, "ok": True}
-
-
-def _repo_slug() -> str:
-    """``owner/repo`` parsed from GIT_REPO (``https://github.com/owner/repo``)."""
-    return GIT_REPO.rstrip("/").split("github.com/", 1)[-1]
 
 
 def _ver_tuple(s: str) -> tuple[int, ...]:
@@ -57,17 +57,38 @@ def _ver_tuple(s: str) -> tuple[int, ...]:
     return tuple(nums + [0] * (3 - len(nums)))
 
 
+def telemetry_user_agent() -> str:
+    """Privacy-respectful UA: app version + OS + arch only, no identifier.
+
+    Example: ``Aglaia/0.1.0 (macOS 14.5; arm64)``. This is the *entire*
+    telemetry payload — the update endpoint parses it for aggregate
+    version/platform stats; there is no cookie, account, or device id."""
+    import platform
+    sysname = platform.system()
+    os_name = {"Darwin": "macOS", "Windows": "Windows",
+               "Linux": "Linux"}.get(sysname, sysname or "unknown")
+    if sysname == "Darwin":
+        os_ver = platform.mac_ver()[0] or platform.release()
+    elif sysname == "Windows":
+        os_ver = platform.release()
+    else:
+        os_ver = platform.release()
+    arch = platform.machine() or "unknown"
+    return f"Aglaia/{APP_VERSION} ({os_name} {os_ver}; {arch})"
+
+
 def latest_release_version(timeout: float = 3.0) -> Optional[str]:
-    """Latest published GitHub release tag (leading 'v' stripped), or None."""
+    """Latest version from the app's update endpoint (leading 'v' stripped),
+    or None. The request carries `telemetry_user_agent()`."""
     import json
     import urllib.request
-    url = f"https://api.github.com/repos/{_repo_slug()}/releases/latest"
     req = urllib.request.Request(
-        url, headers={"Accept": "application/vnd.github+json",
-                      "User-Agent": "aglaia-update-check"})
+        UPDATE_ENDPOINT,
+        headers={"Accept": "application/json",
+                 "User-Agent": telemetry_user_agent()})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.load(resp)
-    tag = (data.get("tag_name") or "").strip().lstrip("vV")
+    tag = (data.get("version") or "").strip().lstrip("vV")
     return tag or None
 
 

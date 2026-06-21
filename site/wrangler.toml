@@ -1,0 +1,13 @@
+# Cloudflare Pages config for the aglaia.bibli.cc site.
+#
+# `pages_build_output_dir` marks this as a Pages project and points at the
+# Astro build output; `wrangler pages deploy` (run from site/) uploads it and
+# compiles the sibling `functions/` directory. The Analytics Engine binding
+# `AE` is what functions/api/latest.js writes update-probe telemetry to.
+name = "aglaia"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-06-01"
+
+[[analytics_engine_datasets]]
+binding = "AE"
+dataset = "aglaia_updates"

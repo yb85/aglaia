@@ -45,3 +45,4 @@ vendor/llama-server/
 # Compiled translation binaries — regenerated from .ts via scripts/i18n_compile.sh
 lib/i18n/qm/*.qm
 spike_jbig2/target/
+.cfrc

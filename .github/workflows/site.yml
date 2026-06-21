@@ -47,4 +47,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy site/dist --project-name=aglaia --branch=main
+          # Run from site/ so wrangler reads site/wrangler.toml
+          # (pages_build_output_dir = dist) and compiles site/functions/.
+          workingDirectory: site
+          command: pages deploy --project-name=aglaia --branch=main
