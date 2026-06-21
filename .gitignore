@@ -46,3 +46,9 @@ vendor/llama-server/
 lib/i18n/qm/*.qm
 spike_jbig2/target/
 .cfrc
+
+# Private dev overlay (aglaia-dev) — tooling lives in the private repo
+aglaia-dev/
+/.claude
+/.agents
+/CLAUDE.md
