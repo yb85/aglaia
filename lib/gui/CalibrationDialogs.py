@@ -134,7 +134,6 @@ class DpiCalibrationDialog(QDialog):
     DETECT_MS = 400          # card-detect tick (~2.5 Hz)
     STEADY_TICKS = 3         # ~1.2 s of stable detection → auto-capture
     STEADY_CV = 0.05         # max coeff. of variation for "stable" DPI
-    MIN_LONG_FRAC = 0.25     # card long side must fill ≥ this of frame width
     MAX_PERSP_RATIO = 1.25   # opposite-side length ratio above this = oblique
 
     def __init__(self, webcam_thread, *, id1_long_mm: float,
@@ -384,20 +383,20 @@ class DpiCalibrationDialog(QDialog):
     def _assess_quad(self, quad: np.ndarray) -> tuple[bool, str]:
         """Judge whether the detected card quad gives a reliable measure.
 
-        Returns (ok, hint). Flags a card that is too small in frame (DPI from
-        few pixels is noisy) or too oblique (strong perspective biases the
-        long-edge length the DPI is derived from)."""
+        Returns (ok, hint). Flags only an oblique/tilted card (strong
+        perspective biases the long-edge length the DPI is derived from) or a
+        mis-detected outline. We deliberately do NOT flag a "small" card: the
+        whole point is to measure DPI at the SCANNING distance, where a
+        credit card is naturally small in frame — telling the user to move it
+        closer would measure the wrong DPI. Noise from a small card is caught
+        by the stability gate (`_dpi_is_stable`) instead."""
         from lib.workers.CreditCardDPI import ID1_ASPECT
         if self._live_frame is None or quad is None or len(quad) != 4:
             return False, self.tr("Looking for a card…")
-        fw = float(self._live_frame.shape[1]) or 1.0
         q = np.asarray(quad, dtype=np.float64)
         # Side lengths around the quad (already corner-ordered by the detector).
         sides = [float(np.linalg.norm(q[(i + 1) % 4] - q[i])) for i in range(4)]
         long_side = max(sides)
-        if long_side < self.MIN_LONG_FRAC * fw:
-            return False, self.tr(
-                "Card too small — move it closer so it fills more of the frame.")
         # Perspective: opposite sides should match for a square-on card.
         top, right, bottom, left = sides
         persp = max(top / max(bottom, 1e-6), bottom / max(top, 1e-6),
