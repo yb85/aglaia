@@ -462,6 +462,32 @@ class PipelineProgressBar(QWidget):
             self._done_t = time.monotonic()
         self.update()
 
+    def is_finished(self) -> bool:
+        """True once the bar has reached (or been snapped to) 100 %."""
+        return (self._imported > 0
+                and len(self._done_snaps) >= self._imported
+                and self._done_t is not None)
+
+    def force_complete(self) -> None:
+        """Snap the bar to finished. Called when the pipeline has drained while
+        the event-counted ``done`` is still below ``total`` — a desync that
+        would otherwise leave the bar stuck at e.g. 309/311 forever even though
+        no work remains (partial-open edge cases, work added/skipped mid-run, a
+        lost branch_ready event). An idle chain means whatever's on disk is the
+        final state, so reconcile the label to 100 %."""
+        if self._imported <= 0:
+            return
+        pad = self._imported - len(self._done_snaps)
+        if pad > 0:
+            # Sentinels well clear of real scan_ids (positive) and mark_tick's
+            # small negatives, so dedup/ratio keep working.
+            base = -1_000_000
+            for k in range(pad):
+                self._done_snaps.add(base - k)
+        if self._done_t is None:
+            self._done_t = time.monotonic()
+        self.update()
+
     def _stamp_start_if_needed(self):
         if self._start_t is None:
             self._start_t = time.monotonic()

@@ -427,6 +427,27 @@ class IntegratedProcessingChain:
             "parent_stem": parent_stem,
         }))
 
+    def is_idle(self) -> bool:
+        """True when nothing is in flight and both queues are drained.
+
+        Best-effort: ``multiprocessing.Queue.empty()`` is only approximate, so
+        callers should debounce across a few checks before treating the
+        pipeline as finished. ``_inflight`` (a Manager dict the workers update
+        as they pick up / finish items) is the authoritative "a worker is busy"
+        signal; the queue checks catch work that's queued but not yet picked up."""
+        try:
+            if len(self._inflight) > 0:
+                return False
+            iq = self.input_queue
+            if iq is not None and not iq.empty():
+                return False
+            rq = self.routed_queue
+            if rq is not None and not rq.empty():
+                return False
+            return True
+        except Exception:
+            return False
+
     def get_input_queue(self):
         return self.input_queue
 

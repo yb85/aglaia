@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
                  force_reprocess_callback=None,
                  reprocess_scans_callback=None,
                  reprocess_branch_callback=None,
+                 pipeline_idle_callback=None,
                  stop_pipeline_callback=None):
         super().__init__()
         # Calculate pipeline length for progress indication
@@ -283,6 +284,9 @@ class MainWindow(QMainWindow):
         self._force_reprocess_callback = force_reprocess_callback
         self._reprocess_snaps_callback = reprocess_scans_callback
         self._reprocess_branch_callback = reprocess_branch_callback
+        self._pipeline_idle_callback = pipeline_idle_callback
+        # Consecutive idle ticks before snapping a stuck progress bar to 100%.
+        self._progress_idle_ticks = 0
         self._stop_pipeline_callback = stop_pipeline_callback
         # Maps scan_id -> ScanItemWidget
         self.scan_widgets_by_scan: dict[int, ScanItemWidget] = {}
@@ -642,6 +646,14 @@ class MainWindow(QMainWindow):
             self._on_status_branch_ready
         )
         self.monitor_thread.start()
+
+        # Self-heal a progress bar stuck below 100% (e.g. 309/311): once the
+        # chain has been idle for a few ticks, no more branch_ready events are
+        # coming, so reconcile the bar to finished. See _reconcile_progress.
+        self._progress_idle_timer = QTimer(self)
+        self._progress_idle_timer.setInterval(2000)
+        self._progress_idle_timer.timeout.connect(self._reconcile_progress_if_idle)
+        self._progress_idle_timer.start()
 
         # Voice control. Auto-start when the user passed --voice-control;
         # otherwise stays inactive but can be flipped on by clicking the
@@ -2826,6 +2838,32 @@ class MainWindow(QMainWindow):
         sid = _payload.get("scan_id") if isinstance(_payload, dict) else None
         self.status_bar_widget.progress.note_imported(sid)
         self._update_ocr_frame_state()
+
+    def _reconcile_progress_if_idle(self):
+        """Snap a stuck progress bar to 100% once the chain has gone idle.
+
+        `done`/`total` are independent event counters that can permanently
+        desync (a scan completes on disk but its branch_ready never reaches the
+        bar — partial-open, mid-run re-enable, a dropped event). Polling the
+        chain's idle state and requiring a few consecutive idle ticks (so a
+        slow single stage doesn't trip it) lets us reconcile without chasing
+        every off-by-one cause."""
+        bar = getattr(self.status_bar_widget, "progress", None)
+        cb = self._pipeline_idle_callback
+        if bar is None or cb is None or bar.is_finished():
+            self._progress_idle_ticks = 0
+            return
+        try:
+            idle = bool(cb())
+        except Exception:
+            idle = False
+        if not idle:
+            self._progress_idle_ticks = 0
+            return
+        self._progress_idle_ticks += 1
+        if self._progress_idle_ticks >= 3:   # ~6 s of sustained idle
+            bar.force_complete()
+            self._progress_idle_ticks = 0
 
     def _on_status_branch_ready(self, payload: dict):
         scan_id = payload.get("scan_id")

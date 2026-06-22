@@ -523,6 +523,15 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         _threading.Thread(target=_worker, daemon=True,
                           name="ReprocessBranch").start()
 
+    def is_pipeline_idle_callback() -> bool:
+        """True when the current chain has no work in flight or queued — lets
+        the GUI reconcile a progress bar stuck below 100%."""
+        ch = state.get("chain")
+        try:
+            return ch.is_idle() if ch is not None else True
+        except Exception:
+            return False
+
     def stop_pipeline_callback() -> int:
         """Hard-stop the current chain + spin up a fresh, idle one.
         Returns the count of items discarded across the queues."""
@@ -555,6 +564,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         force_reprocess_callback=force_reprocess_callback,
         reprocess_scans_callback=reprocess_scans_callback,
         reprocess_branch_callback=reprocess_branch_callback,
+        pipeline_idle_callback=is_pipeline_idle_callback,
         stop_pipeline_callback=stop_pipeline_callback,
     )
     window.show()
