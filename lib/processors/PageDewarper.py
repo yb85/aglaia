@@ -380,6 +380,12 @@ class PageDewarper(AbstractImageProcessor):
     SUMMARY = "Cubic-sheet dewarp via page-dewarp + JAX."
     REPLAY_TRAIT = ReplayTrait.COORDINATE  # nonlinear sheet remap
     OPTION_CLASS = DewarpOption
+    PROVIDES_META = {
+        "char_h_frac": "median glyph height as a fraction of page height "
+                       "(dimensionless text scale; absent if < 30 chars found)",
+        "roi": "page quad polygon [[x,y],...] in output coords",
+        "success": "bool — whether the dewarp remap succeeded",
+    }
     _ESSENTIAL_PARAMS = ("sheet_model", "backend", "focal_length", "twist")
     # jax.clear_caches() cadence: per-process counter, flush every N
     # dewarps. Per-image clears defeat the padded fixed-shape compile
@@ -882,6 +888,9 @@ class PageDewarper(AbstractImageProcessor):
         text_mask, h_med = _text_mask_dpi(small, pagemask, analysis_dpi,
                                           self.line_join_mm, is_bw=is_bw,
                                           kernel_char_mult=self.kernel_char_mult)
+        # Text scale relative to the analysis image (dimensionless), stamped
+        # into the output meta as "char_h_frac" for downstream steps.
+        char_h_frac = (h_med / float(small.shape[0])) if h_med > 0 else 0.0
 
         # Tie span-filter bounds to h_med (DPI fallback if char-scale unknown):
         # library defaults drop spans on warped lines or wide inter-word gaps.
@@ -1438,6 +1447,8 @@ class PageDewarper(AbstractImageProcessor):
             img_buf.type = ImageType.COLOR
              
         img_buf.meta["success"] = success
+        if char_h_frac > 0:
+            img_buf.meta["char_h_frac"] = char_h_frac
         # Replay params: cubic-sheet remap on the source buffer. The
         # replay engine rebuilds the grid from `params` + `page_dims`
         # against the source image shape and applies a single warp.

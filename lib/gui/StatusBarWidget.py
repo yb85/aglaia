@@ -131,9 +131,9 @@ def _kill_cap_mb() -> float:
         return 3072.0
 
 
-# Per-worker "pressure" scale for the worst-worker bar: 100% = 600 MB. A
+# Per-worker "pressure" scale for the worst-worker bar: 100% = 1024 MB. A
 # tight scale so normal worker RSS is visible (the kill cap is much higher).
-_WORKER_PRESSURE_CAP_MB = 600.0
+_WORKER_PRESSURE_CAP_MB = 1024.0
 
 
 def _lerp_color(t: float) -> QColor:

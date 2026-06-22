@@ -182,6 +182,17 @@ class _VoiceSplitButton(QFrame):
         )
 
 
+class _ClickableLabel(QLabel):
+    """A QLabel that emits ``clicked`` on a left mouse release — used for the
+    DPI readout so the user can click it to set the value manually."""
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, ev) -> None:  # noqa: N802 (Qt override)
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(ev)
+
+
 class CaptureTab(QWidget):
     """Container for capture-mode controls. Public attrs only — wiring
     is done by MainWindow so the chain logic stays in one place."""
@@ -249,11 +260,13 @@ class CaptureTab(QWidget):
         # ── Current DPI readout ─────────────────────────────────────
         # Always-visible scan resolution at the live zoom. MainWindow
         # refreshes it on calibration + zoom changes (`set_dpi`).
-        self.dpi_label = QLabel(self.tr("DPI: —"))
+        self.dpi_label = _ClickableLabel(self.tr("DPI: —"))
         self.dpi_label.setObjectName("DpiReadout")
+        self.dpi_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dpi_label.setToolTip(
             self.tr("Effective scan resolution at the current zoom. "
-                    "Calibrate with a credit-card-sized object."))
+                    "Click to set it manually, or calibrate with a "
+                    "credit-card-sized object."))
         outer.addWidget(self.dpi_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # ── Deactivate camera ───────────────────────────────────────
@@ -434,11 +447,17 @@ class CaptureTab(QWidget):
         self.preview_label.clear()
         self.preview_label.setText(self.tr("No camera"))
 
-    def set_dpi(self, dpi: float, calibrated: bool) -> None:
+    def set_dpi(self, dpi: float, calibrated: bool, manual: bool = False) -> None:
         """Update the DPI readout. ``calibrated`` distinguishes a measured
-        value from the uncalibrated default (shown dimmer + flagged)."""
+        value from the uncalibrated default (shown dimmer + flagged);
+        ``manual`` flags a user-typed value (shown bold like calibrated, but
+        tagged ``(manual)`` since no camera calibration backs it)."""
         if calibrated:
             self.dpi_label.setText(self.tr("DPI: {dpi:.0f}").format(dpi=dpi))
+            self.dpi_label.setStyleSheet(f"color: {COLOR_FONT_PRIMARY}; font-weight: 600;")
+        elif manual:
+            self.dpi_label.setText(
+                self.tr("DPI: {dpi:.0f} (manual)").format(dpi=dpi))
             self.dpi_label.setStyleSheet(f"color: {COLOR_FONT_PRIMARY}; font-weight: 600;")
         else:
             self.dpi_label.setText(

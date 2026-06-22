@@ -141,6 +141,16 @@ class AbstractImageProcessor(ABC):
     REGISTRY_NAME: ClassVar[Optional[str]] = None           # registry key; default = class name
     OPTION_CLASS: ClassVar[Optional[type]] = None           # options dataclass; default = synthesised from OPTIONS
 
+    # OPTIONAL declaration — the metadata keys this processor STAMPS into
+    # the output buffer's `meta` dict, beyond the `replay_kind` /
+    # `replay_params` plumbing the replay engine reads. Maps key → one-line
+    # meaning. Purely documentary: it lets a downstream processor or plugin
+    # author discover what upstream steps make available (e.g. a despeckler
+    # reading `char_h_frac`), and feeds the generated processor reference.
+    # Declaring a key here does not stamp it — the processor still writes
+    # `buffer.meta[key]` itself; this is the contract, not the mechanism.
+    PROVIDES_META: ClassVar[Dict[str, str]] = {}
+
     # Subclasses list the parameter field names that matter most — shown
     # in the pipeline card's one-line "essential" description. Empty →
     # the base falls back to the first few algorithm fields.

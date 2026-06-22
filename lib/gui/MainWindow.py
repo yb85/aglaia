@@ -289,6 +289,13 @@ class MainWindow(QMainWindow):
         
         # Calibration state
         self.calibration = load_calibration()
+        # Manual DPI override (set by clicking the DPI readout). Kept apart
+        # from `self.calibration` on purpose: fabricating an identity-matrix
+        # calibration just to carry a DPI would feed a bogus camera_matrix to
+        # PageDewarper (see the identity-K focal-underflow leak). When set, it
+        # overrides the uncalibrated input_dpi default; a real calibration
+        # takes precedence over it.
+        self._manual_dpi: Optional[float] = None
         cal_cfg = self.args.config.get("calibration", {})
         self.cal_target_count = cal_cfg.get("calnum", 10)
         self.calibrator = Calibrator(
@@ -1381,6 +1388,7 @@ class MainWindow(QMainWindow):
         ct.transform_combo.setCurrentIndex(0)
         ct.btn_full_calibrate.clicked.connect(self.calibrate_camera)
         ct.btn_dpi_calibrate.clicked.connect(self.calibrate_dpi)
+        ct.dpi_label.clicked.connect(self._prompt_manual_dpi)
         ct.btn_freehand.clicked.connect(self._on_freehand_clicked)
         ct.btn_apply_transform.clicked.connect(self._apply_selected_transform)
         ct.zoom_slider.valueChanged.connect(self._on_zoom_slider)
@@ -1425,7 +1433,8 @@ class MainWindow(QMainWindow):
         ct.format_combo.currentIndexChanged.connect(self._on_capture_format_changed)
         # Seed the DPI readout (uncalibrated default until calibration runs).
         try:
-            ct.set_dpi(self.effective_dpi(), calibrated=bool(self.calibration))
+            ct.set_dpi(self.effective_dpi(), calibrated=bool(self.calibration),
+                       manual=bool(self._manual_dpi is not None and not self.calibration))
         except Exception:
             pass
         return ct
@@ -1435,9 +1444,37 @@ class MainWindow(QMainWindow):
         ct = getattr(self, "_capture_tab", None)
         if ct is not None and hasattr(ct, "set_dpi"):
             try:
-                ct.set_dpi(self.effective_dpi(), calibrated=bool(self.calibration))
+                ct.set_dpi(self.effective_dpi(), calibrated=bool(self.calibration),
+                           manual=bool(self._manual_dpi is not None and not self.calibration))
             except Exception:
                 pass
+
+    def _prompt_manual_dpi(self) -> None:
+        """Let the user type the scan DPI directly (the readout is clickable).
+
+        Stored as a standalone override (`self._manual_dpi`), NOT a fake
+        calibration — see the note where `_manual_dpi` is initialised. Also
+        updates the `input_dpi` general option so the spawned workers pick the
+        new value up on the `reload_params` broadcast below."""
+        from PySide6.QtWidgets import QInputDialog
+        cur = self.effective_dpi()
+        val, ok = QInputDialog.getDouble(
+            self, self.tr("Set DPI manually"),
+            self.tr("Scan resolution in DPI:"),
+            float(cur), 10.0, 4800.0, 0)
+        if not ok:
+            return
+        self._manual_dpi = float(val)
+        # Feed the workers: input_dpi is the uncalibrated DPI source.
+        try:
+            self.args.options["general"]["input_dpi"] = float(val)
+        except Exception:
+            pass
+        if self.processing_queue:
+            for _ in range(self.total_workers + 2):
+                self.processing_queue.put(('reload_params',))
+        self.toast(self.tr("DPI set manually — {dpi:.0f} dpi.").format(dpi=float(val)))
+        self._refresh_dpi_readout()
 
     def _populate_capture_devices(self, ct) -> None:
         """Fill the camera + format combos and pre-select the active device.
@@ -2545,6 +2582,8 @@ class MainWindow(QMainWindow):
     def effective_dpi(self) -> float:
         """Current DPI scaled by the camera's live zoom factor."""
         if not self.calibration:
+            if self._manual_dpi is not None:
+                return float(self._manual_dpi)
             return float(self.args.options["general"].get("input_dpi", 100.0))
         base = self.calibration.get("base_dpi")
         if base is None:

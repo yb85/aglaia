@@ -22,6 +22,9 @@ class DPIfixer(AbstractImageProcessor):
     SUMMARY = "Clamp DPI to [min, max] by resampling."
     REPLAY_TRAIT = ReplayTrait.COORDINATE  # uniform scale resample → fuses with other warps
     OPTION_CLASS = DPIfixerOption
+    PROVIDES_META = {
+        "roi": "page quad polygon [[x,y],...] rescaled into output coords",
+    }
     _ESSENTIAL_PARAMS = ("min_dpi", "max_dpi")
     OPTIONS = {
         "min_dpi": _i(100, 50, 600,

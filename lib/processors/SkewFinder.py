@@ -29,6 +29,10 @@ class SkewFinder(AbstractImageProcessor):
     SUMMARY = "Projection-profile skew estimation + rotation."
     REPLAY_TRAIT = ReplayTrait.COORDINATE  # rigid rotation (affine)
     OPTION_CLASS = SkewFinderOption
+    PROVIDES_META = {
+        "skew": "estimated page skew angle in degrees",
+        "roi": "page quad polygon [[x,y],...] rotated into output coords",
+    }
     _ESSENTIAL_PARAMS = ("max_angle", "apply_rotation", "k_cluster")
     OPTIONS = {
         "max_angle": _f(30.0, 0.1, 45.0, 0.5,

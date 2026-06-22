@@ -222,6 +222,11 @@ class PageDetector(AbstractImageProcessor):
     SUMMARY = "Text detection → child crops (splits 2-page spreads)."
     REPLAY_TRAIT = ReplayTrait.ROI  # crop + branch → fixed barrier / source anchor
     OPTION_CLASS = PageOption
+    PROVIDES_META = {
+        "roi": "detected page polygon [[x,y],...] in the child's coords",
+        "page_side": "'left' | 'right' for a split 2-page spread",
+        "parent_crop_xywh": "[x,y,w,h] of this child's bbox in parent coords",
+    }
     _ESSENTIAL_PARAMS = ("backend", "max_pages", "margin_mm")
     OPTIONS = {
         "margin_mm": _f(2.0, 0.0, 50.0, 0.5,

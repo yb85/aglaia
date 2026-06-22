@@ -16,6 +16,7 @@ All processors live in `lib/processors/`. Each has:
 | `replay(buffer)` | no | End-of-chain reconstruction. Default re-runs `process()`; geometric processors stamp `replay_kind`/`replay_params` so the engine fuses their warp instead. |
 | `OPTION_CLASS` | no | Explicit options dataclass; default is synthesised from `OPTIONS`. |
 | `REGISTRY_NAME` | no | Registry key; default is the class name. |
+| `PROVIDES_META: dict[str, str]` | no | Documentary declaration of the `meta` keys this step stamps onto its output buffer (key → meaning), beyond the `replay_kind`/`replay_params` plumbing. Lets a downstream processor or plugin author discover what's available upstream, and feeds the generated reference. Declaring a key does **not** stamp it — the processor still writes `buffer.meta[key]` itself. |
 
 The chain calls `run(buffer)`, which wraps `process()` and enforces the
 output-format contract (`ImageBuffer`, list, or `None`). `__init_subclass__`
@@ -356,3 +357,21 @@ the GUI.
 > Threat model: stop a user from blindly running a file he dropped (or
 > that something dropped for him). It is *not* a defense against an
 > attacker with write access to the data dir — hence no signing.
+
+**Worked example.** `examples/plugins/processors/ExemplePluginDespeckler.py`
+is a complete, heavily-commented drop-in processor shipped for reference. It
+demonstrates the whole contract in one file: declaring `OPTIONS` /
+`OPTION_CLASS`, **consuming upstream metadata** (`meta["char_h_frac"]`),
+**joining the replay pass** as a `PIXEL_VALUE` step via `apply_replay()`, and
+**declaring** `PROVIDES_META`. Copy it into `<APP_DATA>/plugins/processors/`
+and accept it in the trust prompt to try it live.
+
+### Shared cross-step metadata: `char_h_frac`
+
+`TrapezoidalCorrection` and `PageDewarper` both estimate the median glyph
+height while detecting text lines. They stamp it as
+`meta["char_h_frac"]` — glyph height ÷ page height, dimensionless, so it
+survives any later resample/warp (a consumer multiplies by *its own* image
+height to get pixels). Absent if fewer than ~30 char-like components were
+found. This is the canonical "text scale" hint for downstream steps (e.g. a
+despeckler sizing its speckle threshold) that would otherwise recompute it.

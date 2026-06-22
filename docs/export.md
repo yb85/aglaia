@@ -3,6 +3,14 @@
 Aglaïa exports a project to a **searchable PDF** or **Markdown**. Both
 read the chosen stage of each visible page from the project DB.
 
+> **Not yet pluggable.** Unlike processors and OCR engines (drop-in
+> autodiscovery, no central map), export targets are hardcoded: the allowed
+> names in `cli.py` `_parse_export_arg`, the dispatch in
+> `headless.py:_run_exports`, and the GUI imports in `MainWindow`. Adding a
+> target means editing all three. Making exporters drop-in pluggable
+> (`Exporter` base + `@register` + `<APP_DATA>/plugins/exporters/`) is
+> tracked in [#1](https://github.com/yb85/aglaia/issues/1).
+
 ## PDF (`lib/workers/pdf_export.py`)
 
 A page is encoded by colour type:

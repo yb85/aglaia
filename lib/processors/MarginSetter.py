@@ -77,6 +77,9 @@ class MarginSetter(AbstractImageProcessor):
     SUMMARY = "Crop to content bbox + pad with a CSS-style margin (mm or px)."
     REPLAY_TRAIT = ReplayTrait.ROI  # crop + pad → ROI change
     OPTION_CLASS = MarginSetterOption
+    PROVIDES_META = {
+        "status": "int Status enum for the crop+pad outcome",
+    }
     _ESSENTIAL_PARAMS = ("margin_mm", "margin_px")
     OPTIONS = {
         "margin_mm": _s("5",

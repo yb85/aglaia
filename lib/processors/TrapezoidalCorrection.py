@@ -127,6 +127,12 @@ class TrapezoidalCorrection(AbstractImageProcessor):
     SUMMARY = "Perspective (keystone) rectification via column-quad detection + Zhang-He."
     REPLAY_TRAIT = ReplayTrait.COORDINATE  # perspective warp
     OPTION_CLASS = TrapezoidalOption
+    PROVIDES_META = {
+        "char_h_frac": "median glyph height as a fraction of page height "
+                       "(dimensionless text scale; absent if < 30 chars found)",
+        "roi": "page quad polygon [[x,y],...] in output coords",
+        "trapezoid_success": "bool — whether keystone rectification succeeded",
+    }
     _ESSENTIAL_PARAMS = ("line_source", "interp", "processing_dpi")
     OPTIONS = {
         "line_source": _e("connectivity", ["connectivity", "meta"],
@@ -222,6 +228,11 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         self.opt = options
         self.uses_gpu = False
         self._last_source_label: str = ""
+        # Median glyph height as a fraction of the analysis-image height
+        # (dimensionless, resolution-independent). Stamped into the output
+        # meta as "char_h_frac" so downstream steps (e.g. a despeckler) get
+        # the text scale without recomputing it. 0.0 = not measured.
+        self._last_char_h_frac: float = 0.0
 
     # ── line bbox detection ────────────────────────────────────────────
     def _line_bboxes_from_connectivity(self, bw: np.ndarray,
@@ -261,6 +272,9 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         else:
             h_med = 0.0
             kw = max(9, int(round(self.opt.line_join_mm * dpi / 25.4)))
+        # Record the text scale relative to the analysis image so process()
+        # can stamp it into the output meta (see _last_char_h_frac).
+        self._last_char_h_frac = (h_med / float(H_img)) if h_med > 0 else 0.0
         # Break thin vertical bridges between adjacent text lines BEFORE
         # the horizontal close. Without this, a single 1-2 px tall ink
         # chain between line N descender and line N+1 ascender (binariser
@@ -358,6 +372,9 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         # back exactly (4 corner points) and the final warpPerspective is
         # the only full-res operation.
         H_src, W_src = buf.buffer.shape[:2]
+        # Reset per-call so a stale value from a prior scan (instances are
+        # reused across the worker's lifetime) never leaks into this output.
+        self._last_char_h_frac = 0.0
         src_dpi = float(buf.dpi or 0.0)
         ana_scale = 1.0
         analysis_dpi = src_dpi if src_dpi > 0 else self.opt.processing_dpi
@@ -629,6 +646,8 @@ class TrapezoidalCorrection(AbstractImageProcessor):
                 "src_wh": [int(W_src), int(H_src)],
             },
         })
+        if self._last_char_h_frac > 0:
+            out.meta["char_h_frac"] = self._last_char_h_frac
         if self.debug_enabled():
             self.debug_save(rectified, "4_rectified", buf)
             # Transform-grid overlay: sample a uniform grid on the output
@@ -700,6 +719,8 @@ class TrapezoidalCorrection(AbstractImageProcessor):
             "line_source": self._last_source_label,
             "mode_used": "fallback_passthrough",
         })
+        if self._last_char_h_frac > 0:
+            out.meta["char_h_frac"] = self._last_char_h_frac
         return out
 
 
