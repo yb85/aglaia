@@ -655,13 +655,21 @@ class OcrTab(QWidget):
         self._refresh_cloud_key_status()
         return wrap
 
-    def _refresh_cloud_key_status(self) -> None:
+    def _refresh_cloud_key_status(self, *, probe_keychain: bool = False) -> None:
+        """Update the cloud-key status line.
+
+        ``probe_keychain`` defaults to False so the common path (startup,
+        engine seeding) never reads the OS keychain — that read pops a system
+        password prompt the user hasn't asked for. We probe the keychain only
+        when the user actively engages Cloud OCR (picks the cloud engine, or
+        opens the key dialog). Until then, a key that lives only in the
+        keychain shows as a neutral 'click to check' hint rather than a prompt."""
         lbl = getattr(self, "_cloud_key_status", None)
         if lbl is None:
             return
         try:
             from lib.app_data.secrets import mistral_key_location
-            where = mistral_key_location()
+            where = mistral_key_location(include_keychain=probe_keychain)
         except Exception:
             where = ""
         msgs = {
@@ -672,6 +680,11 @@ class OcrTab(QWidget):
         if where:
             lbl.setText("✓ " + msgs.get(where, self.tr("API key set.")))
             lbl.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 10px;")
+        elif not probe_keychain:
+            # Didn't look in the keychain (no prompt). A key may still be there.
+            lbl.setText(self.tr("Select Cloud OCR to use a key from your keychain, "
+                                "or add one below."))
+            lbl.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
         else:
             lbl.setText(self.tr("No API key set — pages can't be sent yet."))
             lbl.setStyleSheet(f"color: {COLOR_WARNING}; font-size: 10px;")
@@ -723,7 +736,7 @@ class OcrTab(QWidget):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, self.tr("Key storage failed"), str(e))
             return
-        self._refresh_cloud_key_status()
+        self._refresh_cloud_key_status(probe_keychain=True)
         if where == "env_file":
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(
@@ -973,9 +986,14 @@ class OcrTab(QWidget):
         self._refresh_engine_state()
         self._refresh_cost_estimate()
         self._refresh_language_state()
-        if getattr(self, "_cloud_key_status", None) is not None:
-            self._refresh_cloud_key_status()
         new_key = self.engine_group.current_key()
+        if getattr(self, "_cloud_key_status", None) is not None:
+            # Probe the keychain only when the user actively switches TO the
+            # cloud engine — never on the initial seed (avoids a startup
+            # password prompt). See _refresh_cloud_key_status.
+            engaging_cloud = (new_key == "mistral_cloud"
+                              and new_key != self._last_engine)
+            self._refresh_cloud_key_status(probe_keychain=engaging_cloud)
         if new_key and new_key != self._last_engine:
             self._last_engine = new_key
             self.engine_changed.emit(new_key)

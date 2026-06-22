@@ -50,20 +50,40 @@ if [[ ! -f "$ENT" ]]; then
     exit 1
 fi
 
+# codesign with retry. Apple's secure-timestamp server (TSA) intermittently
+# rejects requests when many fire back-to-back ("A timestamp was expected but
+# was not found") — Pillow alone bundles ~15 small dylibs signed in a burst.
+# Retry with linear backoff so a transient TSA hiccup doesn't fail the build.
+# This is THE signer (PyInstaller is run WITHOUT an identity on purpose so it
+# doesn't burst the TSA itself); every binary must end up signed + timestamped
+# for notarization, which the --verify --strict pass below enforces.
+_codesign_ts() {
+    local n=1 max=6
+    while true; do
+        if codesign "$@"; then return 0; fi
+        if (( n >= max )); then
+            echo "✗ codesign failed after ${max} attempts: ${*: -1}" >&2
+            return 1
+        fi
+        echo "  …codesign retry ${n}/${max} (TSA hiccup) — backing off ${n}s" >&2
+        sleep "$n"
+        ((n++))
+    done
+}
+
 echo "→ signing $APP"
-# Walk every dylib + so + binary first (PyInstaller leaves them unsigned
-# even with codesign_identity set). The --deep on the outer app sign
-# only goes one level — we want full recursion.
+# Walk every dylib + so + binary first (PyInstaller leaves them unsigned).
+# The --deep on the outer app sign only goes one level — we want full recursion.
 find "$APP/Contents" \
     \( -name '*.dylib' -o -name '*.so' -o -perm +111 \) -type f \
     | while read -r f; do
-        # Skip already-signed Apple framework copies we may have hardlinked in.
-        codesign --force --options runtime --timestamp \
-            --sign "$IDENTITY" "$f" 2>/dev/null || true
+        _codesign_ts --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$f" || true
     done
 
-# Final wrap pass over the bundle itself.
-codesign --force --deep --options runtime --timestamp \
+# Final wrap pass over the bundle itself (retry; an unrecoverable failure here
+# aborts via set -e, which is what we want).
+_codesign_ts --force --deep --options runtime --timestamp \
     --entitlements "$ENT" \
     --sign "$IDENTITY" \
     "$APP"

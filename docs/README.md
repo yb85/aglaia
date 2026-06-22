@@ -4,6 +4,7 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 
 | Doc | Topic |
 |---|---|
+| [quickstart.md](./quickstart.md) | **Start here** — install → capture/import → process → OCR → export, GUI + headless |
 | [architecture.md](./architecture.md) | Process tree, IntegratedProcessingChain, log_queue protocol |
 | [pipeline.md](./pipeline.md) | YAML pipeline schema, template substitution, default pipeline annotated |
 | [processors.md](./processors.md) | DPIfixer, SkewFinder, PageDetector, Binarizer, PageDewarper — options, behavior, extension points, **drop-in user plugins** |

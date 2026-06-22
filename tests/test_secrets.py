@@ -16,6 +16,11 @@ import importlib
 
 import pytest
 
+# `keyring` ships with the `cloud` extra (Mistral key storage). CI syncs only
+# `dev`, so skip this module's keychain-fallback tests when it's absent —
+# secrets.py itself imports keyring lazily and degrades to the .env path.
+pytest.importorskip("keyring")
+
 
 @pytest.fixture()
 def sec(tmp_path, monkeypatch):

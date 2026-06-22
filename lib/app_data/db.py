@@ -95,6 +95,8 @@ KEY_SIDEBAR_COLLAPSED = "sidebar_collapsed"   # bool — sidebar content-pane hi
 KEY_DEBUG_OVERLAYS = "debug_overlays_shown"   # bool — Debug viewer's "Show
                                   # debug overlays" toggle, remembered across
                                   # sessions.
+KEY_WELCOME_SEEN = "welcome_seen"  # bool — first-run welcome/permissions
+                                   # screen has been shown + dismissed.
 
 BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_THEME: "system",
@@ -120,6 +122,7 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_OCR_CONFIDENCE_GATE: 0.7,
     KEY_LIVE_OCR: False,
     KEY_DEBUG_OVERLAYS: False,
+    KEY_WELCOME_SEEN: False,
 }
 
 

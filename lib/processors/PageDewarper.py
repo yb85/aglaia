@@ -188,7 +188,8 @@ def _sample_spans_xband(shape: tuple[int, int],
 def _text_mask_dpi(small_rgb: np.ndarray, pagemask: np.ndarray,
                    analysis_dpi: float, line_join_mm: float,
                    is_bw: bool = False,
-                   kernel_char_mult: float = 1.5
+                   kernel_char_mult: float = 1.5,
+                   large_blob_limit: float = 0.0
                    ) -> tuple[np.ndarray, float]:
     """Build a text mask using mm-sized MORPH_CLOSE.
 
@@ -217,7 +218,7 @@ def _text_mask_dpi(small_rgb: np.ndarray, pagemask: np.ndarray,
     cc_h_max = max(cc_h_min + 1, int(round(analysis_dpi * 0.45)))
     cc_w_min = max(2, int(round(analysis_dpi * 0.02)))
     cc_w_max = max(cc_w_min + 1, int(round(analysis_dpi * 0.60)))
-    n, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
+    n, cc_labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
     char_h = [int(s[3]) for s in stats[1:]
               if cc_h_min <= s[3] <= cc_h_max
               and cc_w_min <= s[2] <= cc_w_max]
@@ -227,6 +228,17 @@ def _text_mask_dpi(small_rgb: np.ndarray, pagemask: np.ndarray,
     else:
         h_med = 0.0
         kw = max(9, int(round(line_join_mm * analysis_dpi / 25.4)))
+    # Wipe oversized blobs (table-grid lines / borders) before the morphology
+    # + span detection, so they don't get chained into spurious spans. Uses
+    # the cheap bounding-box area (w·h) vs (large_blob_limit × char h)².
+    if large_blob_limit > 0 and h_med > 0:
+        areas = (stats[:, cv2.CC_STAT_WIDTH].astype(np.int64)
+                 * stats[:, cv2.CC_STAT_HEIGHT].astype(np.int64))
+        thr = (large_blob_limit * h_med) ** 2
+        large_ids = np.nonzero(areas > thr)[0]
+        large_ids = large_ids[large_ids != 0]  # never the background label
+        if large_ids.size:
+            mask[np.isin(cc_labels, large_ids)] = 0
 
     # Break thin vertical bridges before the horizontal close — otherwise
     # adjacent text lines weld into multi-row blobs.
@@ -274,6 +286,11 @@ class DewarpOption(AbstractProcessorOption):
     # welded into multi-line spans → their curvature was never modelled and
     # the dewarp left them bent. 1.5 separates them; welding returns ≥~1.7.
     kernel_char_mult: float = 1.5
+    # Drop connected components whose bounding-box area (w×h) exceeds
+    # (large_blob_limit × median char height)² before span detection — strips
+    # connected table-grid lines / borders that would otherwise chain into
+    # bogus spans. 0 disables.
+    large_blob_limit: float = 10.0
     # TEXT_MAX_THICKNESS = thickness_char_mult × median char height.
     # ≈ ascender + x-height + descender. Single text line column-sum
     # max stays under that bound; multi-line bridged blobs exceed it
@@ -491,6 +508,10 @@ class PageDewarper(AbstractImageProcessor):
         "kernel_char_mult": _f(1.5, 0.5, 6.0, 0.1,
                                "Adaptive MORPH_CLOSE kernel width = mult × median char height. "
                                "Bridges words into full-line spans."),
+        "large_blob_limit": _f(10.0, 0.0, 40.0, 1.0,
+                               "Drop connected components whose bounding-box area "
+                               "exceeds (mult × median char height)² before span "
+                               "detection — removes table-grid lines. Use 0 to disable."),
         "thickness_char_mult": _f(3.0, 1.0, 8.0, 0.1,
                                   "TEXT_MAX_THICKNESS = mult × median char height "
                                   "(3× ≈ ascender + x-height + descender + margin)."),
@@ -732,6 +753,7 @@ class PageDewarper(AbstractImageProcessor):
         self.processing_dpi = options.processing_dpi
         self.line_join_mm = options.line_join_mm
         self.kernel_char_mult = float(getattr(options, "kernel_char_mult", 1.5))
+        self.large_blob_limit = float(getattr(options, "large_blob_limit", 10.0))
         self.thickness_char_mult = float(getattr(options, "thickness_char_mult", 3.0))
         self.edge_max_length_char_mult = float(
             getattr(options, "edge_max_length_char_mult", 3.0))
@@ -887,7 +909,8 @@ class PageDewarper(AbstractImageProcessor):
         # 2. Extract Contours and Spans (DPI-aware text mask).
         text_mask, h_med = _text_mask_dpi(small, pagemask, analysis_dpi,
                                           self.line_join_mm, is_bw=is_bw,
-                                          kernel_char_mult=self.kernel_char_mult)
+                                          kernel_char_mult=self.kernel_char_mult,
+                                          large_blob_limit=self.large_blob_limit)
         # Text scale relative to the analysis image (dimensionless), stamped
         # into the output meta as "char_h_frac" for downstream steps.
         char_h_frac = (h_med / float(small.shape[0])) if h_med > 0 else 0.0

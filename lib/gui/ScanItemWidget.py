@@ -496,8 +496,12 @@ class ScanItemWidget(QWidget):
 
     def handle_event(self, *, node_id: Optional[int], parent_node_id: Optional[int],
                      image_id: Optional[int], step_name: str, filestem: str,
-                     meta: Optional[dict] = None):
-        """Called when a worker emits a new node for this scan."""
+                     meta: Optional[dict] = None, defer_header: bool = False):
+        """Called when a worker emits a new node for this scan.
+
+        ``defer_header=True`` skips the per-event header repaint — the batch
+        handler calls :meth:`update_header` once after applying a whole batch,
+        which is the dominant per-event cost during a large reprocess."""
         if not step_name or not filestem:
             return
         parent_stem = self._resolve_parent_stem(parent_node_id)
@@ -510,7 +514,8 @@ class ScanItemWidget(QWidget):
                             image_id=image_id, meta=meta)
         self._auto_advance(filestem, step_name)
         self.schedule_refresh()
-        self.update_header()
+        if not defer_header:
+            self.update_header()
 
     def restore_node(self, *, node_id: int, parent_node_id: Optional[int],
                      image_id: int, step_name: str, filestem: str,

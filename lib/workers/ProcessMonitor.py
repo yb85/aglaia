@@ -30,6 +30,12 @@ _STAGE_RSS_SUFFIX_RE = re.compile(r"\s+RSS=\s*-?\d+(?:\.\d+)?\s*MB\s*$")
 class ProcessMonitor(QThread):
     # Dict payload: scan_id, node_id, parent_node_id, image_id, event_type, filestem, depth, meta, ...
     image_event_signal = Signal(dict)
+    # Batched image events. A full reprocess of a large project emits thousands
+    # of per-stage image events; one queued cross-thread signal each saturates
+    # the GUI event loop (beach-ball during processing). We coalesce them into
+    # lists so the GUI handles a batch per slot call and can do per-widget work
+    # (header refresh) once per batch instead of once per event.
+    image_events_batch_signal = Signal(list)
     branch_ready_signal = Signal(dict)
     snap_imported_signal = Signal(dict)
     worker_started_signal = Signal()
@@ -53,15 +59,34 @@ class ProcessMonitor(QThread):
         # the user clicks the status-bar log strip. Survives across tab
         # close/reopen.
         self.log_buffer: deque[str] = deque(maxlen=self.LOG_BUFFER_MAX)
-        
+        # Pending image-event payloads, flushed as a batch (see signal docs).
+        self._img_batch: list = []
+
+    # Flush at this many buffered image events even mid-burst, to bound the
+    # latency between a stage finishing and its thumbnail appearing.
+    IMG_BATCH_MAX = 64
+
+    def _flush_img_batch(self):
+        if self._img_batch:
+            self.image_events_batch_signal.emit(self._img_batch)
+            self._img_batch = []
+
     def run(self):
         while self.running:
             try:
                 # Use blocking get with timeout to prevent busy-waiting
                 msg = self.log_queue.get(block=True, timeout=0.1)
-                
-                if msg is None: break
-                
+
+                if msg is None:
+                    self._flush_img_batch()
+                    break
+
+                # Any non-image event flushes the pending image batch first so
+                # ordering is preserved (e.g. image events before a branch_ready
+                # are applied before it).
+                if msg[0] != 'image_event':
+                    self._flush_img_batch()
+
                 if msg[0] == 'worker_started':
                     self.worker_started_signal.emit()
                 elif msg[0] == 'log_info':
@@ -110,9 +135,13 @@ class ProcessMonitor(QThread):
                 elif msg[0] == 'progress':
                     pass # Ignore granular progress for now
                 elif msg[0] == 'image_event':
-                    # msg format (M0): ('image_event', payload_dict)
+                    # msg format (M0): ('image_event', payload_dict). Buffer and
+                    # flush as a batch (on size cap, idle, or before a non-image
+                    # event) rather than one cross-thread signal per stage image.
                     payload = msg[1] if len(msg) > 1 and isinstance(msg[1], dict) else {}
-                    self.image_event_signal.emit(payload)
+                    self._img_batch.append(payload)
+                    if len(self._img_batch) >= self.IMG_BATCH_MAX:
+                        self._flush_img_batch()
                 elif msg[0] == 'branch_ready':
                     payload = msg[1] if len(msg) > 1 and isinstance(msg[1], dict) else {}
                     self.branch_ready_signal.emit(payload)
@@ -133,6 +162,9 @@ class ProcessMonitor(QThread):
                     line += f"[bold yellow]{ms:6.1f}ms[/]"
                     console.print(line)
             except Empty:
+                # Queue went quiet — flush whatever images are buffered so the
+                # final stages of a burst appear without waiting for the cap.
+                self._flush_img_batch()
                 continue
             except Exception as e:
                 console.print(rf"[red]\[ERROR][/] ProcessMonitor Error: {e}")

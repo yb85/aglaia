@@ -611,7 +611,9 @@ class MainWindow(QMainWindow):
             self.webcam_thread = None
 
         self.monitor_thread = ProcessMonitor(log_queue)
-        self.monitor_thread.image_event_signal.connect(self.on_image_event)
+        # Image events arrive batched (see ProcessMonitor) to keep the GUI
+        # responsive during a large reprocess.
+        self.monitor_thread.image_events_batch_signal.connect(self.on_image_events_batch)
         self.monitor_thread.snap_imported_signal.connect(self.on_scan_imported)
         self.monitor_thread.worker_started_signal.connect(self.on_worker_started)
         # Status bar wiring
@@ -2154,6 +2156,38 @@ class MainWindow(QMainWindow):
             filestem=payload.get("filestem") or "",
             meta=payload.get("meta") or {},
         )
+
+    def on_image_events_batch(self, events: list):
+        """Batched image events (see ProcessMonitor.image_events_batch_signal).
+
+        Applies each event's node registration, but defers the per-widget
+        header refresh to ONCE per affected widget per batch — the dominant
+        per-event cost during a large reprocess. Thumbnails already rebuild via
+        each widget's coalesced refresh timer."""
+        affected = set()
+        widgets = self.scan_widgets_by_scan
+        for payload in events:
+            if not isinstance(payload, dict):
+                continue
+            scan_id = payload.get("scan_id")
+            target = widgets.get(scan_id) if scan_id is not None else None
+            if target is None:
+                continue
+            target.handle_event(
+                node_id=payload.get("node_id"),
+                parent_node_id=payload.get("parent_node_id"),
+                image_id=payload.get("image_id"),
+                step_name=payload.get("event_type") or "",
+                filestem=payload.get("filestem") or "",
+                meta=payload.get("meta") or {},
+                defer_header=True,
+            )
+            affected.add(target)
+        for w in affected:
+            try:
+                w.update_header()
+            except Exception:
+                pass
 
     def make_pdf(self, source_type, *, step_name: Optional[str] = None):
         """Build a PDF from DB blobs.

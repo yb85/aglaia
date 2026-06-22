@@ -205,6 +205,13 @@ def _qt_app() -> "QApplication":
             ns.activateIgnoringOtherApps_(True)
         except Exception:
             pass
+    # First-run welcome / permissions screen — set expectations before macOS
+    # pops its own camera / keychain prompts. Shown once (welcome_seen flag).
+    try:
+        from lib.gui.WelcomeDialog import WelcomeDialog
+        WelcomeDialog.show_if_first_run(None)
+    except Exception as e:
+        print(f"welcome: skipped ({e})", file=sys.stderr)
     # Trust gate for drop-in plugins — must run before any widget reads
     # the processor / OCR registries (which import accepted plugins).
     try:

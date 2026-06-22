@@ -18,7 +18,7 @@
 # lib code and can be invoked via the bundled Python from Terminal.
 
 from PyInstaller.utils.hooks import (
-    collect_data_files, collect_dynamic_libs, collect_submodules,
+    collect_all, collect_data_files, collect_dynamic_libs, collect_submodules,
 )
 from pathlib import Path
 import os
@@ -153,12 +153,27 @@ hiddenimports = (
 # Pull the compiled JBIG2 extension (.so) into the bundle.
 _jbig2_binaries = collect_dynamic_libs("aglaia_jbig2")
 
+# mlx (Metal-accelerated dewarp) and vosk (offline voice) ship native libs
+# plus data PyInstaller's static analysis misses — notably mlx's `.metallib`
+# shader library, without which `import mlx.core` fails at Metal init and the
+# app reports the backend unavailable. vosk's native `libvosk` is likewise not
+# picked up. collect_all gathers datas + binaries + submodules for each.
+_native_pkg_binaries = []
+for _pkg in ("mlx", "vosk"):
+    try:
+        _d, _b, _h = collect_all(_pkg)
+        datas += _d
+        _native_pkg_binaries += _b
+        hiddenimports += _h
+    except Exception:
+        pass
+
 block_cipher = None
 
 a = Analysis(
     ["aglaia.py"],
     pathex=[str(REPO)],
-    binaries=list(_llama_binaries) + list(_jbig2_binaries),
+    binaries=list(_llama_binaries) + list(_jbig2_binaries) + list(_native_pkg_binaries),
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

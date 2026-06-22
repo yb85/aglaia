@@ -42,8 +42,13 @@ jobs:
       - name: Vendor llama-server (Surya backend)
         run: uv run --no-project python scripts/fetch_llama_server.py --platform macos-arm64
 
-      - name: Sync deps (macOS + package extras)
-        run: uv sync --extra macos --extra dev --extra package --extra jbig2
+      - name: Sync deps (everything but cuda — the shipped app must be full-featured)
+        # MUST include `gui` (PySide6) or the bundled .app crashes on launch with
+        # ModuleNotFoundError: No module named 'PySide6'. Ship every extra except
+        # `cuda` (Linux-GPU JAX wheels, irrelevant on the macOS arm64 target).
+        run: >-
+          uv sync --extra gui --extra voice --extra macos --extra dev --extra package
+          --extra jbig2 --extra cloud --extra keyring-bitwarden --extra keyring-1password
 
       - name: Tests (release gate)
         run: uv run pytest -q
@@ -80,10 +85,13 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_PW"
 
-      - name: Build .app (PyInstaller, signed)
+      - name: Build .app (PyInstaller, unsigned)
+        # No AGLAIA_SIGN_IDENTITY on purpose: PyInstaller signs each bundled
+        # dylib inline with --timestamp, bursting Apple's TSA and randomly
+        # failing ("A timestamp was expected but was not found"). Signing is
+        # deferred to the next step, which signs once with retry/backoff.
         env:
           AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
-          AGLAIA_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: uv run pyinstaller Aglaia.spec --clean --noconfirm
 
       - name: Re-sign + notarize + staple

@@ -162,13 +162,21 @@ def _env_file_clear(key: str) -> None:
         _write_env_file(values)
 
 
-def mistral_key_location() -> str:
+def mistral_key_location(*, include_keychain: bool = True) -> str:
     """Where the key currently resolves from — for UI status. One of
-    ``"env"`` (process env), ``"keychain"``, ``"env_file"``, or ``""``."""
+    ``"env"`` (process env), ``"keychain"``, ``"env_file"``, or ``""``.
+
+    ``include_keychain=False`` checks only the env var + ``.env`` file and
+    NEVER touches the OS keychain. Reading a keychain item the app isn't yet
+    trusted for pops a system-password prompt, so the GUI calls this with
+    ``include_keychain=False`` at startup (no surprise prompt) and only probes
+    the keychain once the user actively engages Cloud OCR."""
     if os.environ.get(ENV_MISTRAL, "").strip():
         return "env"
     if _read_env_file().get(ENV_MISTRAL, "").strip():
         return "env_file"
+    if not include_keychain:
+        return ""
     try:
         import keyring
         if keyring.get_password(_SERVICE, _ACCOUNT_MISTRAL):

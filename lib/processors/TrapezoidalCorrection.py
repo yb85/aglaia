@@ -52,6 +52,11 @@ class TrapezoidalOption(AbstractProcessorOption):
     thickness_char_mult: float = 3.0
     # EDGE_MAX_LENGTH = edge_max_length_char_mult × median char height.
     edge_max_length_char_mult: float = 3.0
+    # Drop connected components whose inscribing-rectangle area (w×h) exceeds
+    # (large_blob_limit × median char height)² before span detection. Removes
+    # connected table-grid lines / borders that would otherwise be chained into
+    # bogus spans and skew the baseline/quad fit. 0 disables.
+    large_blob_limit: float = 10.0
 
     # --- VP solving ---
     ransac_trials: int = 200
@@ -151,6 +156,10 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         "edge_max_length_char_mult": _f(3.0, 0.5, 12.0, 0.1,
                                         "EDGE_MAX_LENGTH = mult × median char height. "
                                         "Max gap between adjacent cinfos the span-builder will link."),
+        "large_blob_limit": _f(10.0, 0.0, 40.0, 1.0,
+                               "Drop connected components whose bounding-box area "
+                               "exceeds (mult × median char height)² before span "
+                               "detection — removes table-grid lines. Use 0 to disable."),
         "processing_dpi": _f(150.0, 50.0, 600.0, 25.0,
                              "Analysis resolution for line/quad detection. "
                              "Final warp always runs at full input resolution.",
@@ -262,7 +271,7 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         cc_h_max = max(cc_h_min + 1, int(round(dpi * 0.45)))
         cc_w_min = max(2, int(round(dpi * 0.02)))
         cc_w_max = max(cc_w_min + 1, int(round(dpi * 0.60)))
-        n_cc, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=4)
+        n_cc, cc_labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=4)
         char_h = [int(s[3]) for s in stats[1:]
                   if cc_h_min <= s[3] <= cc_h_max
                   and cc_w_min <= s[2] <= cc_w_max]
@@ -275,6 +284,18 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         # Record the text scale relative to the analysis image so process()
         # can stamp it into the output meta (see _last_char_h_frac).
         self._last_char_h_frac = (h_med / float(H_img)) if h_med > 0 else 0.0
+        # Strip oversized blobs (table-grid lines / borders) before span
+        # detection: any CC whose bounding-box area exceeds (limit × char h)²
+        # is wiped from the ink, so the span-builder never chains it into a
+        # bogus baseline. Bounding-box area (w·h) is cheap vs a convex hull.
+        if self.opt.large_blob_limit > 0 and h_med > 0:
+            areas = (stats[:, cv2.CC_STAT_WIDTH].astype(np.int64)
+                     * stats[:, cv2.CC_STAT_HEIGHT].astype(np.int64))
+            thr = (self.opt.large_blob_limit * h_med) ** 2
+            large_ids = np.nonzero(areas > thr)[0]
+            large_ids = large_ids[large_ids != 0]  # never the background label
+            if large_ids.size:
+                ink[np.isin(cc_labels, large_ids)] = 0
         # Break thin vertical bridges between adjacent text lines BEFORE
         # the horizontal close. Without this, a single 1-2 px tall ink
         # chain between line N descender and line N+1 ascender (binariser

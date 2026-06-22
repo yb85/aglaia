@@ -106,9 +106,45 @@ def _synthesize_option_class(name: str, options: dict[str, Any]) -> type:
     return cls
 
 
+# Built-in processor modules — the authoritative list for PyInstaller-frozen
+# builds, where the package directory doesn't exist on disk to walk. These are
+# force-bundled via `collect_submodules("lib.processors")` in Aglaia.spec, so
+# importing them always succeeds in the bundle. KEEP IN SYNC when adding a new
+# built-in processor (the source-mode filesystem walk auto-discovers it for
+# dev; only the frozen app needs it listed here — and `test_registry` guards
+# that the two agree).
+_BUILTIN_PROCESSOR_MODULES = (
+    "DPIfixer", "SkewFinder", "PageDetector", "Binarizer",
+    "PageDewarper", "TrapezoidalCorrection", "MarginSetter",
+)
+
+
+def _iter_processor_module_names(pkg) -> list[str]:
+    """Module names to import for built-in processor discovery.
+
+    The filesystem walk (`pkgutil.iter_modules`) works from source but yields
+    NOTHING inside a PyInstaller bundle — the package directory doesn't exist
+    on disk, the modules live in the PYZ archive. Earlier attempts to detect
+    "frozen" and read the PYZ table-of-contents proved unreliable (the bundle
+    skipped the branch with no diagnostics), so we stop guessing: we ALWAYS
+    union the filesystem walk with the hard-coded built-in list. The built-ins
+    are force-bundled via `collect_submodules("lib.processors")`, so importing
+    them succeeds in the bundle; from source the walk already finds them and
+    the union just dedups. Registration downstream is idempotent.
+
+    A new built-in must be added to ``_BUILTIN_PROCESSOR_MODULES`` to appear in
+    frozen builds — ``test_registry_frozen`` enforces that the list stays in
+    sync with what the source walk discovers.
+    """
+    fs_names = [m for _, m, _ in pkgutil.iter_modules(pkg.__path__)]
+    # dict.fromkeys preserves order while de-duplicating.
+    return list(dict.fromkeys(fs_names + list(_BUILTIN_PROCESSOR_MODULES)))
+
+
 def _discover_once() -> None:
-    """Walk `lib/processors/*.py`, import each, register every concrete
-    `AbstractImageProcessor` subclass that declares `OPTIONS`. Pure
+    """Discover built-in processors (frozen-safe, see
+    :func:`_iter_processor_module_names`), import each, and register every
+    concrete `AbstractImageProcessor` subclass that declares `OPTIONS`. Pure
     classes without `OPTIONS` are skipped — they're internal helpers
     (e.g. abstract bases, utility processors not exposed to the UI).
     """
@@ -116,7 +152,7 @@ def _discover_once() -> None:
     if _DISCOVERED:
         return
     import lib.processors as _pkg
-    for _, mod_name, _ in pkgutil.iter_modules(_pkg.__path__):
+    for mod_name in _iter_processor_module_names(_pkg):
         if mod_name.startswith("_") or mod_name in {"abstraction", "registry",
                                                      "option_specs", "utils",
                                                      "geometry"}:
@@ -143,6 +179,9 @@ def _discover_once() -> None:
         print(f"[registry] processor plugin discovery skipped: {e}")
 
     _apply_aliases()
+    # One-line summary — cheap support breadcrumb (esp. for frozen builds where
+    # a discovery regression silently empties the pipeline).
+    print(f"[registry] {len(_REGISTRY)} processors registered", flush=True)
     _DISCOVERED = True
 
 

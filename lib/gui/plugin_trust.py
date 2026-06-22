@@ -55,8 +55,13 @@ def prompt_pending_plugins(parent: QWidget | None = None) -> None:
                                 QMessageBox.ButtonRole.AcceptRole)
         del_btn = box.addButton("Delete file",
                                 QMessageBox.ButtonRole.DestructiveRole)
-        box.addButton("Skip for now", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(box.buttons()[-1])  # Skip — safe default
+        skip_btn = box.addButton("Skip for now",
+                                 QMessageBox.ButtonRole.RejectRole)
+        # macOS sizes message-box buttons too narrow for these labels, clipping
+        # them ("d (trust & r…"). Widen each to fit its own text.
+        for _b in (add_btn, del_btn, skip_btn):
+            _b.setMinimumWidth(_b.sizeHint().width() + 28)
+        box.setDefaultButton(skip_btn)  # Skip — safe default
         box.exec()
 
         clicked = box.clickedButton()
