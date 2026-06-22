@@ -407,6 +407,26 @@ class IntegratedProcessingChain:
             return
         self.input_queue.put(item)
 
+    def enqueue_resume(self, *, node_id: int, start_idx: int, branch_path: str,
+                       scan_id: int, parent_stem: Optional[str] = None):
+        """Resume the pipeline mid-chain from an already-persisted node.
+
+        Used for branch-level reprocess: re-run only the steps from
+        ``start_idx`` onward for a single page-branch (``branch_path``),
+        re-decoding ``node_id``'s image. The worker applies that branch's
+        per-page disable overrides as it goes (see ``run_pipeline``). Unlike
+        :meth:`enqueue` (which always starts a fresh scan at step 0), this
+        leaves sibling branches untouched."""
+        if self.input_queue is None:
+            return
+        self.input_queue.put(("ref", {
+            "node_id": int(node_id),
+            "start_idx": int(start_idx),
+            "branch_path": branch_path or "",
+            "scan_id": int(scan_id),
+            "parent_stem": parent_stem,
+        }))
+
     def get_input_queue(self):
         return self.input_queue
 

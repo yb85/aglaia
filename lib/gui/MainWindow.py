@@ -212,6 +212,7 @@ class MainWindow(QMainWindow):
                  apply_pipeline_callback=None,
                  force_reprocess_callback=None,
                  reprocess_scans_callback=None,
+                 reprocess_branch_callback=None,
                  stop_pipeline_callback=None):
         super().__init__()
         # Calculate pipeline length for progress indication
@@ -281,6 +282,7 @@ class MainWindow(QMainWindow):
         self._apply_pipeline_callback = apply_pipeline_callback
         self._force_reprocess_callback = force_reprocess_callback
         self._reprocess_snaps_callback = reprocess_scans_callback
+        self._reprocess_branch_callback = reprocess_branch_callback
         self._stop_pipeline_callback = stop_pipeline_callback
         # Maps scan_id -> ScanItemWidget
         self.scan_widgets_by_scan: dict[int, ScanItemWidget] = {}
@@ -3655,6 +3657,17 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         self.step_disabled_changed.emit(int(scan_id), bp, int(sidx), bool(disabled))
+        # Rerun only the toggled page-branch (its sibling pages are unaffected).
+        # `bp` is the branch path; reprocess_branch falls back to a whole-scan
+        # rerun when the scan isn't split. If no branch callback is wired, fall
+        # back to the scan-level reprocess.
+        branch_cb = self._reprocess_branch_callback
+        if branch_cb is not None:
+            try:
+                branch_cb(int(scan_id), bp)
+                return
+            except Exception:
+                pass
         cb = self._reprocess_snaps_callback
         if cb is not None:
             try:

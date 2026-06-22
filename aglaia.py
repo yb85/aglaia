@@ -503,6 +503,26 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         _threading.Thread(target=_worker, daemon=True,
                           name="ReprocessSnaps").start()
 
+    def reprocess_branch_callback(scan_id, branch_label):
+        """Reprocess ONE page-branch of a scan (per-page step toggle). Reruns
+        only that branch from its split point — sibling pages untouched —
+        falling back to a whole-scan rerun when the scan isn't split."""
+        from lib.workers.ImportHelpers import reprocess_branch
+        cur_chain = state["chain"]
+        cur_pvid = state["pipeline_version_id"]
+        sid, blabel = int(scan_id), str(branch_label or "")
+
+        def _worker():
+            try:
+                reprocess_branch(
+                    db_path=str(db_path), pipeline_version_id=cur_pvid,
+                    chain=cur_chain, scan_id=sid, branch_label=blabel,
+                )
+            except Exception as e:
+                print(f"reprocess branch: {e}", file=sys.stderr)
+        _threading.Thread(target=_worker, daemon=True,
+                          name="ReprocessBranch").start()
+
     def stop_pipeline_callback() -> int:
         """Hard-stop the current chain + spin up a fresh, idle one.
         Returns the count of items discarded across the queues."""
@@ -534,6 +554,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         apply_pipeline_callback=apply_pipeline_callback,
         force_reprocess_callback=force_reprocess_callback,
         reprocess_scans_callback=reprocess_scans_callback,
+        reprocess_branch_callback=reprocess_branch_callback,
         stop_pipeline_callback=stop_pipeline_callback,
     )
     window.show()

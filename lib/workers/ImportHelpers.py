@@ -295,6 +295,106 @@ def reprocess_active_scans(*, db_path: str, pipeline_version_id: int,
         conn.close()
 
 
+def reprocess_branch(*, db_path: str, pipeline_version_id: int, chain,
+                     scan_id: int, branch_label: str) -> int:
+    """Re-run only ONE page-branch of a scan, from its split point.
+
+    Toggling a per-page step on page A used to reprocess the whole scan from
+    raw — re-running PageDetector and recomputing the *other* page(s) for
+    nothing. Here we resume from the branch's anchor (the shallowest node
+    carrying ``branch_label`` — i.e. the PageDetector child for that page),
+    wipe only that branch's downstream subtree, and re-enqueue a resume-ref so
+    the worker re-runs just the post-split steps for this branch.
+
+    Falls back to a whole-scan reprocess when the scan isn't actually split
+    (≤1 branch) or the branch can't be isolated — never silently does nothing.
+    Returns 1 on a branch rerun, else the fallback's count.
+    """
+    from lib.storage.repo import NodeRepo, ImageRepo
+
+    def _fallback():
+        return reprocess_active_scans(
+            db_path=db_path, pipeline_version_id=pipeline_version_id,
+            chain=chain, scan_ids={int(scan_id)})
+
+    conn = open_db(db_path)
+    try:
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = OFF")
+        node_repo = NodeRepo(conn)
+        image_repo = ImageRepo(conn)
+        n_branches = conn.execute(
+            "SELECT COUNT(*) AS n FROM branches WHERE scan_id = ?", (int(scan_id),)
+        ).fetchone()["n"]
+        anchor = conn.execute(
+            "SELECT * FROM nodes WHERE scan_id = ? AND branch_label = ? "
+            "ORDER BY step_idx ASC LIMIT 1", (int(scan_id), str(branch_label)),
+        ).fetchone()
+        # No real split, or branch not found / has no image → whole-scan path.
+        if (n_branches is None or int(n_branches) <= 1 or anchor is None
+                or anchor["image_id"] is None):
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.close()
+            return _fallback()
+
+        anchor_id = int(anchor["id"])
+        anchor_step = int(anchor["step_idx"])
+        # parent_stem = the pre-split (parent) node's stem, matching what the
+        # normal PageDetector re-enqueue passes (out_buf.parent_stem). Used by
+        # the GUI to route resumed events to the right branch card.
+        parent_row = conn.execute(
+            "SELECT filestem FROM nodes WHERE id = ?", (anchor["parent_id"],),
+        ).fetchone() if anchor["parent_id"] is not None else None
+        anchor_parent_stem = parent_row["filestem"] if parent_row else None
+        # Images held by the subtree we're about to drop (anchor's descendants
+        # for this branch). GC'd after the delete commits — same content-
+        # addressed-orphan rationale as reprocess_active_scans.
+        stale_img_ids = [
+            r["image_id"] for r in conn.execute(
+                "SELECT DISTINCT image_id FROM nodes WHERE scan_id = ? "
+                "AND branch_label = ? AND id != ? AND image_id IS NOT NULL",
+                (int(scan_id), str(branch_label), anchor_id),
+            ).fetchall()
+        ]
+        # Drop this branch's row(s) (leaf 'A' and any nested 'A.*') + mark its
+        # OCR stale; sibling branches' rows are untouched.
+        conn.execute(
+            "DELETE FROM branches WHERE scan_id = ? AND (branch_path = ? "
+            "OR branch_path LIKE ?)",
+            (int(scan_id), str(branch_label), f"{branch_label}.%"),
+        )
+        conn.execute(
+            "UPDATE ocr_runs SET is_stale = 1 WHERE scan_id = ? AND node_id IN "
+            "(SELECT id FROM nodes WHERE scan_id = ? AND branch_label = ?)",
+            (int(scan_id), int(scan_id), str(branch_label)),
+        )
+        # Wipe the branch's downstream nodes (anchor's descendants); anchor and
+        # all sibling branches survive.
+        node_repo.delete_subtree(anchor_id, include_self=False)
+        for iid in stale_img_ids:
+            if conn.execute("SELECT 1 FROM nodes WHERE image_id = ? LIMIT 1",
+                            (iid,)).fetchone():
+                continue
+            if conn.execute(
+                "SELECT 1 FROM debug_artifacts WHERE image_id = ? LIMIT 1",
+                (iid,)).fetchone():
+                continue
+            conn.execute("DELETE FROM thumbs WHERE image_id = ?", (iid,))
+            conn.execute("DELETE FROM images WHERE id = ?", (iid,))
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = ON")
+    finally:
+        conn.close()
+
+    # Resume the pipeline from the anchor for this branch only.
+    chain.enqueue_resume(
+        node_id=anchor_id, start_idx=anchor_step,
+        branch_path=str(branch_label), scan_id=int(scan_id),
+        parent_stem=anchor_parent_stem,
+    )
+    return 1
+
+
 def scans_needing_catchup(db_path: str) -> list[int]:
     """Active scans with no branches row → never reached the pipeline objective.
 
