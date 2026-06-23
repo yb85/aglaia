@@ -57,6 +57,26 @@ PROJECT_EXT = ".agl"
 
 # ── public dispatch ────────────────────────────────────────────────
 
+def filetype_registration_available() -> bool:
+    """True when there's a real target to bind ``.agl`` to. On macOS that
+    means an actual Aglaïa.app on disk (frozen process or an install) — a
+    bare CLI / `python -m aglaia` / source run has none, so binding would
+    point at the Python process. Linux registers a `.desktop` and works from
+    any launch. The Settings button is disabled when this is False."""
+    if sys.platform == "darwin":
+        # Only when running AS the bundled .app (sys.frozen). A CLI /
+        # `python -m aglaia` / source run shouldn't touch the system binding
+        # (it would point .agl at the Python process), even if an .app
+        # happens to exist on disk.
+        if not getattr(sys, "frozen", False):
+            return False
+        app = _find_installed_app()
+        return app is not None and app.is_dir()
+    if sys.platform.startswith("linux"):
+        return True
+    return False
+
+
 def register_filetype(*, app_path: Path | None = None,
                       icon_path: Path | None = None) -> tuple[bool, str]:
     """Register `.agl` with the host OS. Returns (ok, message)."""

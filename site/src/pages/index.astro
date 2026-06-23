@@ -1,6 +1,9 @@
 ---
 const GITHUB = 'https://github.com/yb85/aglaia';
-const LATEST = `${GITHUB}/releases/latest`;
+// Direct download of the newest macOS (Apple Silicon) DMG — the release CI
+// publishes a stable-named copy so this URL never needs the version. Avoids
+// dumping new users on the GitHub releases page.
+const DOWNLOAD = `${GITHUB}/releases/latest/download/Aglaia-macos-arm64.dmg`;
 const KOFI = 'https://ko-fi.com/yb_85';
 
 // Icons match the app sidebar tabs (lucide): camera, sliders-horizontal,
@@ -51,7 +54,7 @@ const powers = [
           <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
           Tip
         </a>
-        <a class="btn btn--sm" href={LATEST} data-download>Download</a>
+        <a class="btn btn--sm" href={DOWNLOAD} data-download>Download</a>
       </nav>
     </header>
 
@@ -69,7 +72,7 @@ const powers = [
             <span class="lede__l3">No flatbed, no bulky rig: just you, your laptop and your phone.</span>
           </p>
           <div class="cta reveal">
-            <a class="btn" href={LATEST} data-download>Download for macOS</a>
+            <a class="btn" href={DOWNLOAD} data-download>Download for macOS</a>
             <a class="btn btn--ghost" href="/docs">Read the docs →</a>
           </div>
           <p class="fineprint reveal">Linux and Windows versions coming soon…</p>
@@ -292,7 +295,7 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
           <h2>Digitize your shelf.</h2>
           <p>Free, source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, and yours to extend.</p>
           <div class="cta">
-            <a class="btn btn--lg" href={LATEST} data-download>Download for macOS</a>
+            <a class="btn btn--lg" href={DOWNLOAD} data-download>Download for macOS</a>
             <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
           </div>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
@@ -323,6 +326,46 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
       // reveal everything shortly after load.
       addEventListener('load', () => setTimeout(
         () => revealEls.forEach((el) => el.classList.add('in')), 1000));
+
+      // Tiny shell syntax highlighter for the install code tabs — runs FIRST,
+      // synchronously, before the `await import('lenis')` below, so it can
+      // never be skipped by a slow/failed dynamic import. Wraps comments /
+      // leading command / flags / quoted strings in spans; span text
+      // concatenates back to the original, so Copy (textContent) is intact.
+      try {
+        const hlEsc = (s: string) =>
+          s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const hlLine = (line: string): string => {
+          let code = line, comment = '';
+          const m = line.match(/(?:^|\s)#/);
+          if (m) {
+            const i = line.indexOf('#', m.index);
+            code = line.slice(0, i);
+            comment = line.slice(i);
+          }
+          let out = '', first = true;
+          const re = /(\s+)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\S+)/g;
+          let t: RegExpExecArray | null;
+          while ((t = re.exec(code))) {
+            if (t[1]) { out += t[1]; continue; }
+            if (t[2]) { out += `<span class="tok-str">${hlEsc(t[2])}</span>`; continue; }
+            const w = t[3];
+            if (first && /^[a-z]/i.test(w)) {
+              out += `<span class="tok-cmd">${hlEsc(w)}</span>`; first = false; continue;
+            }
+            first = false;
+            if (/^--?\w/.test(w)) { out += `<span class="tok-flag">${hlEsc(w)}</span>`; continue; }
+            out += hlEsc(w);
+          }
+          if (comment) out += `<span class="tok-comment">${hlEsc(comment)}</span>`;
+          return out;
+        };
+        document.querySelectorAll<HTMLElement>('.code__panel code').forEach((c) => {
+          c.innerHTML = (c.textContent || '').split('\n').map(hlLine).join('\n');
+        });
+      } catch (err) {
+        console.warn('Aglaïa: code highlight failed', err);
+      }
 
       // Before/after swipes — each drives its own clip divider, and hides a
       // corner label once its image is mostly slid away.
@@ -368,39 +411,6 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
           document.querySelectorAll<HTMLElement>('.code__panel').forEach((p) =>
             p.classList.toggle('is-active', p.dataset.panel === k));
         });
-      });
-      // Tiny shell syntax highlighter — wraps comments / leading command /
-      // flags / quoted strings in spans. Span text concatenates back to the
-      // original, so Copy (textContent) is unaffected.
-      const hlEsc = (s: string) =>
-        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      function hlLine(line: string): string {
-        let code = line, comment = '';
-        const m = line.match(/(?:^|\s)#/);
-        if (m) {
-          const i = line.indexOf('#', m.index);
-          code = line.slice(0, i);
-          comment = line.slice(i);
-        }
-        let out = '', first = true;
-        const re = /(\s+)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\S+)/g;
-        let t: RegExpExecArray | null;
-        while ((t = re.exec(code))) {
-          if (t[1]) { out += t[1]; continue; }
-          if (t[2]) { out += `<span class="tok-str">${hlEsc(t[2])}</span>`; continue; }
-          const w = t[3];
-          if (first && /^[a-z]/i.test(w)) {
-            out += `<span class="tok-cmd">${hlEsc(w)}</span>`; first = false; continue;
-          }
-          first = false;
-          if (/^--?\w/.test(w)) { out += `<span class="tok-flag">${hlEsc(w)}</span>`; continue; }
-          out += hlEsc(w);
-        }
-        if (comment) out += `<span class="tok-comment">${hlEsc(comment)}</span>`;
-        return out;
-      }
-      document.querySelectorAll<HTMLElement>('.code__panel code').forEach((c) => {
-        c.innerHTML = (c.textContent || '').split('\n').map(hlLine).join('\n');
       });
 
       const copyBtn = document.querySelector<HTMLButtonElement>('.code__copy');

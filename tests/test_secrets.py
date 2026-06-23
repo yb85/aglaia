@@ -13,6 +13,7 @@ writes on the dev machine).
 """
 
 import importlib
+import os
 
 import pytest
 
@@ -46,10 +47,14 @@ def test_set_falls_back_to_env_file(sec, tmp_path):
     assert (tmp_path / ".env").exists()
     assert sec.get_mistral_api_key() == "sk-abc"
     assert sec.mistral_key_location() == "env_file"
-    # 0600 perms on the cleartext fallback
-    import stat
-    mode = stat.S_IMODE((tmp_path / ".env").stat().st_mode)
-    assert mode == 0o600
+    # 0600 perms on the cleartext fallback — POSIX only. Windows can't
+    # represent owner-only mode bits (os.chmod toggles just the read-only
+    # bit), so st_mode never equals 0o600 there; on Windows the secure store
+    # is the Credential Manager via keyring, and .env is a last-resort fallback.
+    if os.name != "nt":
+        import stat
+        mode = stat.S_IMODE((tmp_path / ".env").stat().st_mode)
+        assert mode == 0o600
 
 
 def test_env_var_overrides_file(sec, monkeypatch):

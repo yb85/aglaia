@@ -40,9 +40,11 @@ def _default_workers() -> int:
     cores = os.cpu_count() or 4
     return min(math.ceil(cores / 2), 4)
 
-# Bundled defaults — repo-local, not copied into APP_DATA.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULTS_YAML = _REPO_ROOT / "config" / "config_default.yaml"
+# Bundled defaults — shipped INSIDE the package (aglaia/config/), both in
+# source and in the PyInstaller bundle. `parents[1]` is the `aglaia/` package
+# dir; `parents[2]` was the pre-refactor repo-root `config/`, which no longer
+# exists on a fresh install / in the frozen app.
+_DEFAULTS_YAML = Path(__file__).resolve().parents[1] / "config" / "config_default.yaml"
 
 
 # ── canonical keys ────────────────────────────────────────────────────
@@ -97,6 +99,12 @@ KEY_DEBUG_OVERLAYS = "debug_overlays_shown"   # bool — Debug viewer's "Show
                                   # sessions.
 KEY_WELCOME_SEEN = "welcome_seen"  # bool — first-run welcome/permissions
                                    # screen has been shown + dismissed.
+KEY_FILETYPE_ASSOC_DONE = "filetype_assoc_done"  # bool — auto-registered the
+                                   # .agl ↔ app binding once (first .app launch).
+KEY_MISTRAL_BATCH = "mistral_batch"  # bool — Cloud OCR (Mistral) submits a
+                                   # batch job (cheaper, async) instead of a
+                                   # synchronous OCR run. Remembered across
+                                   # sessions; the OCR card's batch toggle.
 
 BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_THEME: "system",
@@ -123,6 +131,8 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_LIVE_OCR: False,
     KEY_DEBUG_OVERLAYS: False,
     KEY_WELCOME_SEEN: False,
+    KEY_FILETYPE_ASSOC_DONE: False,
+    KEY_MISTRAL_BATCH: False,
 }
 
 

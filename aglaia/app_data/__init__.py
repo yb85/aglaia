@@ -83,7 +83,12 @@ def cache_dir() -> Path:
     return _resolve(_ENV_CACHE, user_cache_dir)
 
 
-_BUNDLED_PIPELINES = Path(__file__).resolve().parents[2] / "config" / "pipelines"
+# Bundled read-only pipeline defs live INSIDE the package (aglaia/config/…),
+# both in source and in the PyInstaller bundle (spec ships them at the same
+# package-relative path). `parents[1]` is the `aglaia/` package dir; using
+# `parents[2]` (the old repo-root `config/`) silently finds nothing on a fresh
+# install — config moved into the package during the pip-packaging refactor.
+_BUNDLED_PIPELINES = Path(__file__).resolve().parents[1] / "config" / "pipelines"
 _pipelines_seeded = False
 
 

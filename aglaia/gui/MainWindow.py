@@ -753,6 +753,9 @@ class MainWindow(QMainWindow):
             self.tr("Show Downloader"), None,
             lambda: self._open_model_downloader()))
         view_menu.addAction(_act(
+            self.tr("Mistral OCR jobs…"), None,
+            lambda: self.open_mistral_jobs_tab()))
+        view_menu.addAction(_act(
             self.tr("Close Tab"), QKeySequence.StandardKey.Close,
             self._close_current_tab))
         view_menu.addSeparator()
@@ -1035,6 +1038,8 @@ class MainWindow(QMainWindow):
             self._settings_tab = None
         if getattr(self, "_fix_dpi_tab", None) is w:
             self._fix_dpi_tab = None
+        if getattr(self, "_mistral_jobs_tab", None) is w:
+            self._mistral_jobs_tab = None
         self.tabs.removeTab(idx)
         w.deleteLater()
 
@@ -1314,6 +1319,12 @@ class MainWindow(QMainWindow):
         # Engine switch — mark all done runs of the OLD engine as
         # stale so badges + default OCR run mode pick them up.
         self._ocr_tab.engine_changed.connect(self._on_ocr_engine_changed)
+        # Mistral batch card buttons.
+        self._ocr_tab.batch_check_requested.connect(
+            self._on_batch_check_requested)
+        self._ocr_tab.batch_cancel_requested.connect(
+            self._on_batch_cancel_requested)
+        self._ocr_tab.jobs_tab_requested.connect(self.open_mistral_jobs_tab)
 
         # ── Export-tab wiring ──────────────────────────────────────
         self._export_tab.btn_export.clicked.connect(self._on_export_clicked)
@@ -2988,6 +2999,17 @@ class MainWindow(QMainWindow):
         of "switching engines invalidates the prior output"."""
         if not new_engine:
             return
+        # Remember the pick so it's the default selection next launch
+        # ("last used"). Stored in the config DB's OCR defaults.
+        try:
+            from aglaia.app_data import db as _cfg
+            with _cfg.session() as _conn:
+                _d = _cfg.get(_conn, _cfg.KEY_OCR_DEFAULTS, {}) or {}
+                _d["engine"] = new_engine
+                _cfg.set(_conn, _cfg.KEY_OCR_DEFAULTS, _d)
+                _conn.commit()
+        except Exception:
+            pass
         try:
             with db_session(str(self.db_path)) as conn:
                 n = OcrRepo(conn).mark_stale_for_engine_switch(new_engine)
@@ -3082,6 +3104,9 @@ class MainWindow(QMainWindow):
         self.ocr_frame.set_pipeline_running(pipeline_running)
         self._update_stop_btn_state(pipeline_running)
         self._update_ocr_stop_btn_state(False)
+        # Reflect any pending Mistral batch job on the OCR card (also gates
+        # the Run button when a batch is in flight).
+        self._refresh_batch_card()
         # DB-derived pending counts → keeps the OCR frame in sync with
         # whatever the badges show. Single source of truth.
         if not pipeline_running:
@@ -3181,16 +3206,136 @@ class MainWindow(QMainWindow):
                               complement: str = ""):
         if self._ocr_worker is not None and self._ocr_worker.isRunning():
             return
+        batch = (engine == "mistral_cloud"
+                 and getattr(self, "_ocr_tab", None) is not None
+                 and self._ocr_tab.batch_enabled())
         self._ocr_worker = OcrWorker(
             db_path=str(self.db_path), engine_name=engine,
             languages=list(languages), mode=mode, complement=complement,
+            batch=batch,
         )
-        self._ocr_worker.started_total.connect(self._on_ocr_started_total)
-        self._ocr_worker.progress_scan.connect(self._on_ocr_progress)
         self._ocr_worker.log_line.connect(self._on_log_line)
-        self._ocr_worker.finished_ok.connect(self._on_ocr_finished)
+        self._ocr_worker.started_total.connect(self._on_ocr_started_total)
+        if batch:
+            # Batch: submit + leave pending; no per-page progress / finish.
+            self._ocr_worker.batch_submitted.connect(self._on_batch_submitted)
+            # Clear the OCR-running frame once the submit thread actually ends
+            # (batch_submitted fires from inside run(), still "running").
+            self._ocr_worker.finished.connect(self._on_batch_thread_finished)
+        else:
+            self._ocr_worker.progress_scan.connect(self._on_ocr_progress)
+            self._ocr_worker.finished_ok.connect(self._on_ocr_finished)
         self._update_ocr_frame_state()
         self._ocr_worker.start()
+
+    # ── Mistral batch ──────────────────────────────────────────────────
+    def _on_batch_submitted(self, n_jobs: int, error: str):
+        self.status_bar_widget.progress.set_indeterminate(False)
+        if error:
+            self.toast(self.tr("Batch submit failed: {e}").format(e=error))
+        else:
+            self.toast(self.tr("Submitted {n} Mistral batch job(s). Pull "
+                               "results later with 'Check result'.").format(
+                                   n=n_jobs))
+        self._update_ocr_frame_state()
+        self._refresh_batch_card()
+
+    def _on_batch_thread_finished(self) -> None:
+        # The submit thread ended → drop the OCR-running frame/overlay and
+        # resync the card + badges (the runs are pending, not stale).
+        self.status_bar_widget.progress.set_indeterminate(False)
+        self._update_ocr_frame_state()
+        self.ocr_state_changed.emit()
+        self._refresh_alt_views_if_visible()
+        self._refresh_batch_card()
+
+    def _refresh_batch_card(self) -> None:
+        try:
+            if getattr(self, "_ocr_tab", None) is not None:
+                self._ocr_tab.refresh_batch_state()
+        except Exception:
+            pass
+
+    def _on_batch_check_requested(self) -> None:
+        from aglaia.workers.MistralBatchWorker import MistralBatchWorker
+        if getattr(self, "_batch_worker", None) is not None \
+                and self._batch_worker.isRunning():
+            return
+        self._batch_worker = MistralBatchWorker(
+            action="check", db_path=str(self.db_path))
+        self._batch_worker.log_line.connect(self._on_log_line)
+        self._batch_worker.check_done.connect(self._on_batch_check_done)
+        self.toast(self.tr("Checking Mistral batch job(s)…"))
+        self._batch_worker.start()
+
+    def _on_batch_check_done(self, imported: int, pending: int, failed: int,
+                             msg: str) -> None:
+        self.toast(msg)
+        if imported:
+            self.ocr_state_changed.emit()
+            self._refresh_alt_views_if_visible()
+        self._refresh_batch_card()
+
+    def _on_batch_cancel_requested(self) -> None:
+        from aglaia.workers.MistralBatchWorker import MistralBatchWorker
+        from aglaia.storage.db import db_session
+        from aglaia.storage.repo import MistralBatchRepo
+        jids: list[str] = []
+        try:
+            with db_session(str(self.db_path)) as conn:
+                jids = [r["job_id"] for r in MistralBatchRepo(conn).pending()]
+        except Exception:
+            jids = []
+        if not jids:
+            self._refresh_batch_card()
+            return
+        self._batch_cancel_workers = []
+        for jid in jids:
+            w = MistralBatchWorker(action="cancel", db_path=str(self.db_path),
+                                   job_id=jid)
+            w.cancel_done.connect(lambda *_: self._refresh_batch_card())
+            self._batch_cancel_workers.append(w)
+            w.start()
+        self.toast(self.tr("Cancelling {n} batch job(s)…").format(n=len(jids)))
+
+    def open_mistral_jobs_tab(self) -> None:
+        existing = getattr(self, "_mistral_jobs_tab", None)
+        if existing is not None:
+            try:
+                self.tabs.setCurrentWidget(existing)
+                existing.refresh()
+                return
+            except Exception:
+                pass
+        from aglaia.gui.MistralJobsTab import MistralJobsTab
+        from aglaia.gui.theme import lucide as _lucide_tab
+        tab = MistralJobsTab(str(self.db_path))
+        tab.open_project_requested.connect(self._on_jobs_open_project)
+        self._mistral_jobs_tab = tab
+        idx = self.tabs.addTab(tab, _lucide_tab("cloud", size=14),
+                               self.tr("Mistral jobs"))
+        self.tabs.setCurrentIndex(idx)
+
+    def _on_jobs_open_project(self, path: str) -> None:
+        from PySide6.QtWidgets import QMessageBox, QApplication
+        from pathlib import Path
+        p = Path(str(path))
+        if not p.exists():
+            self.toast(self.tr("Project not found: {p}").format(p=p))
+            return
+        if QMessageBox.question(
+                self, self.tr("Open project?"),
+                self.tr("Close the current project and open\n{p}?").format(
+                    p=p.name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty("aglaia_restart", "reopen")
+            app.setProperty("aglaia_reopen_path", str(p))
+        self.close()
 
     def _on_ocr_started_total(self, total: int):
         # `total == 0` means "nothing to do" — don't repaint the bar as

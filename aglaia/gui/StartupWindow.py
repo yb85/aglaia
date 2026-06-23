@@ -560,6 +560,11 @@ class StartupWindow(QDialog):
     _GRID_HGAP = 18
     _GRID_VGAP = 18
     _MAX_RECENTS = 7  # 9 tiles total = 1 Open + 7 recents + 1 New
+    # The window also hosts the taller New-project page in the same fixed-size
+    # stack, so its height is floored to this many grid rows. Without the floor
+    # an empty/sparse history sizes the window to 1 row and the New-project
+    # view inherits that tiny height (cramped camera + pipeline picker).
+    _MIN_WINDOW_ROWS = 3
 
     def __init__(self, parent=None, *, initial_action: str | None = None):
         super().__init__(parent)
@@ -587,29 +592,9 @@ class StartupWindow(QDialog):
         self._stack.addWidget(self._build_new_page())       # 1
         outer.addWidget(self._stack, 1)
 
-        # Size the dialog to exactly fit the actually-populated grid +
-        # chrome. Cap recents at MAX, total tiles = 1 Open + N recents
-        # + 1 New, rounded up to whole rows so the bottom edge sits flush
-        # against the footer (no tall blank pane below sparse grids).
-        n_recents = min(len(self._load_recents()), self._MAX_RECENTS)
-        n_tiles = 1 + n_recents + 1
-        n_rows = max(1, (n_tiles + self.GRID_COLS - 1) // self.GRID_COLS)
-        grid_w = self.GRID_COLS * self._CARD_W + (self.GRID_COLS - 1) * self._GRID_HGAP
-        grid_h = n_rows * self._CARD_H + (n_rows - 1) * self._GRID_VGAP
-        # Chrome budget = title row (~46) + post-title spacing (16) +
-        # outer dialog margins (20+20) + outer dialog spacing (12) +
-        # footer link strip (~56) + footer top spacing (12). Bottom
-        # margin matches the side margin so the window reads as
-        # uniformly padded.
-        # Extra 14 px below the grid so the bottom row's 1.5 px border
-        # doesn't bleed under the footer link strip (regression at small
-        # window heights — looked like the cards were cropped).
-        chrome_h = 46 + 16 + 40 + 12 + 56 + 12 + 14 + 18 + 30
-        # +48 (not the bare 20+20 margins) gives the edge cards' 1.5 px
-        # selected/accent borders a few px of slack so they don't clip.
-        win_w = grid_w + 48
-        win_h = grid_h + chrome_h
-        self.setFixedSize(win_w, win_h)
+        # Size the dialog to fit the recents grid + chrome, with the height
+        # floored to fit the taller New-project page (see _window_size).
+        self.setFixedSize(*self._window_size())
 
         self._install_shortcuts()
         # Honour the ⌘N / ⌘O pre-navigation once the dialog is up.
@@ -836,6 +821,24 @@ class StartupWindow(QDialog):
         return out
 
     # ── page 1: new project ──────────────────────────────────────────
+    def _window_size(self) -> tuple[int, int]:
+        """Fixed (width, height) for the dialog. Width fits a GRID_COLS-wide
+        recents grid; height fits the populated grid BUT is floored to
+        `_MIN_WINDOW_ROWS` so the taller New-project page (same fixed-size
+        stack) is never cramped — even with no project history."""
+        n_recents = min(len(self._load_recents()), self._MAX_RECENTS)
+        n_tiles = 1 + n_recents + 1
+        n_rows = max(1, (n_tiles + self.GRID_COLS - 1) // self.GRID_COLS)
+        size_rows = max(n_rows, self._MIN_WINDOW_ROWS)
+        grid_w = self.GRID_COLS * self._CARD_W + (self.GRID_COLS - 1) * self._GRID_HGAP
+        grid_h = size_rows * self._CARD_H + (size_rows - 1) * self._GRID_VGAP
+        # Chrome budget: title row (46) + post-title spacing (16) + outer
+        # margins (40) + outer spacing (12) + footer strip (56) + footer top
+        # spacing (12) + 14 px bottom-border slack + 18 + 30. +48 on width
+        # gives the edge cards' 1.5 px accent borders slack so they don't clip.
+        chrome_h = 46 + 16 + 40 + 12 + 56 + 12 + 14 + 18 + 30
+        return grid_w + 48, grid_h + chrome_h
+
     def _build_new_page(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
@@ -999,21 +1002,11 @@ class StartupWindow(QDialog):
         except Exception:
             return
         self._populate_recents_grid()
-        # Window size depends on remaining row count — re-pin via a
-        # fresh setFixedSize call. Unfix first so Qt accepts the new
-        # size.
-        n_recents = min(len(self._load_recents()), self._MAX_RECENTS)
-        n_tiles = 1 + n_recents + 1
-        n_rows = max(1, (n_tiles + self.GRID_COLS - 1) // self.GRID_COLS)
-        grid_w = self.GRID_COLS * self._CARD_W + (self.GRID_COLS - 1) * self._GRID_HGAP
-        grid_h = n_rows * self._CARD_H + (n_rows - 1) * self._GRID_VGAP
-        # Extra 14 px below the grid so the bottom row's 1.5 px border
-        # doesn't bleed under the footer link strip (regression at small
-        # window heights — looked like the cards were cropped).
-        chrome_h = 46 + 16 + 40 + 12 + 56 + 12 + 14 + 18 + 30
+        # Re-pin the window size for the new row count. Unfix first so Qt
+        # accepts the change.
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
-        self.setFixedSize(grid_w + 48, grid_h + chrome_h)
+        self.setFixedSize(*self._window_size())
 
     def _open_recent(self, path: str) -> None:
         from aglaia.storage import (

@@ -1,142 +1,133 @@
 # Quickstart
 
-Get from a stack of book photos (or a PDF) to a searchable PDF / Markdown in
-a few minutes. This is the guided happy path; the reference docs in the
-[table](./README.md) go deeper on every step.
+Aglaïa is a Mac app that turns book photos (or a PDF) into a **searchable
+PDF / Markdown**. Everything happens in the app — no command line. Each book
+you work on is a **project**, saved as a single `<name>.agl` file you can
+move, back up, or reopen later.
 
-Aglaïa has **one entry point**, `aglaia`, in two modes:
+Install: download **Aglaïa** for macOS (Apple Silicon) from
+[aglaia.bibli.cc](https://aglaia.bibli.cc), open the `.dmg`, and drag the app
+to your Applications folder.
 
-- **GUI** (macOS) — webcam capture + live processing: `aglaia <workspace>`
-- **Headless CLI** (cross-platform) — same pipeline, no Qt:
-  `aglaia <workspace> --headless …`
-
-A *workspace* is a project directory; its state lives in a single
-`<name>.scanproj.sqlite` (a.k.a. `.agl`) file — see [storage.md](./storage.md).
-
----
-
-## 1. Install
-
-Managed with [`uv`](https://docs.astral.sh/uv/). Pick the extras for what you
-need (base deps are GUI-free):
-
-```bash
-# Headless / CLI / CI — no Qt
-uv sync --extra dev
-
-# GUI (cross-platform Qt)
-uv sync --extra dev --extra gui
-
-# macOS capture GUI (Qt + Vision/AVFoundation + MLX dewarp)
-uv sync --extra dev --extra gui --extra macos
-
-# Linux + NVIDIA GPU (CUDA 12 JAX wheels — faster dewarp)
-uv sync --extra dev --extra cuda
-```
-
-> OCR via **Apple Vision** is macOS-only; **Surya** is cross-platform. Voice
-> control (Vosk) is the `voice` extra. Cloud OCR (Mistral) is `cloud`.
+> There's also a cross-platform headless command-line mode for power users —
+> see the [CLI reference](./configuration.md). This guide stays in the app.
 
 ---
 
-## 2a. Capture from a webcam (GUI, macOS)
+## 1. Open the app — the starting window
 
-```bash
-uv run aglaia ~/scans/my-book
-```
+When Aglaïa launches you land on the **starting window**, a gallery of cards:
 
-1. **Pick a camera** in the capture sidebar (Continuity Camera works).
-2. **Set the scale.** The DPI readout shows `DPI: N (uncalibrated)`. Either:
-   - **Click the readout** to type a value manually (shows `(manual)`), or
-   - **Calibrate DPI** — hold an ISO ID-1 credit-card-sized object flat in
-     frame; the dialog auto-detects it, holds steady, and auto-captures a
-     measurement. (One-off camera distortion correction lives behind **Full
-     Calibration** with the A4 chessboard target — see
-     [calibration.md](./calibration.md).)
-3. **Capture** each page (button, keyboard, or say "photo" with voice
-   control). Each shot runs the pipeline live; the scans column shows
-   raw → stages → output per page.
-4. When done, **export** (see step 4).
+- **Recent projects** — one card per book you've opened recently (with a
+  thumbnail and scan count). Click one to reopen it. The small **×** forgets
+  a card without deleting the file.
+- **New project** — the accented last card. Click it to set up a new book.
 
-## 2b. Import images or a PDF (GUI or headless)
+Creating a new project asks for a few choices:
 
-The import panel accepts multiple images and PDFs (per-page extract or
-render). From the CLI, just pass the files:
+- **Name & folder** — what to call the book and where to save its `.agl`.
+- **How pages come in** — two cards:
+  - **Capture** — you'll photograph pages with a camera.
+  - **Files** — you'll import photos or a PDF you already have.
+- **Pipeline** — the cleanup recipe (e.g. *curved book, 2 pages per photo*).
+  The default is right for most books; **Properties** opens the full editor
+  if you want to tweak it. You can also change it later.
 
-```bash
-# Ingest images into a new/!existing project
-uv run aglaia ~/scans/my-book.agl --headless page-01.jpg page-02.jpg
-
-# Extract a PDF's pages and process them
-uv run aglaia ~/scans/my-book.agl --headless scan.pdf --input-dpi 300
-```
-
-`--input-dpi` sets the assumed resolution for imported **images** (PDFs
-estimate per-page DPI from paper size).
+Pick, confirm, and Aglaïa opens the **main window** for that project.
 
 ---
 
-## 3. Process
+## 2. The main window
 
-Both modes run the same YAML-defined pipeline (default
-`config/pipelines/book_curved_x2.yaml` — DPI clamp → skew → page detect →
-dewarp → binarize). Override with `-p`:
+The window has two parts: the **work area** on the left (the live camera
+and/or the column of scanned pages, each showing raw → cleanup stages →
+result) and the **sidebar** on the right — a vertical strip of icons, each
+opening one panel. Top to bottom:
 
-```bash
-uv run aglaia ~/scans/my-book.agl --headless \
-    -p book_curved_x2 --workers 4
-```
+### 📷 Capture
+Photograph pages with a built-in or Continuity (iPhone) camera. Pick the
+camera, frame a flat page, and shoot with the button (or say "photo" with
+voice control). Every shot is processed live and added to the scans column.
+The **DPI** readout here is critical — see [Troubleshooting](#troubleshooting).
 
-`-p` takes a bundled name (`book_curved_x2`) or a path to a `.yaml`. See
-[pipeline.md](./pipeline.md) for the schema and
-[processors.md](./processors.md) for what each step does (and how to add your
-own — built-in or drop-in plugin).
+### ⬇️ Import
+Drop in photos or a PDF (it extracts or renders each page). Use this for
+scans you already have instead of a live camera.
 
----
+### 🎚️ Pipeline
+The cleanup recipe applied to every page (deskew → detect pages → flatten →
+black-and-white). Switch recipes, tune steps, or preview the effect. This
+panel also has a **Fix input DPI** button — the single most important fix
+when results look wrong (again, see [Troubleshooting](#troubleshooting)).
 
-## 4. OCR + export
+### 🔤 OCR
+Add a searchable text layer. Pick an **engine** (Apple Vision on macOS, or a
+cloud option) and the **language(s)**, then run it. Without OCR your export
+is an image-only PDF you can't search.
 
-OCR and export are off-chain passes you can run in the same headless
-invocation:
+### 📤 Export
+Produce the final file(s):
 
-```bash
-uv run aglaia ~/scans/my-book.agl --headless \
-    --do-ocr apple:lang=fr-FR \
-    --export "pdf:g4+md"
-```
+- a **searchable PDF** — the page image plus an invisible, selectable text
+  layer, and/or
+- **Markdown** — the text as a clean document.
 
-- `--do-ocr [ENGINE[:opt…]]` — `auto` | `apple` | `surya` | any registered
-  engine; e.g. `apple:lang=fr-FR`, or `--ocr-lang fr-FR+en-US`. Surya
-  autodetects language. See [ocr.md](./ocr.md).
-- `--export` — `+`-joined specs. `pdf:<profile>` (`jbig2` default / `g4` /
-  `native`) makes a searchable PDF (image + invisible OCR text layer); `md`
-  makes structured Markdown. `md:refine=apple_fm` post-refines the Markdown.
-  See [export.md](./export.md) and [markdown_export.md](./markdown_export.md).
+Exports land next to your `.agl` project file.
 
-In the **GUI**, the same actions live in the export panel.
-
----
-
-## Full headless one-liner
-
-Ingest a PDF, process, OCR, and emit both a G4 PDF and Markdown:
-
-```bash
-uv run aglaia ~/scans/my-book.agl --headless scan.pdf \
-    -p book_curved_x2 --workers 4 \
-    --do-ocr apple --ocr-lang fr-FR+en-US \
-    --export "pdf:g4+md"
-```
-
-Outputs land next to the `.agl` project file.
+> **Bottom of the sidebar:** close the project, report a bug, and settings
+> (theme, language, default OCR engine, …).
 
 ---
 
-## Where next
+## Troubleshooting
 
-- Something looks wrong in the output → [lessons.md](./lessons.md) (DPI
-  pitfalls, dewarp quirks) and per-page step toggles in [gui.md](./gui.md).
-- Tune or write a pipeline → [pipeline.md](./pipeline.md),
-  [processors.md](./processors.md).
-- Extend without touching the repo → drop-in
-  [processor / OCR plugins](./processors.md#drop-in-user-plugins-no-repo-edit).
+### Bad output? It's almost always the DPI.
+
+**Read this first, every time.** If letters look broken or merged, the black
+& white is smeared, or a flattened page is over-curled — **stop and check the
+DPI before changing anything else.** Wrong DPI is by far the most common
+cause of bad results, and no amount of pipeline tweaking will fix it.
+
+**What DPI is.** Dots (pixels) per inch — how many pixels cover one inch of
+the *real* page. It's how Aglaïa knows the true size of the text, so it can
+size its cleanup correctly.
+
+**Why it matters so much.** The black-and-white conversion, speckle removal,
+page-flattening and deskew all measure in millimetres and scale by DPI. Tell
+the app 300 DPI when the photo is really ~110 and every one of those is ~3×
+off — strokes break up, thin lines vanish, noise survives. The picture looks
+fine to your eye; the math is wrong.
+
+![The same 100 DPI photo cleaned at 300 / 200 / 100 DPI — broken strokes at
+300 (3× too high), crisp at the true 100 DPI](./assets/dpi-comparison.png)
+
+**Set it in the app.**
+
+- **While capturing:** click the **DPI** readout in the Capture panel to type
+  a value, or use **Calibrate DPI** — hold a credit-card-sized card flat in
+  frame and the app measures the scale for you.
+- **After importing:** Pipeline panel → **Fix input DPI**. It lists every
+  page; set the DPI on one row, or **tick several checkboxes and set them all
+  at once**, then **Set DPI and reprocess**.
+
+**Photos with no DPI info** (most phone pictures) — estimate it:
+
+- **From the page size** — page `mm` wide, image `W` pixels wide:
+  **DPI = W × 25.4 / mm.** (A5 ≈ 148 mm, A4 ≈ 210 mm, Letter ≈ 216 mm.)
+  Example: a 1700-px-wide photo of an A5 page → `1700 × 25.4 / 148 ≈ 290`.
+- **From the letter size** — measure how many pixels tall a lowercase letter
+  is (its "x-height"). A typical book is set in ~**11 pt** type, whose
+  x-height is about half that: **DPI ≈ x-height-in-pixels × 13.**
+  Example: lowercase letters ~8 px tall → `8 × 13 ≈ 104`. Use 11 pt unless
+  the print is clearly larger or smaller.
+
+Getting within ~15 % is plenty — Aglaïa is tolerant, just not to a 3× error.
+**When in doubt, it's the DPI.**
+
+### Other fixes
+
+- A single page came out wrong → toggle individual cleanup steps on just that
+  page (see [the GUI guide](./gui.md)).
+- Camera lens distortion → [calibrate the camera](./calibration.md).
+- OCR text is poor → check the language and engine in the OCR panel
+  ([ocr.md](./ocr.md)) — but first, check the DPI.

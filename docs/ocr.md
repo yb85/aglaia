@@ -58,6 +58,39 @@ a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain backend is
 available (`aglaia/app_data/secrets.py`). The key never touches the project
 DB or the config DB. Install with `uv sync --extra cloud`.
 
+## Mistral batch OCR (async, cheaper)
+
+The Cloud OCR card has a **batch toggle** (persisted; config key
+`mistral_batch`). With it on, *Run OCR* submits a [Mistral Batch
+API](https://docs.mistral.ai/studio-api/batch-processing) job
+(`POST /v1/batch/jobs`, endpoint `/v1/ocr`) instead of OCR'ing
+synchronously — ~50 % cheaper, processed asynchronously.
+
+Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
+`OcrWorker(batch=True)`):
+
+1. **Submit** — the selected branches' OCR runs are created (left
+   *pending*), the pages assembled into capped PDF(s) reusing
+   `MistralCloudEngine`'s 1000-page / 50 MB chunking (one batch job per
+   chunk), uploaded as a JSONL batch input, and `batch.jobs.create(...)` is
+   called with `metadata = {app: aglaia, aglaia_project: <full .agl path>,
+   aglaia_chunk}`. Job ids + the page→run mapping (`run_ids` JSON) are
+   stored in the project DB table `mistral_batch_jobs` (migration 0011).
+2. **Pending** — while any job is pending the card disables Run and shows
+   *“Batch job pending — submitted N ago”* with **Check result** and
+   **Cancel** (confirm).
+3. **Check result** — polls each pending job; for `SUCCESS`, downloads the
+   output JSONL and writes each page's markdown back to its OCR run via
+   `ocr_repo.finish` (dims from `ocr_runs → nodes → images`), then marks the
+   job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs.
+4. **Jobs tab** — *View → Mistral OCR jobs…* (or the card's **Jobs** pill):
+   a zebra table of every Aglaïa job on the account (`batch.jobs.list`,
+   newest first); the job's `aglaia_project` metadata is a clickable link
+   that opens that project (close-current confirm).
+
+The key + SDK are the same `[cloud]` extra as the synchronous path; only
+the submit/poll/fetch calls differ.
+
 ## Engine→GUI logging
 
 Engines emit diagnostics via `engine_log(text, level)`. `OcrWorker`

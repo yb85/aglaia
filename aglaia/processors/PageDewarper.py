@@ -103,7 +103,7 @@ def _span_step_points(span, poly, step: int) -> list[tuple[float, float]]:
 
 def _sample_spans_xband(shape: tuple[int, int],
                         spans: list,
-                        baseline_source: str = "both") -> list[np.ndarray]:
+                        baseline_source: str = "bottom") -> list[np.ndarray]:
     """Drop-in replacement for `page_dewarp.spans.sample_spans` feeding
     robust span-level baselines instead of raw per-column ink-mass means.
 
@@ -327,8 +327,10 @@ class DewarpOption(AbstractProcessorOption):
     # Which fitted curve(s) feed the sheet model: bottom (baselines),
     # top (x-height toplines), average (midlines), both (baseline +
     # topline as separate spans — doubles vertical constraints).
-    # See _sample_spans_xband.
-    baseline_source: str = "both"
+    # See _sample_spans_xband. Default "bottom": the bottom-ink baseline
+    # fit alone removes binding curl cleanly; "both" over-constrains and
+    # leaves residual curve on post-trapezoidal pages.
+    baseline_source: str = "bottom"
     # Robust (pseudo-Huber) reprojection loss on/off. When off, plain
     # L2 regardless of huber_delta.
     use_huber: bool = True
@@ -426,7 +428,7 @@ class PageDewarper(AbstractImageProcessor):
                                    "Drop spans whose width is less than this fraction "
                                    "of the widest span in the scan. 0 = disabled.",
                                    advanced=True),
-        "baseline_source": _e("both", ["bottom", "top", "average", "both"],
+        "baseline_source": _e("bottom", ["bottom", "top", "average", "both"],
                               "Which fitted text-line curve(s) constrain the sheet: "
                               "bottom = baselines, top = x-height toplines, "
                               "average = midlines, both = baseline + topline as "
@@ -651,12 +653,12 @@ class PageDewarper(AbstractImageProcessor):
         self.huber_delta = (float(getattr(options, "huber_delta", 0.005))
                             if self.use_huber else 0.0)
         self.baseline_source = str(getattr(options, "baseline_source",
-                                           "both") or "both").lower()
+                                           "bottom") or "bottom").lower()
         if self.baseline_source not in ("bottom", "top", "average", "both"):
             print(f"[PageDewarper] unknown baseline_source="
-                  f"{self.baseline_source!r}; falling back to 'both'.",
+                  f"{self.baseline_source!r}; falling back to 'bottom'.",
                   flush=True)
-            self.baseline_source = "both"
+            self.baseline_source = "bottom"
 
         # Resolve backend (auto / mlx / jax / powell). Env overrides:
         # AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables padded JAX.

@@ -93,6 +93,10 @@ class CliConfig:
     ocr_engine: str = "auto"              # auto | apple | surya | <registered engine>
     ocr_languages: list[str] = field(default_factory=list)  # empty == "auto"
     ocr_params: dict[str, str] = field(default_factory=dict)  # engine spec key=value
+    ocr_batch: bool = False               # `--do-ocr mistral:batch` → submit a
+                                          # Mistral batch job (vs `:stream`/sync)
+    check_ocr: bool = False               # `--check-ocr <project>` → poll +
+                                          # import pending Mistral batch jobs
 
     exports: list[ExportTask] = field(default_factory=list)
     md_refine: Optional[str] = None       # on-device LLM backend for MD cleanup
@@ -121,7 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "paths", nargs="*", type=Path,
-        help="One .scanproj.sqlite file, OR one or more PDFs, OR one or more image files.",
+        help="One .agl project file, OR one or more PDFs, OR one or more image files.",
     )
     p.add_argument("--workers", type=int, default=None,
                    help="Number of pipeline worker processes (overrides config).")
@@ -154,6 +158,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--headless", action="store_true",
                    help="Run end-to-end on the CLI without showing the UI.")
+    p.add_argument("--check-ocr", action="store_true", dest="check_ocr",
+                   help="Poll + import any pending Mistral batch OCR job(s) "
+                        "for the given project, then exit. Pair with the "
+                        "project path: aglaia --headless --check-ocr proj.agl")
     p.add_argument("--project-name", type=str, default=None,
                    help="Name for new projects (default: derive from input filename).")
     p.add_argument("--parent-dir", type=Path, default=None,
@@ -201,6 +209,10 @@ def parse_argv(argv: list[str]) -> CliConfig:
         ocr_languages=ocr_languages,
         ocr_params={k: v for k, v in (ocr_spec.params.items() if ocr_spec else ())
                     if k != "lang"},
+        # `mistral:batch` (token) submits a batch job; `mistral:stream` (or no
+        # token) is the synchronous default.
+        ocr_batch=bool(ocr_spec and "batch" in ocr_spec.tokens),
+        check_ocr=bool(getattr(ns, "check_ocr", False)),
         exports=_parse_export_arg(ns.export),
         md_refine=ns.md_refine,
         headless=bool(ns.headless),
@@ -387,7 +399,7 @@ def classify_inputs(cfg: CliConfig) -> None:
     if proj:
         if len(proj) > 1 or pdfs or imgs:
             raise SystemExit(
-                "When opening a project, pass exactly one .scanproj.sqlite "
+                "When opening a project, pass exactly one .agl "
                 "file and no other inputs."
             )
         cfg.source = "project"

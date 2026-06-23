@@ -47,18 +47,24 @@ class OcrWorker(QThread):
     progress_scan = Signal(int)                # scan_id just finished
     log_line = Signal(str, str)                # level, text
     finished_ok = Signal(bool, str)            # ok, error_text
+    batch_submitted = Signal(int, str)         # n_jobs, error_text ("" = ok)
 
     MODE_DEFAULT = "default"     # OCR on missing + stale
     MODE_FORCE = "force"         # OCR on every branch (re-OCR fresh too)
     MODE_MISSING = "missing"     # OCR only branches with no OCR at all
 
     def __init__(self, *, db_path: str, engine_name: str, languages: list[str],
-                 mode: str, complement: str = "", parent=None) -> None:
+                 mode: str, complement: str = "", batch: bool = False,
+                 parent=None) -> None:
         super().__init__(parent)
         self._db_path = db_path
         self._engine_name = engine_name
         self._languages = list(languages)
         self._mode = mode
+        # When True (Cloud OCR + the card's batch toggle), submit a Mistral
+        # batch job instead of running OCR synchronously: create the runs,
+        # upload, and leave them pending for a later "Check result" import.
+        self._batch = bool(batch)
         # Only meaningful for the apple_docs engine — the confidence-gated
         # complement engine ("surya" / "paddle_vl" / "none"). "" leaves the
         # engine on its own default.
@@ -96,8 +102,8 @@ class OcrWorker(QThread):
                 rows = ocr_repo.branches_needing_ocr(include_stale=True)
 
             total = len(rows)
-            self.started_total.emit(total)
             if total == 0:
+                self.started_total.emit(0)
                 self.log_line.emit("info", "OCR: nothing to do.")
                 self.finished_ok.emit(True, "")
                 return
@@ -107,6 +113,17 @@ class OcrWorker(QThread):
                 f"OCR: {total} branch(es), engine={self._engine_name}, "
                 f"langs={self._languages or '<auto>'}, mode={self._mode}",
             )
+
+            # Batch path: submit a Mistral batch job and leave the runs
+            # pending (filled later by "Check result"). Only for whole-doc
+            # cloud engines. Don't emit started_total — batch isn't a running
+            # OCR pass, so it must NOT show the "Génération OCR…" spinner.
+            if self._batch and getattr(engine, "whole_doc", False):
+                self._submit_batch(rows, ocr_repo, conn)
+                return
+
+            # Non-batch: now show the progress bar.
+            self.started_total.emit(total)
 
             # Batched OCR: feed N pages per call so Surya's llama-server
             # `--parallel` slots stay busy across pages instead of doing
@@ -291,6 +308,75 @@ class OcrWorker(QThread):
                 pass
             if conn is not None:
                 conn.close()
+
+    def _submit_batch(self, rows, ocr_repo, conn) -> None:
+        """Create OCR runs for the selected branches, assemble the upload,
+        and submit a Mistral batch job (chunked if over the page/size cap).
+        Runs are left PENDING — results are pulled later by 'Check result'.
+        Emits ``batch_submitted(n_jobs, error)``."""
+        from aglaia.app_data.secrets import get_mistral_api_key
+        from aglaia.storage.repo import MistralBatchRepo
+        from aglaia.workers.ocr import mistral_batch
+
+        api_key = get_mistral_api_key()
+        if not api_key:
+            self.batch_submitted.emit(
+                0, "No Mistral API key — set it in the OCR tab's Cloud card.")
+            return
+
+        run_ids: list[int] = []
+        img_rows: list[dict] = []
+        for r in rows:
+            if self._cancel:
+                self.batch_submitted.emit(0, "cancelled")
+                return
+            image_id = int(r["image_id"])
+            rec = conn.execute(
+                "SELECT blob, dpi, type, format, width, height "
+                "FROM images WHERE id = ?", (image_id,)).fetchone()
+            if rec is None:
+                continue
+            run_id = ocr_repo.start(
+                scan_id=int(r["scan_id"]), node_id=int(r["chosen_node_id"]),
+                branch_path=r["branch_path"], engine=self._engine_name,
+                languages=self._languages)
+            img_rows.append({
+                "blob": rec["blob"], "dpi": rec["dpi"], "type": rec["type"],
+                "format": rec["format"], "width": rec["width"],
+                "height": rec["height"]})
+            run_ids.append(run_id)
+
+        if not run_ids:
+            self.batch_submitted.emit(0, "No pages to submit.")
+            return
+
+        self.log_line.emit(
+            "info", f"Mistral batch: assembling + uploading {len(run_ids)} "
+            f"page(s)…")
+        try:
+            jobs = mistral_batch.submit(api_key, img_rows, run_ids,
+                                        self._db_path)
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            self.log_line.emit("error", f"Batch submit failed: {err}")
+            for run_id in run_ids:
+                ocr_repo.fail(run_id, "batch submit failed: " + err)
+            self.batch_submitted.emit(0, err)
+            return
+
+        repo = MistralBatchRepo(conn)
+        for j in jobs:
+            repo.add(j["job_id"], input_file_id=j.get("input_file_id"),
+                     chunk=j.get("chunk", 0),
+                     chunks_total=j.get("chunks_total", 1),
+                     page_count=j.get("page_count"), status="QUEUED",
+                     run_ids=j.get("run_ids"))
+        conn.commit()
+        self.log_line.emit(
+            "info", f"Mistral batch: submitted {len(jobs)} job(s). Track them "
+            f"on the OCR card or the Jobs tab; pull results with 'Check "
+            f"result'.")
+        self.batch_submitted.emit(len(jobs), "")
 
     def _run_whole_doc(self, engine, rows, ocr_repo, conn, total: int) -> None:
         """Low-memory path for whole-document engines (Cloud OCR).

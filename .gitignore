@@ -52,3 +52,10 @@ aglaia-dev/
 /.claude
 /.agents
 /CLAUDE.md
+
+# Machine-specific camera calibration (stray repo-root copy; canonical store
+# is APP_DATA). Never commit.
+/config/
+# OCR exports dropped into test_data during manual QA.
+test_data/**/*_apple_docsOCR_*.md
+test_data/**/*_apple_docsOCR_*.pdf

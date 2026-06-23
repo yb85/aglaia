@@ -486,7 +486,7 @@ leaks 14-58 GB. See `memory/project_camera_matrix_leak.md`.
 
 ### 3.4 PDF + sqlite project debugging
 
-Each project is a `<slug>.scanproj.sqlite` file. Pipeline runs leave
+Each project is a `<slug>.agl` file (a SQLite database). Pipeline runs leave
 nodes per step:
 
 ```sql
@@ -501,7 +501,7 @@ Extract any intermediate image:
 
 ```python
 import sqlite3
-con = sqlite3.connect("/path/to/project.scanproj.sqlite")
+con = sqlite3.connect("/path/to/project.agl")
 blob = con.execute("SELECT blob FROM images WHERE id = ?", (image_id,)).fetchone()[0]
 open("/tmp/extracted.png", "wb").write(blob)
 ```

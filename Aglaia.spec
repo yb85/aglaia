@@ -1,4 +1,4 @@
-# PyInstaller spec for Aglaïa.app (macOS).
+# PyInstaller spec for Aglaïa — cross-platform (macOS .app / Windows onedir).
 #
 # Build:
 #   # 1. Populate vendor/llama-server/<plat>/ with the binary that
@@ -7,15 +7,16 @@
 #   uv run python scripts/fetch_llama_server.py
 #
 #   # 2. Sync deps for the target platform.
-#   uv sync --extra macos --extra dev --extra package --extra jbig2
+#   uv sync --extra macos --extra dev --extra package --extra jbig2   # macOS
+#   uv sync --extra gui --extra voice --extra dev --extra package      # Windows
 #
 #   # 3. Build the bundle.
 #   uv run pyinstaller Aglaia.spec --clean --noconfirm
 #
-# Output: dist/Aglaïa.app
+# Output: macOS → dist/Aglaia.app   |   Windows → dist/Aglaia/Aglaia.exe
 #
-# Entry: `aglaia.py` — the Qt scan GUI. `pdf2scans.py` shares the same
-# lib code and can be invoked via the bundled Python from Terminal.
+# Entry: `aglaia/__main__.py` — the Qt scan GUI (`aglaia <dir>` console script).
+# The same module also drives the `--headless` CLI batch runner.
 
 from PyInstaller.utils.hooks import (
     collect_all, collect_data_files, collect_dynamic_libs, collect_submodules,
@@ -26,7 +27,19 @@ import platform as _plat
 import sys as _sys
 
 REPO = Path(SPECPATH).resolve()
+IS_MAC = _plat.system() == "Darwin"
+IS_WIN = _plat.system() == "Windows"
 ICON_ICNS = str(REPO / "aglaia" / "assets" / "app" / "Aglaia.icns")
+ICON_ICO = str(REPO / "aglaia" / "assets" / "app" / "Aglaia.ico")
+# PyInstaller wants the platform-native icon format (.icns on macOS, .ico on
+# Windows); passing a mismatched format errors at build. None → default
+# bootloader icon (Linux / missing file).
+if IS_MAC:
+    APP_ICON = ICON_ICNS
+elif IS_WIN and Path(ICON_ICO).is_file():
+    APP_ICON = ICON_ICO
+else:
+    APP_ICON = None
 
 # ── code signing ─────────────────────────────────────────────────────
 #
@@ -133,6 +146,11 @@ datas = [
     # reference by name — only the SOURCE path changed.
     (str(REPO / "aglaia" / "assets" / "app" / "Aglaia.icns"), "aglaia/app_data"),
     (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "aglaia/app_data"),
+    # CFBundleTypeIconFile resolves the document icon relative to
+    # Contents/Resources/ ROOT — so the .agl icon must sit there, not only in
+    # the aglaia/app_data subdir (where filetype_register reads it). Drop a
+    # copy at the root for the Finder file icon.
+    (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "."),
 ]
 
 # Surya/transformers/huggingface_hub ship YAML configs + tokenizer
@@ -150,7 +168,9 @@ for pkg in ("surya", "transformers", "tokenizers", "huggingface_hub",
 hiddenimports = (
     collect_submodules("aglaia.processors")
     + collect_submodules("aglaia.workers")
-    + ["pyobjc", "Vision", "Speech", "AVFoundation"]
+    # Apple frameworks only exist on macOS; listing them as hidden imports on
+    # Windows/Linux makes PyInstaller emit noisy "module not found" warnings.
+    + (["pyobjc", "Vision", "Speech", "AVFoundation"] if IS_MAC else [])
     # JBIG2 encoder (maturin/PyO3). Editable installs leave the compiled
     # `_native` .so in the crate source dir, so name it explicitly or the
     # frozen app silently falls back to G4. Built when the build env was
@@ -242,9 +262,11 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     target_arch=None,
-    codesign_identity=CODESIGN_IDENTITY,
-    entitlements_file=ENTITLEMENTS_FILE,
-    icon=ICON_ICNS,
+    # codesign_identity / entitlements_file are macOS-only knobs. On Windows
+    # signing happens post-build via signtool (see release.yml), so leave None.
+    codesign_identity=CODESIGN_IDENTITY if IS_MAC else None,
+    entitlements_file=ENTITLEMENTS_FILE if IS_MAC else None,
+    icon=APP_ICON,
 )
 
 coll = COLLECT(
@@ -258,7 +280,10 @@ coll = COLLECT(
     name="Aglaia",
 )
 
-app = BUNDLE(
+# BUNDLE wraps COLLECT into a macOS .app — a Darwin-only concept. On Windows
+# the deliverable IS the COLLECT onedir (dist/Aglaia/Aglaia.exe), so skip BUNDLE
+# there. `IS_MAC and BUNDLE(...)` short-circuits the call away off-macOS.
+app = IS_MAC and BUNDLE(
     coll,
     name="Aglaia.app",
     icon=ICON_ICNS,

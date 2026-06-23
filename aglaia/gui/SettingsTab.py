@@ -495,6 +495,16 @@ class SettingsTab(QWidget):
         reg_btn.clicked.connect(self._register_filetype)
         unreg_btn = QPushButton(self.tr("Unregister"))
         unreg_btn.clicked.connect(self._unregister_filetype)
+        # Only meaningful when there's a real app to bind to — disable for a
+        # CLI / `python -m aglaia` / source run (no .app → would bind .agl to
+        # the Python process).
+        from aglaia.app_data.filetype_register import (
+            filetype_registration_available)
+        if not filetype_registration_available():
+            reg_btn.setEnabled(False)
+            reg_btn.setToolTip(self.tr(
+                "Available only from the installed Aglaïa.app — not a CLI / "
+                "source run."))
         reg_row.addWidget(reg_btn)
         reg_row.addWidget(unreg_btn)
         reg_row.addStretch(1)

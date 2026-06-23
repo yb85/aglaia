@@ -1,11 +1,14 @@
 name: release
 
-# Tag-driven macOS release. Push a tag like `v1.2.3` and this builds,
-# signs, notarizes, and publishes a Gatekeeper-clean DMG to a GitHub
-# Release. Version flows: git tag → AGLAIA_VERSION → Aglaia.spec Info.plist
-# → build_dmg.sh DMG name.
+# Tag-driven release. Push a tag like `v1.2.3` and this builds, signs, and
+# publishes per-platform artifacts to one GitHub Release:
+#   * macOS   → Gatekeeper-clean DMG (signed + notarized)
+#   * Windows → Inno Setup installer (.agl association) + portable ZIP
+#   * Linux   → AppImage (x86_64)
+# Version flows: git tag → AGLAIA_VERSION → Aglaia.spec → artifact names.
 #
 # Required repository secrets (Settings → Secrets and variables → Actions):
+#   --- macOS (build job) ---
 #   APPLE_CERT_P12_BASE64        Developer ID Application cert+key, exported
 #                                as .p12 then `base64 -i cert.p12 | pbcopy`.
 #   APPLE_CERT_PASSWORD          Password set when exporting the .p12.
@@ -13,6 +16,9 @@ name: release
 #   APPLE_ID                     Apple ID email used for notarization.
 #   APPLE_TEAM_ID                10-char Apple Developer Team ID.
 #   APPLE_APP_SPECIFIC_PASSWORD  App-specific password (appleid.apple.com).
+#   --- Windows (build-windows job, OPTIONAL — unsigned ZIP ships without) ---
+#   WINDOWS_CERT_PFX_BASE64      Authenticode cert+key (.pfx) base64-encoded.
+#   WINDOWS_CERT_PASSWORD        Password for the .pfx.
 # See docs/distribution.md for the full setup walkthrough.
 
 on:
@@ -114,6 +120,14 @@ jobs:
           cd dist
           shasum -a 256 Aglaia-*.dmg | tee SHA256SUMS.txt
 
+      - name: Stable-named copy (version-agnostic direct download)
+        # The landing page links to
+        #   releases/latest/download/Aglaia-macos-arm64.dmg
+        # so "Download for macOS" always grabs the newest build without
+        # threading the version through the URL. Ship it alongside the
+        # versioned asset (which the Cask / formula pin by sha256).
+        run: cp dist/Aglaia-*.dmg dist/Aglaia-macos-arm64.dmg
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -123,3 +137,173 @@ jobs:
           files: |
             dist/Aglaia-*.dmg
             dist/SHA256SUMS.txt
+
+  build-windows:
+    runs-on: windows-latest
+    # Authenticode signing is OPTIONAL: set WINDOWS_CERT_PFX_BASE64 +
+    # WINDOWS_CERT_PASSWORD to ship a signed exe (SmartScreen-friendly).
+    # Without them an unsigned ZIP still ships.
+    env:
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Vendor llama-server (Surya backend)
+        run: uv run --no-project python scripts/fetch_llama_server.py --platform windows-x64
+
+      - name: Sync deps (no macos/cuda — Apple + Linux-GPU extras are off-target)
+        # `gui` (PySide6) is mandatory or the frozen app can't import Qt. `surya`
+        # is the cross-platform OCR engine; the apple_vision layout/OCR backend is
+        # macOS-only and auto-falls back to EAST/heuristic here. `paddle` is left
+        # out for now (heavy/fragile Windows wheels) — add `--extra paddle` once
+        # validated; `jbig2` (Rust/maturin) likewise omitted, output falls back to
+        # G4 PDF compression.
+        run: >-
+          uv sync --extra gui --extra voice --extra dev --extra package
+          --extra cloud --extra surya
+
+      - name: Tests (release gate)
+        run: uv run pytest -q
+
+      - name: Build .exe (PyInstaller onedir)
+        env:
+          AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
+        run: uv run pyinstaller Aglaia.spec --clean --noconfirm
+
+      - name: Sign app exe (optional)
+        if: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $st = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+          & $st sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 "dist\Aglaia\Aglaia.exe"
+          if ($LASTEXITCODE -ne 0) { throw "signtool (exe) failed" }
+          Remove-Item $pfx
+
+      - name: Build installer (Inno Setup) — Start-menu shortcut + .agl association
+        shell: pwsh
+        env:
+          AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\aglaia.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+      - name: Sign installer (optional)
+        if: ${{ env.WINDOWS_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $st = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+          & $st sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 "dist\Aglaia-windows-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "signtool (installer) failed" }
+          Remove-Item $pfx
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: Compress-Archive -Path dist\Aglaia\* -DestinationPath dist\Aglaia-windows-x64.zip
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Set-Location dist
+          Get-ChildItem Aglaia-windows-x64.zip, Aglaia-windows-x64-setup.exe | ForEach-Object {
+            $h = (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          } | Out-File -Encoding ascii SHA256SUMS-windows.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Aglaïa ${{ steps.ver.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            dist/Aglaia-windows-x64-setup.exe
+            dist/Aglaia-windows-x64.zip
+            dist/SHA256SUMS-windows.txt
+
+  build-linux:
+    # ubuntu-22.04 (glibc 2.35) for AppImage portability — building on a newer
+    # glibc would exclude older distros from running the result.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: System libs (AppImage tooling + Qt xcb runtime)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfuse2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+
+      - name: Vendor llama-server (Surya backend)
+        run: uv run --no-project python scripts/fetch_llama_server.py --platform linux-x64
+
+      - name: Sync deps (no macos/cuda — Apple + Linux-GPU extras are off-target)
+        run: >-
+          uv sync --extra gui --extra voice --extra dev --extra package
+          --extra cloud --extra surya
+
+      - name: Tests (release gate)
+        env:
+          QT_QPA_PLATFORM: offscreen   # no display on the runner
+        run: uv run pytest -q
+
+      - name: Build onedir (PyInstaller)
+        env:
+          AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
+        run: uv run pyinstaller Aglaia.spec --clean --noconfirm
+
+      - name: Fetch appimagetool
+        # Named plainly `appimagetool` on PATH; build_appimage.sh runs it with
+        # APPIMAGE_EXTRACT_AND_RUN=1 so no FUSE mount is needed on the runner.
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Build AppImage
+        env:
+          AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
+          ARCH: x86_64
+        run: ./packaging/build_appimage.sh
+
+      - name: Checksum
+        run: cd dist && sha256sum Aglaia-x86_64.AppImage | tee SHA256SUMS-linux.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Aglaïa ${{ steps.ver.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            dist/Aglaia-x86_64.AppImage
+            dist/SHA256SUMS-linux.txt

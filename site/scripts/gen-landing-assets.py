@@ -111,13 +111,13 @@ def full_project(src_agl: Path):
     (restoring every intermediate step image the slim copy dropped), yield an
     open read-only-ish connection, then delete the temp copy. Local-only:
     the reprocess runs the full pipeline including dewarp."""
-    from lib.storage.db import open_db
+    from aglaia.storage.db import open_db
     tmpdir = Path(tempfile.mkdtemp(prefix="aglaia-landing-"))
     tmp = tmpdir / src_agl.name
     shutil.copy2(src_agl, tmp)
     try:
         subprocess.run(
-            [sys.executable, str(ROOT / "aglaia.py"), str(tmp),
+            [sys.executable, "-m", "aglaia", str(tmp),
              "--headless", "--force-proc", "-p", "book_curved_x2"],
             cwd=str(ROOT), check=True, capture_output=True, text=True)
         conn = open_db(tmp)
@@ -132,6 +132,27 @@ def full_project(src_agl: Path):
 def scan_ids(conn) -> list[int]:
     return [r[0] for r in conn.execute(
         "SELECT id FROM scans WHERE deleted_at IS NULL ORDER BY idx")]
+
+
+def scan_by_stem(conn, stem: str) -> int:
+    """Pick the scan whose source_ref filename contains ``stem``. Landing
+    scans are referenced by the source page they came from (e.g. athanase_150),
+    NOT by position — so trimming/re-indexing the example set can't silently
+    repoint a slide. Falls back to the first scan if no match."""
+    for sid, ref in conn.execute(
+            "SELECT id, source_ref FROM scans WHERE deleted_at IS NULL ORDER BY idx"):
+        if ref and stem in Path(ref).name:
+            return sid
+    return scan_ids(conn)[0]
+
+
+def other_scan(conn, primary: int) -> int:
+    """A scan distinct from ``primary`` for slideshow variety; returns
+    ``primary`` itself if it is the only surviving scan."""
+    for sid in scan_ids(conn):
+        if sid != primary:
+            return sid
+    return primary
 
 
 def raw_img(conn, sid: int) -> Image.Image:
@@ -156,7 +177,7 @@ def final_img(conn, sid: int, branch: str) -> Image.Image:
 
 
 def overlays(conn, sid: int, branch: str):
-    from lib.storage.debug_renderers import render_chain_overlays
+    from aglaia.storage.debug_renderers import render_chain_overlays
     return render_chain_overlays(conn, _leaf(conn, sid, branch))  # {label,url}/step
 
 
@@ -192,8 +213,7 @@ def before_after(conn, sid: int, w: int = 760, nudge: int = 0):
 
 # ── athanase: before/after + stage slideshow + doc figs ──────────────
 with full_project(ATH) as conn:
-    sids = scan_ids(conn)
-    s1 = sids[0]                                    # scan 1 = the landing page
+    s1 = scan_by_stem(conn, "athanase_150")         # the landing-page scan
 
     # Heavy-curl before/after (scan 1 has the spine bulge + hand).
     b, a = before_after(conn, s1)
@@ -202,7 +222,7 @@ with full_project(ATH) as conn:
 
     # Band slide: a couple of clean rectified pages.
     save(fith(final_img(conn, s1, "A"), 820), "band-slide-3.jpg", q=68)
-    save(fith(final_img(conn, sids[1], "A"), 820), "band-slide-1.jpg", q=68)
+    save(fith(final_img(conn, other_scan(conn, s1), "A"), 820), "band-slide-1.jpg", q=68)
 
     # 5-stage "start → finish" strip — the GUI inspector's own overlays.
     ov = overlays(conn, s1, "A")
@@ -226,15 +246,15 @@ with full_project(ATH) as conn:
 
 # ── augustin + balthasar: before/after + band slides ─────────────────
 with full_project(AUG) as conn:
-    s = scan_ids(conn)[1]
+    s = scan_by_stem(conn, "augustin_287")
     b, a = before_after(conn, s)
     save(b, "before.jpg")
     save(a, "after.jpg")
     save(fith(final_img(conn, s, "A"), 820), "band-slide-2.jpg", q=68)
-    save(fith(final_img(conn, scan_ids(conn)[3], "A"), 820), "band-slide-4.jpg", q=68)
+    save(fith(final_img(conn, other_scan(conn, s), "A"), 820), "band-slide-4.jpg", q=68)
 
 with full_project(BAL) as conn:
-    s = scan_ids(conn)[0]
+    s = scan_by_stem(conn, "balthasar-theologique-iii_100")
     b, a = before_after(conn, s)
     save(b, "lit-before.jpg")
     save(a, "lit-after.jpg")
@@ -242,7 +262,7 @@ with full_project(BAL) as conn:
 
 
 # ── continuity-camera usage diagram (line-art, assets/brand) ─────────
-save(fitw(Image.open(ROOT / "assets" / "brand" / "aglaia_usage.png").convert("RGB"), 760),
+save(fitw(Image.open(ROOT / "aglaia" / "assets" / "brand" / "aglaia_usage.png").convert("RGB"), 760),
      "usage.jpg", q=86)
 
 # NOTE: replay-distorted.webp / replay-restored.webp (the smart-replay

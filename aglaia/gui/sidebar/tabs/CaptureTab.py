@@ -50,6 +50,7 @@ from aglaia.gui.colors import (
     COLOR_BG_TOGGLE,
     COLOR_BG_TOGGLE_ON,
     COLOR_BG_VIDEO,
+    COLOR_ERROR,
     COLOR_FONT_DIM,
     COLOR_FONT_INVERSE,
     COLOR_FONT_MUTED,
@@ -62,6 +63,7 @@ from aglaia.gui.colors import (
     COLOR_PRIMARY,
     COLOR_PRIMARY_HOVER,
     COLOR_SUCCESS_BORDER,
+    COLOR_WARNING,
 )
 
 
@@ -269,6 +271,14 @@ class CaptureTab(QWidget):
                     "credit-card-sized object."))
         outer.addWidget(self.dpi_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
+        # Resolution-quality caption — warns when the live DPI is too low for
+        # legible book text. Hidden at adequate DPI; updated by `set_dpi`.
+        self.dpi_warning = QLabel("")
+        self.dpi_warning.setWordWrap(True)
+        self.dpi_warning.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.dpi_warning.setVisible(False)
+        outer.addWidget(self.dpi_warning, 0, Qt.AlignmentFlag.AlignHCenter)
+
         # ── Deactivate camera ───────────────────────────────────────
         # Hidden by default; MainWindow shows + wires it only when the
         # capture session was activated late (open-from-disk projects).
@@ -469,6 +479,22 @@ class CaptureTab(QWidget):
             self.dpi_label.setText(
                 self.tr("DPI: {dpi:.0f} (uncalibrated)").format(dpi=dpi))
             self.dpi_label.setStyleSheet(f"color: {COLOR_FONT_MUTED};")
+
+        # Resolution-quality warning, by DPI threshold.
+        if dpi < 80:
+            self.dpi_warning.setText(self.tr(
+                "below 80 DPI usual book text is barely readable"))
+            self.dpi_warning.setStyleSheet(
+                f"color: {COLOR_ERROR}; font-size: 10px; font-weight: 600;")
+            self.dpi_warning.setVisible(True)
+        elif dpi < 110:
+            self.dpi_warning.setText(self.tr(
+                "below 110 dpi finer prints will be unreadable"))
+            self.dpi_warning.setStyleSheet(
+                f"color: {COLOR_WARNING}; font-size: 10px; font-weight: 600;")
+            self.dpi_warning.setVisible(True)
+        else:
+            self.dpi_warning.setVisible(False)
 
     # ── Voice engine menu ─────────────────────────────────────────
     def set_voice_engines(self, engines, current=None) -> None:
