@@ -52,13 +52,23 @@ mkdir -p "$STAGE_DIR/.background"
 # background at the image's *pixel* size, so it must match the window
 # bounds exactly (640×400, set in the osascript below) — a larger/hi-dpi
 # image makes Finder skip the background entirely (and abort the styling).
-# Resample to exactly 640×400, 1× (the old bg was the same size).
-sips -z 400 640 "$BG" --out "$STAGE_DIR/.background/background.png" >/dev/null
+# Resample to a 2× retina tile (1280×800) tagged 144 dpi so Finder draws
+# it at the 640×400-point window crisply on Retina (a 1× 640×400 image
+# looks upscaled/soft). Window bounds below stay 640×400 points.
+sips -z 800 1280 -s dpiWidth 144 -s dpiHeight 144 \
+    "$BG" --out "$STAGE_DIR/.background/background.png" >/dev/null
 # Mark hidden so Finder doesn't render the dot-folder when the user
 # mounts the DMG. Combination of chflags + SetFile catches both old
 # (Carbon) and new (HFS) listings.
 chflags hidden "$STAGE_DIR/.background"
 SetFile -a V "$STAGE_DIR/.background" 2>/dev/null || true
+
+# Detach any stale volume of the same name first. Otherwise our new image
+# mounts as "VOLNAME 1" while the osascript below still targets "VOLNAME",
+# so it styles the wrong (old) volume and the shipped DMG ends up unstyled.
+while IFS= read -r _stale; do
+    [[ -n "$_stale" ]] && hdiutil detach "$_stale" -force >/dev/null 2>&1 || true
+done < <(hdiutil info 2>/dev/null | awk -v v="$VOLNAME" '$0 ~ ("/Volumes/" v) {print $1}')
 
 echo "→ creating ${RW_SIZE_MB} MB read-write DMG"
 hdiutil create -volname "$VOLNAME" \
@@ -82,14 +92,18 @@ if [[ -z "$MOUNT_POINT" || ! -d "$MOUNT_POINT" ]]; then
     exit 1
 fi
 echo "   mounted at $MOUNT_POINT"
+# Style the volume by its ACTUAL mounted name — `hdiutil` appends " 1"/" 2"
+# when a same-named volume is already mounted, and `tell disk "$VOLNAME"`
+# would then poke the wrong disk.
+VOL_ACTUAL="$(basename "$MOUNT_POINT")"
 
 # Let the volume settle before osascript pokes at .DS_Store.
 sleep 2
 
-echo "→ styling window via Finder"
+echo "→ styling window via Finder (disk: $VOL_ACTUAL)"
 osascript <<EOF
 tell application "Finder"
-    tell disk "$VOLNAME"
+    tell disk "$VOL_ACTUAL"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -103,13 +117,26 @@ tell application "Finder"
         -- Icon placement: app on the left, arrow → Applications on the right
         set position of item "Aglaia.app" of container window to {160, 240}
         set position of item "Applications" of container window to {480, 240}
-        close
-        open
         update without registering applications
-        delay 1
+        delay 2
+        close
     end tell
 end tell
 EOF
+
+# Finder writes .DS_Store asynchronously after the window updates/closes —
+# wait for it to actually land on the volume before detaching, or the
+# convert below captures an UNSTYLED image (no background, default bounds).
+echo "→ waiting for Finder to flush .DS_Store"
+for _i in 1 2 3 4 5 6 7 8 9 10; do
+    [[ -f "$MOUNT_POINT/.DS_Store" ]] && break
+    sleep 1
+done
+if [[ -f "$MOUNT_POINT/.DS_Store" ]]; then
+    echo "   .DS_Store written ($(stat -f%z "$MOUNT_POINT/.DS_Store") bytes)"
+else
+    echo "✗ Finder never wrote .DS_Store — the DMG window won't be styled." >&2
+fi
 
 echo "→ syncing + unmounting"
 # Finder leaves a .fseventsd cache + a .Trashes folder on the mounted
