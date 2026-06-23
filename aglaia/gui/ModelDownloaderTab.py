@@ -588,6 +588,10 @@ class _ModelCard(Card):
         )
         self.found_tag.setVisible(False)
         head_row.addWidget(self.found_tag)
+        # Set once a model is downloaded *this session*: engines/backends load
+        # their models at startup, so a freshly-fetched model isn't usable
+        # until Aglaïa is restarted. Surfaced on the Installed badge.
+        self._needs_restart = False
         head_row.addStretch(1)
 
         # Action buttons — visibility flipped in `_refresh_state`.
@@ -806,7 +810,16 @@ class _ModelCard(Card):
         installed = self._is_installed()
         has_partial = self._has_partial()
 
-        self.found_tag.setVisible(installed and not is_dl and not is_paused)
+        show_found = installed and not is_dl and not is_paused
+        if show_found and self._needs_restart:
+            self.found_tag.setText(self.tr("Installed · restart to use"))
+            self.found_tag.setToolTip(self.tr(
+                "Models are loaded at startup — restart Aglaïa for this "
+                "newly-downloaded model to become available."))
+        else:
+            self.found_tag.setText(self.tr("Installed"))
+            self.found_tag.setToolTip("")
+        self.found_tag.setVisible(show_found)
 
         # In-flight controls: pause-toggle + stop are the only buttons
         # visible while bytes are flowing or the download is parked.
@@ -975,6 +988,7 @@ class _ModelCard(Card):
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(100)
                 self.status_label.setVisible(False)
+                self._needs_restart = True
                 self._refresh_state()
             else:
                 self.status_label.setText(vmsg)
