@@ -40,9 +40,11 @@ def _default_workers() -> int:
     cores = os.cpu_count() or 4
     return min(math.ceil(cores / 2), 4)
 
-# Bundled defaults — repo-local, not copied into APP_DATA.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULTS_YAML = _REPO_ROOT / "config" / "config_default.yaml"
+# Bundled defaults — shipped INSIDE the package (aglaia/config/), both in
+# source and in the PyInstaller bundle. `parents[1]` is the `aglaia/` package
+# dir; `parents[2]` was the pre-refactor repo-root `config/`, which no longer
+# exists on a fresh install / in the frozen app.
+_DEFAULTS_YAML = Path(__file__).resolve().parents[1] / "config" / "config_default.yaml"
 
 
 # ── canonical keys ────────────────────────────────────────────────────
