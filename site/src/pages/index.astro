@@ -246,23 +246,37 @@ const powers = [
 
         <div class="code reveal">
           <div class="code__tabs">
-            <button class="code__tab is-active" data-tab="uv" type="button">Install with uv</button>
-            <button class="code__tab" data-tab="brew" type="button">Install with Homebrew</button>
+            <button class="code__tab is-active" data-tab="pip" type="button">pip</button>
+            <button class="code__tab" data-tab="uv" type="button">uv (source)</button>
+            <button class="code__tab" data-tab="brew" type="button">Homebrew</button>
             <button class="code__copy" type="button" aria-label="Copy">Copy</button>
           </div>
-          <pre class="code__panel is-active" data-panel="uv"><code># clone, then sync with the extras you want
+          <pre class="code__panel is-active" data-panel="pip"><code># from PyPI — installs the `aglaia` command
+pip install aglaia                  # lean base: headless pipeline, no Qt
+pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
+
+# OCR engines are heavy and mutually exclusive — pick one:
+#   pip install "aglaia[surya]"     # Surya OCR (cross-platform)
+#   pip install "aglaia[paddle]"    # PaddleOCR-VL (MLX)
+# (Apple Vision OCR needs no extra — it ships with [macos].)
+
+aglaia ~/scans/my-book              # launch the GUI</code></pre>
+          <pre class="code__panel" data-panel="uv"><code># build from source with the extras you want
 git clone https://github.com/yb85/aglaia.git &amp;&amp; cd aglaia
 
 uv sync --extra gui --extra macos   # macOS GUI: Vision, Speech, MLX dewarp
 # add any of:
+#   --extra surya | --extra paddle  # OCR engine (pick one)
 #   --extra jbig2    # smallest searchable PDFs (JBIG2 encoder, needs Rust)
 #   --extra cloud    # Mistral cloud OCR
 #   --extra cuda     # NVIDIA GPU dewarp (Linux)
 
-uv run python aglaia.py ~/scans/my-book</code></pre>
-          <pre class="code__panel" data-panel="brew"><code># add the Aglaïa tap, then install the app
+uv run aglaia ~/scans/my-book</code></pre>
+          <pre class="code__panel" data-panel="brew"><code># tap, then install the `aglaia` command (builds from source via uv)
 brew tap yb85/aglaia https://github.com/yb85/aglaia
-brew install --cask aglaia</code></pre>
+brew install aglaia
+
+aglaia ~/scans/my-book</code></pre>
         </div>
       </section>
 

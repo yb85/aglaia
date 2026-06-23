@@ -21,13 +21,40 @@ Each release ships a `SHA256SUMS.txt`; verify with:
 shasum -a 256 -c SHA256SUMS.txt
 ```
 
+## Install the CLI (pip / Homebrew)
+
+Aglaïa is also a pip-installable package that exposes an `aglaia` command.
+The base install is lean and GUI-free (the headless pipeline, no Qt):
+
+```bash
+pip install aglaia                  # `aglaia --headless …` batch pipeline
+pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
+aglaia ~/scans/my-book              # launch the GUI
+```
+
+OCR engines are heavy and **mutually exclusive** (their `huggingface-hub`
+pins conflict) — pick at most one:
+
+```bash
+pip install "aglaia[surya]"         # Surya OCR (cross-platform)
+pip install "aglaia[paddle]"        # PaddleOCR-VL (MLX)
+```
+
+Apple Vision OCR needs no extra; it ships with `[macos]`. Or via Homebrew
+(builds from source with `uv`):
+
+```bash
+brew tap yb85/aglaia https://github.com/yb85/aglaia
+brew install aglaia
+```
+
 ## Build from source
 
 ```bash
 git clone https://github.com/yb85/aglaia
 cd aglaia
 uv sync --extra gui --extra macos
-uv run python aglaia.py ~/scans/my-book
+uv run aglaia ~/scans/my-book
 ```
 
 To build the `.app` bundle yourself, see
