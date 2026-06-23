@@ -12,6 +12,11 @@ wheels/
 #env files
 .env
 
+#code-signing material — never commit a private key
+*.pfx
+*.p12
+WINDOWS_CERT_PFX_BASE64.txt
+
 #data and misc
 data/
 misc/
