@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Aglaïa
+GenericName=Document Scanner
+Comment=Scanner / page-extraction pipeline
+Exec=AppRun %F
+Icon=aglaia
+Categories=Graphics;Utility;Scanning;
+MimeType=application/x-aglaia-project;
+Keywords=scan;ocr;dewarp;pdf;book;
+Terminal=false

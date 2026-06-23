@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- .agl project MIME type. Desktop-integration tools (AppImageLauncher,
+     appimaged) install this so double-clicking a project opens Aglaïa —
+     the Linux analogue of the macOS UTExportedTypeDeclarations. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-aglaia-project">
+    <comment>Aglaïa project</comment>
+    <glob pattern="*.agl"/>
+    <icon name="aglaia"/>
+  </mime-type>
+</mime-info>
