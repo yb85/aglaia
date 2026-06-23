@@ -127,9 +127,10 @@ def poll(api_key: str, job_id: str) -> tuple[str, Optional[str]]:
     return status, (str(err) if err else None)
 
 
-def fetch_markdown(api_key: str, job_id: str) -> list[str]:
-    """Download a SUCCESS job's output and return per-page markdown in page
-    order. Raises if the job isn't SUCCESS or the output is unreadable."""
+def fetch_pages(api_key: str, job_id: str) -> list[dict]:
+    """Download a SUCCESS job's output and return the per-page OCR objects
+    (full OCR-4 structure: markdown + typed blocks / bboxes / confidence) in
+    page order. Raises if the job isn't SUCCESS or the output is unreadable."""
     client = _client(api_key)
     job = client.batch.jobs.get(job_id=job_id)
     status = _norm_status(getattr(job, "status", ""))
@@ -160,7 +161,8 @@ def fetch_markdown(api_key: str, job_id: str) -> list[str]:
         body = resp.get("body") if isinstance(resp, dict) else None
         body = body or resp or obj
         for pg in (body.get("pages") or []):
-            pages.append(pg.get("markdown", "") or "")
+            pages.append(pg if isinstance(pg, dict)
+                         else {"markdown": str(pg or "")})
     return pages
 
 
@@ -213,11 +215,13 @@ def list_jobs(api_key: str) -> list[dict]:
 
 
 # ── result shaping ───────────────────────────────────────────────────────
-def markdown_to_result(md: str, page_w: int, page_h: int,
-                       languages: list[str]) -> OcrResult:
-    """Build the same OcrResult shape the sync path produces, from one page's
-    markdown — so deferred batch results persist via ``ocr_repo.finish``
-    exactly like a synchronous run."""
+def page_to_result(page: dict, page_w: int, page_h: int,
+                   languages: list[str]) -> OcrResult:
+    """Build the same OcrResult shape the sync path produces, from one
+    Mistral page object — markdown for md_export plus the rich page
+    (``meta.mistral_page``) so deferred batch results persist via
+    ``ocr_repo.finish`` exactly like a synchronous run, structure intact."""
+    md = page.get("markdown", "") if isinstance(page, dict) else (page or "")
     base: OcrResult = {
         "engine": "mistral_cloud", "languages": list(languages),
         "page_w": int(page_w), "page_h": int(page_h),
@@ -225,6 +229,8 @@ def markdown_to_result(md: str, page_w: int, page_h: int,
     line = {"text": md, "bbox": (0, 0, int(page_w), int(page_h)),
             "confidence": 1.0}
     base["lines"] = [line] if md else []
-    base["meta"] = {"source": "mistral", "model": MODEL, "markdown": md,
-                    "batch": True}
+    meta = {"source": "mistral", "model": MODEL, "markdown": md, "batch": True}
+    if isinstance(page, dict):
+        meta["mistral_page"] = page
+    base["meta"] = meta
     return base

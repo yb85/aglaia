@@ -123,6 +123,22 @@ def _images_to_pdf(images_rgb: list[np.ndarray],
     return pdf_export.build_native_pdf(rows, out_path)
 
 
+def page_to_dict(pg) -> dict:
+    """A Mistral OCR page → JSON-able dict, preserving the OCR-4 rich
+    structure (typed-block categories, bounding boxes, per-block confidence)
+    alongside the markdown. Stored permanently in the OCR run's result meta
+    (``meta.mistral_page``) so structure-aware export / confidence stay
+    available; the flat ``meta.markdown`` is still kept for md_export."""
+    if isinstance(pg, dict):
+        return pg
+    if hasattr(pg, "model_dump"):
+        try:
+            return pg.model_dump(mode="json", exclude_none=True)
+        except Exception:
+            pass
+    return {"markdown": getattr(pg, "markdown", "") or ""}
+
+
 @register
 class MistralCloudEngine(BatchableOCR, OcrEngine):
     name = "mistral_cloud"
@@ -268,12 +284,17 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
                                f"{MAX_UPLOAD_BYTES // (1024*1024)} MB limit"),
                 }
             else:
-                md = pages[i] if i < len(pages) else ""
+                page = pages[i] if i < len(pages) else ""
+                md = page.get("markdown", "") if isinstance(page, dict) \
+                    else (page or "")
                 line = {"text": md, "bbox": (0, 0, int(w), int(h)),
                         "confidence": 1.0}
                 base["lines"] = [line] if md else []
-                base["meta"] = {"source": "mistral", "model": MODEL,
-                                "markdown": md}
+                meta = {"source": "mistral", "model": MODEL, "markdown": md}
+                if isinstance(page, dict):
+                    # Persist the rich OCR-4 page (blocks/bboxes/confidence).
+                    meta["mistral_page"] = page
+                base["meta"] = meta
             results.append(base)
         return results
 
@@ -337,7 +358,4 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
             document={"type": "document_url", "document_url": signed.url},
             include_image_base64=False,
         )
-        out: list[str] = []
-        for pg in (getattr(resp, "pages", None) or []):
-            out.append(getattr(pg, "markdown", "") or "")
-        return out
+        return [page_to_dict(pg) for pg in (getattr(resp, "pages", None) or [])]

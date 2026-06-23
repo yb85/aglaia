@@ -121,7 +121,7 @@ class MistralBatchWorker(QThread):
                 run_ids = MistralBatchRepo.run_ids_of(job)
                 if status == "SUCCESS":
                     try:
-                        md_pages = mistral_batch.fetch_markdown(api_key, jid)
+                        pages = mistral_batch.fetch_pages(api_key, jid)
                     except Exception as e:
                         self.log_line.emit(
                             "error", f"[mistral_batch] fetch {jid} failed: "
@@ -129,15 +129,15 @@ class MistralBatchWorker(QThread):
                         pending += 1
                         continue
                     for i, rid in enumerate(run_ids):
-                        md = md_pages[i] if i < len(md_pages) else ""
+                        page = pages[i] if i < len(pages) else {}
                         w, h = _dims_for_run(conn, rid)
-                        ocr_repo.finish(rid, mistral_batch.markdown_to_result(
-                            md, w, h, []))
+                        ocr_repo.finish(rid, mistral_batch.page_to_result(
+                            page, w, h, []))
                     repo.mark_imported(jid)
                     imported += 1
                     self.log_line.emit(
                         "info", f"[mistral_batch] imported job {jid} "
-                        f"({len(run_ids)} page(s), {len(md_pages)} md page(s))")
+                        f"({len(run_ids)} run(s), {len(pages)} page(s))")
                 elif status in mistral_batch.FAILED_STATUSES:
                     for rid in run_ids:
                         ocr_repo.fail(rid, f"batch {status}: {err or ''}")

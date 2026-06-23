@@ -87,7 +87,8 @@ def _run_ocr(db_path: str, *, engine_name: str, languages: list[str],
                 if eng.available:
                     return n, eng
             raise SystemExit("OCR: no engine available (apple_vision, surya).")
-        canonical = {"apple": "apple_vision", "surya": "surya"}.get(name, name)
+        canonical = {"apple": "apple_vision", "surya": "surya",
+                     "mistral": "mistral_cloud"}.get(name, name)
         try:
             eng = get_engine(canonical)
         except KeyError as e:
@@ -134,6 +135,135 @@ def _run_ocr(db_path: str, *, engine_name: str, languages: list[str],
                 ocr.fail(run_id, f"{type(e).__name__}: {e}")
                 print(f"  scan {scan_id}: ERROR {e}", file=sys.stderr)
         return 0 if done > 0 else 1
+    finally:
+        conn.close()
+
+
+_OCR_CANON = {"apple": "apple_vision", "surya": "surya",
+              "mistral": "mistral_cloud"}
+
+
+def _submit_batch_ocr(db_path: str, *, engine_name: str,
+                      languages: list[str]) -> int:
+    """Submit a Mistral batch OCR job for every missing/stale branch and
+    leave it pending — no Qt. Prints the `--check-ocr` command to retrieve."""
+    from aglaia.workers.ocr import get_engine
+    from aglaia.workers.ocr.engine import BatchableOCR
+    from aglaia.workers.ocr import mistral_batch
+    from aglaia.app_data.secrets import get_mistral_api_key
+    from aglaia.storage.repo import MistralBatchRepo
+
+    canonical = _OCR_CANON.get(engine_name, engine_name)
+    try:
+        eng = get_engine(canonical)
+    except KeyError as e:
+        raise SystemExit(f"OCR: {e}") from None
+    if not isinstance(eng, BatchableOCR):
+        raise SystemExit(f"OCR: engine {canonical!r} does not support batch "
+                         f"— drop ':batch' (or use ':stream').")
+    api_key = get_mistral_api_key()
+    if not api_key:
+        raise SystemExit("OCR: no Mistral API key (set MISTRAL_API_KEY or the "
+                         "OCR tab's Cloud card).")
+    conn = open_db(db_path)
+    try:
+        ocr = OcrRepo(conn)
+        repo = MistralBatchRepo(conn)
+        rows = ocr.branches_needing_ocr(include_stale=True)
+        if not rows:
+            print("OCR: nothing to do.")
+            return 0
+        run_ids: list[int] = []
+        img_rows: list[dict] = []
+        for r in rows:
+            rec = conn.execute(
+                "SELECT blob, dpi, type, format, width, height "
+                "FROM images WHERE id = ?", (int(r["image_id"]),)).fetchone()
+            if rec is None:
+                continue
+            rid = ocr.start(
+                scan_id=int(r["scan_id"]), node_id=int(r["chosen_node_id"]),
+                branch_path=r["branch_path"] or "", engine=canonical,
+                languages=languages)
+            img_rows.append({
+                "blob": rec["blob"], "dpi": rec["dpi"], "type": rec["type"],
+                "format": rec["format"], "width": rec["width"],
+                "height": rec["height"]})
+            run_ids.append(rid)
+        if not run_ids:
+            print("OCR: nothing to do.")
+            return 0
+        print(f"OCR (batch): submitting {len(run_ids)} page(s) to Mistral…")
+        jobs = mistral_batch.submit(api_key, img_rows, run_ids, db_path)
+        for j in jobs:
+            repo.add(j["job_id"], input_file_id=j.get("input_file_id"),
+                     chunk=j.get("chunk", 0),
+                     chunks_total=j.get("chunks_total", 1),
+                     page_count=j.get("page_count"), status="QUEUED",
+                     run_ids=j.get("run_ids"))
+        conn.commit()
+        print(f"OCR (batch): submitted {len(jobs)} job(s):")
+        for j in jobs:
+            print(f"  {j['job_id']}")
+        print("\nRetrieve the results when ready with:\n"
+              f"  aglaia --headless --check-ocr {db_path}")
+        return 0
+    finally:
+        conn.close()
+
+
+def _check_ocr(db_path: str) -> int:
+    """Poll this project's pending Mistral batch jobs; import SUCCESS results
+    into their OCR runs (rich page JSON + markdown). No Qt."""
+    from aglaia.workers.ocr import mistral_batch
+    from aglaia.storage.repo import MistralBatchRepo
+    from aglaia.app_data.secrets import get_mistral_api_key
+
+    api_key = get_mistral_api_key()
+    if not api_key:
+        raise SystemExit("No Mistral API key.")
+    conn = open_db(db_path)
+    try:
+        repo = MistralBatchRepo(conn)
+        ocr = OcrRepo(conn)
+        pend = repo.pending()
+        if not pend:
+            print("No pending Mistral batch jobs.")
+            return 0
+        imported = still = failed = 0
+        for job in pend:
+            jid = job["job_id"]
+            status, err = mistral_batch.poll(api_key, jid)
+            repo.set_status(jid, status, err)
+            run_ids = MistralBatchRepo.run_ids_of(job)
+            if status == "SUCCESS":
+                pages = mistral_batch.fetch_pages(api_key, jid)
+                for i, rid in enumerate(run_ids):
+                    page = pages[i] if i < len(pages) else {}
+                    row = conn.execute(
+                        "SELECT i.width AS w, i.height AS h FROM ocr_runs r "
+                        "JOIN nodes n ON n.id = r.node_id "
+                        "JOIN images i ON i.id = n.image_id WHERE r.id = ?",
+                        (rid,)).fetchone()
+                    w, h = (int(row["w"] or 0), int(row["h"] or 0)) if row \
+                        else (0, 0)
+                    ocr.finish(rid, mistral_batch.page_to_result(
+                        page, w, h, []))
+                repo.mark_imported(jid)
+                imported += 1
+                print(f"  job {jid}: imported {len(run_ids)} page(s)")
+            elif status in mistral_batch.FAILED_STATUSES:
+                for rid in run_ids:
+                    ocr.fail(rid, f"batch {status}")
+                failed += 1
+                print(f"  job {jid}: {status}")
+            else:
+                still += 1
+                print(f"  job {jid}: {status} (not ready)")
+        conn.commit()
+        print(f"Batch check: {imported} imported, {still} pending, "
+              f"{failed} failed.")
+        return 0 if still == 0 else 2
     finally:
         conn.close()
 
@@ -253,6 +383,10 @@ def run(cfg: CliConfig) -> int:
         project_file = cfg.project_file
         project_dir = project_file.parent
         slug = slug_from_project_file(project_file)
+        # --check-ocr: just poll + import pending batch jobs, then exit. No
+        # pipeline / import.
+        if cfg.check_ocr:
+            return _check_ocr(str(project_file))
     else:
         slug = default_project_name(cfg)
         parent = default_parent_dir(cfg)
@@ -368,6 +502,13 @@ def run(cfg: CliConfig) -> int:
 
     # OCR
     if cfg.do_ocr:
+        if cfg.ocr_batch:
+            # `--do-ocr mistral:batch` — submit + leave pending (retrieve
+            # later with `--check-ocr`). Skip exports below: results aren't
+            # in yet.
+            _submit_batch_ocr(str(project_file), engine_name=cfg.ocr_engine,
+                              languages=cfg.ocr_languages)
+            return 0
         _run_ocr(str(project_file), engine_name=cfg.ocr_engine,
                  languages=cfg.ocr_languages, params=cfg.ocr_params)
 
