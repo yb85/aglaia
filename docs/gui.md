@@ -1,6 +1,6 @@
-# GUI (aglaia.py)
+# GUI (aglaia)
 
-PySide6 desktop app. Entry: `uv run python aglaia.py <workspace_dir>`.
+PySide6 desktop app. Entry: `uv run aglaia <workspace_dir>`.
 
 ## Layout
 

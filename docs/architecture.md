@@ -108,7 +108,7 @@ In the GUI, `ProcessMonitor` (`aglaia/workers/ProcessMonitor.py`) drains the que
 
 ### Producers
 
-- **GUI (`aglaia.py`)**: `MainWindow.capture()` reads a frame from `WebcamThread`, applies undistortion if a calibration exists, builds an `ImageBuffer`, and `processing_queue.put(img_buf)`.
+- **GUI (`aglaia`)**: `MainWindow.capture()` reads a frame from `WebcamThread`, applies undistortion if a calibration exists, builds an `ImageBuffer`, and `processing_queue.put(img_buf)`.
 - **Imports (GUI import panel / `--headless`)**: `aglaia/workers/ImportHelpers.py` (`enqueue_pdf_files` / `enqueue_image_files`) extracts or renders pages via `PDFprocessor`, wraps each in an `ImageBuffer`, and feeds the same chain.
 
 ## Process tree at runtime
@@ -117,7 +117,7 @@ Capture mode:
 
 ```mermaid
 flowchart TD
-    Root["python aglaia.py …"]
+    Root["aglaia …"]
     Main["main / Qt event loop (GUI)"]
     Webcam["WebcamThread (QThread)"]
     Mon["ProcessMonitor (QThread)"]
@@ -136,11 +136,11 @@ flowchart TD
 
 (No separate writer process — each worker persists to the project DB directly.)
 
-Headless mode (`aglaia.py … --headless`):
+Headless mode (`aglaia … --headless`):
 
 ```mermaid
 flowchart TD
-    Root["python aglaia.py book.agl --headless -p config/pipelines/book_curved_x2.yaml"]
+    Root["aglaia book.agl --headless -p config/pipelines/book_curved_x2.yaml"]
     Main["main / log_queue drain (aglaia/workers/headless.py)"]
     W0["Worker-Integrated-0 (Process, daemon)"]
     WN["Worker-Integrated-N (Process, daemon)"]

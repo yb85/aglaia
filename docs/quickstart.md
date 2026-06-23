@@ -4,11 +4,11 @@ Get from a stack of book photos (or a PDF) to a searchable PDF / Markdown in
 a few minutes. This is the guided happy path; the reference docs in the
 [table](./README.md) go deeper on every step.
 
-Aglaïa has **one entry point**, `aglaia.py`, in two modes:
+Aglaïa has **one entry point**, `aglaia`, in two modes:
 
-- **GUI** (macOS) — webcam capture + live processing: `aglaia.py <workspace>`
+- **GUI** (macOS) — webcam capture + live processing: `aglaia <workspace>`
 - **Headless CLI** (cross-platform) — same pipeline, no Qt:
-  `aglaia.py <workspace> --headless …`
+  `aglaia <workspace> --headless …`
 
 A *workspace* is a project directory; its state lives in a single
 `<name>.scanproj.sqlite` (a.k.a. `.agl`) file — see [storage.md](./storage.md).
@@ -42,7 +42,7 @@ uv sync --extra dev --extra cuda
 ## 2a. Capture from a webcam (GUI, macOS)
 
 ```bash
-uv run python aglaia.py ~/scans/my-book
+uv run aglaia ~/scans/my-book
 ```
 
 1. **Pick a camera** in the capture sidebar (Continuity Camera works).
@@ -65,10 +65,10 @@ render). From the CLI, just pass the files:
 
 ```bash
 # Ingest images into a new/!existing project
-uv run python aglaia.py ~/scans/my-book.agl --headless page-01.jpg page-02.jpg
+uv run aglaia ~/scans/my-book.agl --headless page-01.jpg page-02.jpg
 
 # Extract a PDF's pages and process them
-uv run python aglaia.py ~/scans/my-book.agl --headless scan.pdf --input-dpi 300
+uv run aglaia ~/scans/my-book.agl --headless scan.pdf --input-dpi 300
 ```
 
 `--input-dpi` sets the assumed resolution for imported **images** (PDFs
@@ -83,7 +83,7 @@ Both modes run the same YAML-defined pipeline (default
 dewarp → binarize). Override with `-p`:
 
 ```bash
-uv run python aglaia.py ~/scans/my-book.agl --headless \
+uv run aglaia ~/scans/my-book.agl --headless \
     -p book_curved_x2 --workers 4
 ```
 
@@ -100,7 +100,7 @@ OCR and export are off-chain passes you can run in the same headless
 invocation:
 
 ```bash
-uv run python aglaia.py ~/scans/my-book.agl --headless \
+uv run aglaia ~/scans/my-book.agl --headless \
     --do-ocr apple:lang=fr-FR \
     --export "pdf:g4+md"
 ```
@@ -122,7 +122,7 @@ In the **GUI**, the same actions live in the export panel.
 Ingest a PDF, process, OCR, and emit both a G4 PDF and Markdown:
 
 ```bash
-uv run python aglaia.py ~/scans/my-book.agl --headless scan.pdf \
+uv run aglaia ~/scans/my-book.agl --headless scan.pdf \
     -p book_curved_x2 --workers 4 \
     --do-ocr apple --ocr-lang fr-FR+en-US \
     --export "pdf:g4+md"

@@ -27,14 +27,14 @@ uv run python tests/test_processing_chain.py
 Capture GUI (needs a camera at `--camera-id 0` by default):
 
 ```bash
-uv run python aglaia.py /tmp/test_scans
+uv run aglaia /tmp/test_scans
 ```
 
 Headless batch (PDF import lives in the GUI import panel; CLI batch
 reprocesses an existing project):
 
 ```bash
-uv run python aglaia.py /tmp/test_scans.agl --headless -p config/pipelines/book_curved_x2.yaml
+uv run aglaia /tmp/test_scans.agl --headless -p config/pipelines/book_curved_x2.yaml
 ```
 
 ## Module map (quick reference)
@@ -90,7 +90,7 @@ See `docs/processors.md` — "Writing a new processor". One step:
 Three layers let you inspect + drive the app without a screen, camera, or the
 startup dialog — useful for CI smoke shots and agent-driven UI debugging:
 
-1. **Logic / data corners — headless CLI.** `aglaia.py <img|pdf|.agl> --headless
+1. **Logic / data corners — headless CLI.** `aglaia <img|pdf|.agl> --headless
    -p <pipeline> --do-ocr <engine> --export pdf+md --md-refine apple_fm` creates
    a project, imports, processes, OCRs and exports without Qt. Inspect the
    resulting `.agl` DB or output files. Covers import / process / pipeline swap /
@@ -99,9 +99,9 @@ startup dialog — useful for CI smoke shots and agent-driven UI debugging:
    widget (CaptureTab, ExportTab, the capture-mode status bar, …) to a PNG
    offscreen. `QT_QPA_PLATFORM=offscreen uv run python debug/ui_shot.py list`.
    Add a scene function for whatever widget you're debugging.
-3. **Full populated GUI — `AGLAIA_UI_SHOT_DIR`.** `aglaia.py <project.agl>` opens
+3. **Full populated GUI — `AGLAIA_UI_SHOT_DIR`.** `aglaia <project.agl>` opens
    in project mode with no startup dialog, so
-   `QT_QPA_PLATFORM=offscreen AGLAIA_UI_SHOT_DIR=/tmp/s uv run python aglaia.py
+   `QT_QPA_PLATFORM=offscreen AGLAIA_UI_SHOT_DIR=/tmp/s uv run aglaia
    project.agl` screenshots the whole window + each sidebar tab into `/tmp/s`
    then quits (`AGLAIA_UI_SHOT_TABS=pipeline,export` limits which). Faithful view
    of the real app loaded with real data.

@@ -523,7 +523,7 @@ try block.
 After any pipeline-code change:
 
 1. Kill the GUI (Qt: cmd-Q).
-2. Restart the entry script (`aglaia.py`).
+2. Restart the entry script (`aglaia`).
 3. Re-open the project.
 4. Reprocess the affected scan.
 

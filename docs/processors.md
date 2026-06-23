@@ -338,7 +338,7 @@ dropping a `*.py` file into the per-user plugin dirs:
 `~/Library/Application Support/Aglaia/plugins/…`.)
 
 **Trust gate.** Code is not run blindly. At GUI startup
-`aglaia/gui/plugin_trust.py` (wired in `aglaia.py:_qt_app`) shows a warning
+`aglaia/gui/plugin_trust.py` (wired in `aglaia/app.py:_qt_app`) shows a warning
 for every file that is new or whose content changed since it was
 accepted, offering **Add / Delete / Skip**. Accepted files are recorded
 in the `plugins` table of `aglaia-config.db` with a sha256.

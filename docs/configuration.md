@@ -1,7 +1,7 @@
 # Configuration
 
 The user-facing CLI is `aglaia/workers/cli.py` (`build_parser` → `parse_argv`),
-shared by `aglaia.py` and the headless runner. Per-invocation choices are
+shared by `aglaia` and the headless runner. Per-invocation choices are
 flags; runtime *preferences* (default engine, thumb size, theme, worker
 count) live in the per-user config DB (`aglaia/app_data/db.py`). See
 [gui.md](gui.md) for the app-data store.
@@ -107,12 +107,12 @@ args.options = {
 
 ## Calibration injection
 
-After `initialize`, `aglaia.py` overwrites `args.options["calibration"]["camera_matrix"]` and `["camera_matrix_resolution"]` from `config/camera_params.json`. `create_processing_chain` then injects those into every `PageDewarper` step's options.
+After `initialize`, `aglaia` overwrites `args.options["calibration"]["camera_matrix"]` and `["camera_matrix_resolution"]` from `config/camera_params.json`. `create_processing_chain` then injects those into every `PageDewarper` step's options.
 
 ## Example: headless run
 
 ```bash
-uv run python aglaia.py ~/scans/book.agl --headless \
+uv run aglaia ~/scans/book.agl --headless \
   -p full \
   --do-ocr auto --ocr-lang fr-FR+en-US \
   --export pdf:g4+md

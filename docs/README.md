@@ -9,7 +9,7 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | [pipeline.md](./pipeline.md) | YAML pipeline schema, template substitution, default pipeline annotated |
 | [processors.md](./processors.md) | DPIfixer, SkewFinder, PageDetector, Binarizer, PageDewarper — options, behavior, extension points, **drop-in user plugins** |
 | [imagebuffer.md](./imagebuffer.md) | Standard image envelope, meta keys, write logic |
-| [gui.md](./gui.md) | Capture GUI (aglaia.py), threads, key/voice bindings, calibration buttons |
+| [gui.md](./gui.md) | Capture GUI (aglaia), threads, key/voice bindings, calibration buttons |
 | [calibration.md](./calibration.md) | Camera calibration workflow, DPI calibration, camera_params.json |
 | [configuration.md](./configuration.md) | Config layers (defaults / YAML / CLI), `args.options` shape, path resolution |
 | [development.md](./development.md) | Env setup, module map, multiprocessing constraints, adding processors, conventions |
