@@ -108,15 +108,27 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set the bounds of container window to {200, 120, 840, 520}
+        -- `bounds` is the OUTER window; the icon-view content area is that
+        -- minus the title bar (~28pt) AND the bottom status/path bar
+        -- (~28pt). The 640×400pt background fills the *content*, so add both
+        -- bars: outer height 400 + 56 = 456 (else the bottom caption clips).
+        set the bounds of container window to {200, 120, 840, 576}
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 96
         set text size of viewOptions to 13
         set background picture of viewOptions to file ".background:background.png"
-        -- Icon placement: app on the left, arrow → Applications on the right
-        set position of item "Aglaia.app" of container window to {160, 240}
-        set position of item "Applications" of container window to {480, 240}
+        -- The drag-arrow bows DOWNWARD across the middle, so place the two
+        -- icons ABOVE it, pushed diagonally toward the top corners (~one
+        -- icon-size up-and-out from centre) — the whole arrow then reads
+        -- clearly between/below them. App top-left, Applications top-right.
+        set position of item "Aglaia.app" of container window to {100, 150}
+        set position of item "Applications" of container window to {540, 150}
+        -- Shove the hidden .background folder far off-canvas so users who
+        -- show dotfiles don't see it sitting in the window.
+        try
+            set position of item ".background" of container window to {1100, 1100}
+        end try
         update without registering applications
         delay 2
         close
