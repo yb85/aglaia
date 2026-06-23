@@ -246,37 +246,43 @@ const powers = [
 
         <div class="code reveal">
           <div class="code__tabs">
-            <button class="code__tab is-active" data-tab="pip" type="button">pip</button>
+            <button class="code__tab is-active" data-tab="brew" type="button">Homebrew</button>
             <button class="code__tab" data-tab="uv" type="button">uv (source)</button>
-            <button class="code__tab" data-tab="brew" type="button">Homebrew</button>
+            <button class="code__tab" data-tab="pip" type="button">pip</button>
             <button class="code__copy" type="button" aria-label="Copy">Copy</button>
           </div>
-          <pre class="code__panel is-active" data-panel="pip"><code># from PyPI — installs the `aglaia` command
-pip install aglaia                  # lean base: headless pipeline, no Qt
-pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
+          <pre class="code__panel is-active" data-panel="brew"><code># macOS, Apple Silicon
+brew tap yb85/aglaia https://github.com/yb85/aglaia
+brew trust yb85/aglaia              # Homebrew 6.x: trust the third-party tap
 
-# OCR engines are heavy and mutually exclusive — pick one:
-#   pip install "aglaia[surya]"     # Surya OCR (cross-platform)
-#   pip install "aglaia[paddle]"    # PaddleOCR-VL (MLX)
-# (Apple Vision OCR needs no extra — it ships with [macos].)
+brew install --cask aglaia          # the GUI app (notarized DMG) — recommended
+# or, run from a terminal instead of a .app double-click:
+brew install aglaia-cli             # same full app, launched via `aglaia …`
+brew install aglaia-cli --without-gui   # lighter: CLI-only, no Qt/GUI
 
-aglaia ~/scans/my-book              # launch the GUI</code></pre>
+aglaia ~/scans/my-book</code></pre>
           <pre class="code__panel" data-panel="uv"><code># build from source with the extras you want
 git clone https://github.com/yb85/aglaia.git &amp;&amp; cd aglaia
 
 uv sync --extra gui --extra macos   # macOS GUI: Vision, Speech, MLX dewarp
 # add any of:
-#   --extra surya | --extra paddle  # OCR engine (pick one)
+#   --extra surya --extra paddle    # OCR engines — uv installs BOTH
 #   --extra jbig2    # smallest searchable PDFs (JBIG2 encoder, needs Rust)
 #   --extra cloud    # Mistral cloud OCR
 #   --extra cuda     # NVIDIA GPU dewarp (Linux)
 
 uv run aglaia ~/scans/my-book</code></pre>
-          <pre class="code__panel" data-panel="brew"><code># tap, then install the `aglaia` command (builds from source via uv)
-brew tap yb85/aglaia https://github.com/yb85/aglaia
-brew install aglaia
+          <pre class="code__panel" data-panel="pip"><code># from PyPI — installs the `aglaia` command
+pip install aglaia                  # lean base: headless pipeline, no Qt
+pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
 
-aglaia ~/scans/my-book</code></pre>
+# OCR engines: pip can't install both (conflicting huggingface-hub pins),
+# so pick one. This limit is pip-only — uv and the .app ship both.
+#   pip install "aglaia[surya]"     # Surya OCR (cross-platform)
+#   pip install "aglaia[paddle]"    # PaddleOCR-VL (MLX)
+# Apple Vision OCR needs no extra — it ships with [macos].
+
+aglaia ~/scans/my-book              # launch the GUI</code></pre>
         </div>
       </section>
 

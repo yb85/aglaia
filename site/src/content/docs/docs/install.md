@@ -21,32 +21,46 @@ Each release ships a `SHA256SUMS.txt`; verify with:
 shasum -a 256 -c SHA256SUMS.txt
 ```
 
-## Install the CLI (pip / Homebrew)
+## Install via Homebrew
 
-Aglaïa is also a pip-installable package that exposes an `aglaia` command.
-The base install is lean and GUI-free (the headless pipeline, no Qt):
+The tap carries a Cask (the GUI app) and a source formula (the CLI):
 
 ```bash
-pip install aglaia                  # `aglaia --headless …` batch pipeline
-pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
-aglaia ~/scans/my-book              # launch the GUI
+brew tap yb85/aglaia https://github.com/yb85/aglaia
+brew trust yb85/aglaia              # Homebrew 6.x: trust the third-party tap
+
+brew install --cask aglaia          # the GUI app (notarized DMG) — recommended
+brew install aglaia-cli             # same full app, launched from a terminal
+brew install aglaia-cli --without-gui   # lighter: CLI-only, no Qt/GUI
 ```
 
-OCR engines are heavy and **mutually exclusive** (their `huggingface-hub`
-pins conflict) — pick at most one:
+`aglaia-cli` builds from source with `uv`; "cli" means *run from a
+terminal* (`aglaia ~/scans/book`), not GUI-less — it's the same app as the
+Cask. Add `--without-gui` for the lean headless-only build (no PySide6).
+
+## Install via pip
+
+Aglaïa is a pip-installable package exposing an `aglaia` command. The base
+install is lean and GUI-free — running `aglaia <inputs>` then auto-selects
+the headless pipeline (no `--headless` needed):
+
+```bash
+pip install aglaia                  # lean base: headless batch pipeline, no Qt
+pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
+aglaia ~/scans/my-book              # GUI if installed, else headless
+```
+
+OCR engines: **`pip` can't install both** — `surya-ocr` pins
+`huggingface-hub<1`, `mlx-vlm` (paddle) needs `>=1.5`, so a loose pip
+resolve is unsatisfiable. Pick one. This limit is **pip-only**: `uv` (and
+the shipped `.app`) reconcile both via a resolver override.
 
 ```bash
 pip install "aglaia[surya]"         # Surya OCR (cross-platform)
 pip install "aglaia[paddle]"        # PaddleOCR-VL (MLX)
 ```
 
-Apple Vision OCR needs no extra; it ships with `[macos]`. Or via Homebrew
-(builds from source with `uv`):
-
-```bash
-brew tap yb85/aglaia https://github.com/yb85/aglaia
-brew install aglaia
-```
+Apple Vision OCR needs no extra; it ships with `[macos]`.
 
 ## Build from source
 
