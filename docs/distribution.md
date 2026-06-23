@@ -55,6 +55,70 @@ These mirror the local `.env` (`AGLAIA_SIGN_IDENTITY`,
 never leave GitHub's encrypted secret store; the workflow drops them into
 an ephemeral keychain that dies with the runner.
 
+## Windows installer & code signing
+
+The same tag triggers the `build-windows` job (`windows-latest`): it
+PyInstaller-builds the onedir, compiles the Inno Setup installer
+(`packaging/aglaia.iss` — Start-menu shortcut + `.agl` association), and
+ships `Aglaia-windows-x64-setup.exe` + a portable ZIP.
+
+Authenticode signing is **optional**. Set both secrets below to sign the
+exe and the installer; leave them unset and an *unsigned* installer + ZIP
+still ship (users get a SmartScreen "unknown publisher" prompt on first
+run).
+
+| Secret | What | How to get it |
+|---|---|---|
+| `WINDOWS_CERT_PFX_BASE64` | Authenticode cert **+ private key** as a `.pfx`, base64-encoded | see below |
+| `WINDOWS_CERT_PASSWORD` | password protecting the `.pfx` | you choose it at export time |
+
+> **CA reality (2023+):** OV/EV code-signing certs now require the private
+> key on a hardware token or HSM, so a real CA won't hand you an
+> exportable `.pfx`. Genuine SmartScreen trust means a cloud-signing
+> service (Azure Trusted Signing, DigiCert KeyLocker, SSL.com eSigner),
+> which would need the signing steps rewritten — `signtool /f cert.pfx`
+> can't consume an HSM key.
+
+### Self-signed cert (no SmartScreen trust)
+
+Fits the existing workflow as-is. The signature is valid and timestamped
+but the root isn't trusted, so the "unknown publisher" prompt remains.
+Fine for internal distribution or validating the signing plumbing.
+Generate one on Windows (PowerShell), keeping the `.pfx` **outside the
+repo**:
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert `
+  -Subject "CN=bibli.cc, O=bibli.cc" -KeyUsage DigitalSignature `
+  -KeySpec Signature -KeyExportPolicy Exportable `
+  -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
+  -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
+
+$pw = ConvertTo-SecureString "<choose-a-password>" -Force -AsPlainText
+Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" `
+  -FilePath "$HOME\aglaia-codesign\aglaia-codesign.pfx" -Password $pw
+Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
+```
+
+Then push the secrets (web UI, or `gh` once authenticated):
+
+```powershell
+$b64 = [Convert]::ToBase64String(
+  [IO.File]::ReadAllBytes("$HOME\aglaia-codesign\aglaia-codesign.pfx"))
+$b64 | Out-File -Encoding ascii "$HOME\aglaia-codesign\WINDOWS_CERT_PFX_BASE64.txt"
+gh secret set WINDOWS_CERT_PFX_BASE64 < "$HOME\aglaia-codesign\WINDOWS_CERT_PFX_BASE64.txt"
+gh secret set WINDOWS_CERT_PASSWORD   # prompts, hidden input
+```
+
+Verify the cert signs before relying on CI (same `signtool` call the
+workflow uses; `verify /pa` will report an untrusted chain for a
+self-signed cert — that's expected):
+
+```powershell
+signtool sign /f aglaia-codesign.pfx /p <password> /fd SHA256 `
+  /tr http://timestamp.digicert.com /td SHA256 path\to\Aglaia.exe
+```
+
 ## Local build (no CI)
 
 ```bash
