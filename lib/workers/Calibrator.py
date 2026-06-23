@@ -12,10 +12,15 @@ import os
 import json
 
 class Calibrator:
-    def __init__(self, board_size=(5, 8), square_size_mm=30.0):
+    def __init__(self, board_size=(6, 9), square_size_mm=25.0):
         """
         board_size: (columns, rows) of inner corners
         square_size_mm: size of a square in millimeters
+
+        Defaults match the board we ship + generate
+        (`scripts/gen_calibration_board.py`): a 7×10 SQUARE chessboard → a
+        (6, 9) inner-corner grid, 25 mm squares. KEEP IN SYNC with that script
+        and the `calibration:` config defaults if the printed board changes.
         """
         self.board_size = board_size
         self.square_size_mm = square_size_mm

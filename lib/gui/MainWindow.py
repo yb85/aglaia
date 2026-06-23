@@ -304,9 +304,11 @@ class MainWindow(QMainWindow):
         self._manual_dpi: Optional[float] = None
         cal_cfg = self.args.config.get("calibration", {})
         self.cal_target_count = cal_cfg.get("calnum", 10)
+        # Defaults match the generated board (scripts/gen_calibration_board.py):
+        # 7×10 squares → (6, 9) inner corners, 25 mm.
         self.calibrator = Calibrator(
-            board_size=(cal_cfg.get("board_cols_inner", 5), cal_cfg.get("board_rows_inner", 8)),
-            square_size_mm=cal_cfg.get("square_size_mm", 30)
+            board_size=(cal_cfg.get("board_cols_inner", 6), cal_cfg.get("board_rows_inner", 9)),
+            square_size_mm=cal_cfg.get("square_size_mm", 25)
         )
         self.path_config = self.args.config.get("paths", {})
         self.output_dir_name = self.path_config.get("output_dir", "XX_OUTPUT")

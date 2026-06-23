@@ -59,6 +59,9 @@ macos = [
 ]
 dev = [
     "pytest>=8.0.0",
+    # Generates the printable camera-calibration chessboard PDFs
+    # (scripts/gen_calibration_board.py) at exact mm dimensions.
+    "reportlab>=4.0.0",
 ]
 package = [
     # macOS .app bundle builder. Used via `uv run pyinstaller Aglaia.spec`.

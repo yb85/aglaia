@@ -8,15 +8,44 @@ Capture mode benefits from a calibrated camera matrix to:
 
 ## Target
 
-`A4_chessboard.pdf` (repo root). Default expected board:
+`A4_chessboard.pdf` / `letter_chessboard.pdf` (repo root). We **generate**
+these ourselves — `scripts/gen_calibration_board.py` (needs the `dev` extra for
+`reportlab`) — so the grid geometry is fixed and hard-coded:
 
-| Parameter | Default | Config key |
+| Parameter | Value | Config key |
 |---|---|---|
-| Inner corners | 5 columns × 8 rows | `calibration.board_cols_inner` / `board_rows_inner` |
-| Square size | 30 mm | `calibration.square_size_mm` |
+| Board | 7 × 10 squares | (geometry of the generated PDF) |
+| Inner corners | 6 columns × 9 rows | `calibration.board_cols_inner` / `board_rows_inner` |
+| Square size | 25 mm | `calibration.square_size_mm` |
 | Sample count | 10 | `calibration.calnum` |
 
-These defaults are hard-coded in `MainWindow.__init__` (read from `args.config.get("calibration", {})`); the bundled `config/default.yml` has no `calibration:` block, so they apply as-is. If you print the included PDF on actual A4, they're correct. Override by adding a `calibration:` block to `config/default.yml` if you use a different target.
+Regenerate with `uv run --extra dev python scripts/gen_calibration_board.py`.
+The defaults are hard-coded in `Calibrator` + `MainWindow.__init__` (read from
+`args.config.get("calibration", {})`); the bundled `config/default.yml` has no
+`calibration:` block, so they apply as-is. **If you change the board, update the
+script, the `Calibrator` defaults, and these keys together.**
+
+> **Print at 100%.** Set the printer dialog to "Actual Size" / "Custom Scale:
+> 100%" — never "Fit to Page", which alters the 25 mm squares (and thus every
+> measurement derived from them).
+
+### Preparing the physical board
+
+1. **Rigidity is non-negotiable.** A millimetre of warp distorts the matrix.
+   Mount the sheet on a flat, rigid backing (clipboard, foam core, MDF, glass).
+2. **Adhesive:** spray adhesive or a glue stick — *not* tape (it bubbles and
+   tensions unevenly).
+3. **Beware glare.** Glossy laser toner reflects lights → corners aren't found.
+   Diffuse the lighting or angle lamps so the surface reads matte.
+
+### Capturing good samples
+
+1. **15–25 frames** of decent quality.
+2. **Tilt it:** pitch the board forward / back / left / right up to ~45°.
+3. **Map the edges:** distortion is worst at the sensor extremities — push the
+   board into the corners/edges of the field of view in several frames.
+4. **Hold still:** motion blur / out-of-focus corners wreck sub-pixel accuracy.
+5. A good run has an RMS reprojection error well under 1.0 (ideally 0.1–0.2).
 
 ## Workflow (Full Calibration)
 
