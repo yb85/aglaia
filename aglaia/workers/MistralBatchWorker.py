@@ -85,7 +85,15 @@ class MistralBatchWorker(QThread):
         if self._db_path:
             conn = open_db(self._db_path)
             try:
-                MistralBatchRepo(conn).set_status(self._job_id, status)
+                repo = MistralBatchRepo(conn)
+                repo.set_status(self._job_id, status)
+                # Fail the cancelled job's OCR runs so they don't sit
+                # 'running' forever; the pages just stay un-OCR'd.
+                row = repo.get(self._job_id)
+                if row is not None:
+                    ocr_repo = OcrRepo(conn)
+                    for rid in MistralBatchRepo.run_ids_of(row):
+                        ocr_repo.fail(rid, f"batch {status}")
                 conn.commit()
             finally:
                 conn.close()

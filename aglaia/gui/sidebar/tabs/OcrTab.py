@@ -157,6 +157,10 @@ class OcrTab(QWidget):
     # different engine in the radio card group. MainWindow uses it to
     # mark all done OCR runs of the OLD engine as stale.
     engine_changed = Signal(str)
+    # Mistral batch: the cloud card's pending-state buttons.
+    batch_check_requested = Signal()    # "Check result" → poll + import
+    batch_cancel_requested = Signal()   # "Cancel" (after confirm)
+    jobs_tab_requested = Signal()       # open the Mistral Jobs tab
 
     MODE_DEFAULT = "default"
     MODE_FORCE = "force"
@@ -652,8 +656,131 @@ class OcrTab(QWidget):
         btn.clicked.connect(self._prompt_cloud_key)
         col.addWidget(btn)
 
+        # ── Mistral batch controls ──────────────────────────────────────
+        from PySide6.QtWidgets import QCheckBox
+        from aglaia.app_data import db as _cfg
+        try:
+            with _cfg.session() as _c:
+                _batch_on = bool(_cfg.get(_c, _cfg.KEY_MISTRAL_BATCH, False))
+        except Exception:
+            _batch_on = False
+        self._batch_toggle = QCheckBox(self.tr(
+            "Submit as a batch job (cheaper, runs in the background)"))
+        self._batch_toggle.setChecked(_batch_on)
+        self._batch_toggle.setStyleSheet(
+            f"color: {COLOR_FONT_DIM}; font-size: 10px;")
+        self._batch_toggle.setToolTip(self.tr(
+            "Mistral Batch API: ~50% cheaper, processed asynchronously. "
+            "Submit now, pull results later with 'Check result'."))
+        self._batch_toggle.toggled.connect(self._on_batch_toggled)
+        col.addWidget(self._batch_toggle)
+
+        # Pending-job state — hidden unless this project has a pending batch.
+        self._batch_pending_box = QWidget()
+        _pb = QVBoxLayout(self._batch_pending_box)
+        _pb.setContentsMargins(0, 2, 0, 0)
+        _pb.setSpacing(3)
+        self._batch_status_lbl = QLabel()
+        self._batch_status_lbl.setStyleSheet(
+            f"color: {COLOR_PRIMARY}; font-size: 10px; font-weight: 600;")
+        self._batch_status_lbl.setWordWrap(True)
+        _pb.addWidget(self._batch_status_lbl)
+        _brow = QHBoxLayout()
+        _brow.setSpacing(6)
+        _small = (f"QPushButton {{ background-color: {COLOR_SECONDARY_BG_SOFT};"
+                  f" color: {COLOR_FONT_PRIMARY};"
+                  f" border: 1px solid {COLOR_SECONDARY_BORDER};"
+                  f" border-radius: 6px; padding: 3px 10px; font-size: 10px;"
+                  f" font-weight: 600; }}"
+                  f"QPushButton:hover {{ background-color: {COLOR_SECONDARY_BG_HOVER}; }}")
+        self._batch_check_btn = QPushButton(self.tr("Check result"))
+        self._batch_check_btn.clicked.connect(self.batch_check_requested.emit)
+        self._batch_cancel_btn = QPushButton(self.tr("Cancel"))
+        self._batch_cancel_btn.clicked.connect(self._on_batch_cancel_clicked)
+        for _b in (self._batch_check_btn, self._batch_cancel_btn):
+            _b.setCursor(Qt.CursorShape.PointingHandCursor)
+            _b.setStyleSheet(_small)
+            _brow.addWidget(_b)
+        _brow.addStretch(1)
+        _pb.addLayout(_brow)
+        col.addWidget(self._batch_pending_box)
+
+        # "Jobs" pill — always present; opens the Mistral Jobs tab.
+        _jrow = QHBoxLayout()
+        _jrow.addStretch(1)
+        _jobs_pill = QPushButton(self.tr("Jobs"))
+        _jobs_pill.setProperty("pill", "true")
+        _jobs_pill.setCursor(Qt.CursorShape.PointingHandCursor)
+        _jobs_pill.setToolTip(self.tr("Mistral OCR jobs for all projects"))
+        _jobs_pill.clicked.connect(self.jobs_tab_requested.emit)
+        _jrow.addWidget(_jobs_pill)
+        col.addLayout(_jrow)
+
         self._refresh_cloud_key_status()
+        self.refresh_batch_state()
         return wrap
+
+    # ── Mistral batch state ─────────────────────────────────────────────
+    def _on_batch_toggled(self, on: bool) -> None:
+        from aglaia.app_data import db as cfg
+        try:
+            with cfg.session() as conn:
+                cfg.set(conn, cfg.KEY_MISTRAL_BATCH, bool(on))
+                conn.commit()
+        except Exception:
+            pass
+
+    def batch_enabled(self) -> bool:
+        """True when Cloud OCR is selected AND the batch toggle is on — the
+        run should submit a batch instead of OCR'ing synchronously."""
+        return (self.engine_group.current_key() == "mistral_cloud"
+                and getattr(self, "_batch_toggle", None) is not None
+                and self._batch_toggle.isChecked())
+
+    def _on_batch_cancel_clicked(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        if QMessageBox.question(
+                self, self.tr("Cancel batch job?"),
+                self.tr("Cancel the pending Mistral batch job(s)? The pages "
+                        "they cover stay un-OCR'd."),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes:
+            self.batch_cancel_requested.emit()
+
+    def refresh_batch_state(self) -> None:
+        """Show the pending-job row + disable Run while this project has a
+        pending Mistral batch. Call after submit / check / on tab show."""
+        if getattr(self, "_batch_pending_box", None) is None:
+            return
+        pending = []
+        w = self.window()
+        db_path = getattr(w, "db_path", None) if w is not None else None
+        if db_path:
+            try:
+                from aglaia.storage.db import db_session
+                from aglaia.storage.repo import MistralBatchRepo
+                with db_session(str(db_path)) as conn:
+                    pending = MistralBatchRepo(conn).pending()
+            except Exception:
+                pending = []
+        has_run = getattr(self, "run_btn", None) is not None
+        if pending:
+            from aglaia.gui.timeago import time_ago
+            oldest = min((str(p["submitted_at"]) for p in pending), default="")
+            self._batch_status_lbl.setText(self.tr(
+                "Batch job pending ({n}) — submitted {ago}").format(
+                    n=len(pending), ago=time_ago(oldest)))
+            self._batch_pending_box.setVisible(True)
+            if has_run:
+                self.run_btn.setEnabled(False)
+                self.run_btn.setToolTip(self.tr(
+                    "A Mistral batch job is pending — use 'Check result' to "
+                    "pull it, or 'Cancel', before running OCR again."))
+        else:
+            self._batch_pending_box.setVisible(False)
+            if has_run:
+                self._refresh_engine_state()
 
     def _refresh_cloud_key_status(self, *, probe_keychain: bool = False) -> None:
         """Update the cloud-key status line.
