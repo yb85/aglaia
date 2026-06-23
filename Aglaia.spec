@@ -134,6 +134,11 @@ if _llama_subdir is not None:
 # only the runtime subdirs — NOT the large site-only brand backgrounds.
 datas = [
     (str(REPO / "aglaia" / "config"), "aglaia/config"),
+    # Project-DB schema migrations — loaded at runtime via
+    # storage/db.py SCHEMA_DIR = Path(__file__).parent/"schema". Without
+    # these the frozen app applies zero migrations and creates no tables
+    # ("no such table: project").
+    (str(REPO / "aglaia" / "storage" / "schema"), "aglaia/storage/schema"),
     (str(REPO / "aglaia" / "assets" / "icons"), "aglaia/assets/icons"),
     (str(REPO / "aglaia" / "assets" / "modes"), "aglaia/assets/modes"),
     # Theme-aware wordmarks (About dialog / startup) + the 1024 logo.

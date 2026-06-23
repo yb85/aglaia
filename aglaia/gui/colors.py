@@ -272,19 +272,18 @@ def _resolve_palette() -> tuple[str, dict[str, str]]:
         return "light", _LIGHT
     if pref == "dark":
         return "dark", _DARK
-    # `pref == "system"`. Without a QApplication around yet (this module
-    # loads before Qt is initialised in some entry paths) we can't probe
-    # the OS theme reliably — default to dark, which matches the prior
-    # behaviour.
+    # `pref == "system"` → resolve via darkdetect, the SAME oracle
+    # qdarktheme's "auto" mode uses, so the chrome (qdarktheme stylesheet)
+    # and the inline COLOR_* tokens can't disagree. The old QPalette
+    # luminance probe was unreliable: qdarktheme themes via stylesheet and
+    # leaves the palette Window role light, so the probe returned "light"
+    # under a dark theme → dark fonts on dark chrome (broken on Linux).
+    # Default to dark when darkdetect can't tell (None), matching prior
+    # fallback behaviour.
     try:
-        from PySide6.QtGui import QPalette
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app is not None:
-            window = app.palette().color(QPalette.ColorRole.Window)
-            # Luminance proxy: average of RGB. <128 → dark.
-            if (window.red() + window.green() + window.blue()) / 3.0 >= 128:
-                return "light", _LIGHT
+        import darkdetect
+        if str(darkdetect.theme() or "").lower() == "light":
+            return "light", _LIGHT
     except Exception:
         pass
     return "dark", _DARK
