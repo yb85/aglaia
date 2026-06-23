@@ -48,12 +48,12 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 ditto "$APP" "$STAGE_DIR/Aglaia.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 mkdir -p "$STAGE_DIR/.background"
-# The brand bg is a large hi-res PNG (2424×1536). Resample to a 2× retina
-# tile (1280×800) tagged 144 dpi so Finder renders it at the window's
-# 640×400 *point* bounds (set in the osascript below) — crisp on Retina,
-# correctly scaled on 1×. (The old bg was a 1× 640×400 image.)
-sips -z 800 1280 -s dpiWidth 144 -s dpiHeight 144 \
-    "$BG" --out "$STAGE_DIR/.background/background.png" >/dev/null
+# The brand bg is a large hi-res PNG (2424×1536). Finder draws a DMG
+# background at the image's *pixel* size, so it must match the window
+# bounds exactly (640×400, set in the osascript below) — a larger/hi-dpi
+# image makes Finder skip the background entirely (and abort the styling).
+# Resample to exactly 640×400, 1× (the old bg was the same size).
+sips -z 400 640 "$BG" --out "$STAGE_DIR/.background/background.png" >/dev/null
 # Mark hidden so Finder doesn't render the dot-folder when the user
 # mounts the DMG. Combination of chflags + SetFile catches both old
 # (Carbon) and new (HFS) listings.
