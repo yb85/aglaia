@@ -664,8 +664,7 @@ class OcrTab(QWidget):
                 _batch_on = bool(_cfg.get(_c, _cfg.KEY_MISTRAL_BATCH, False))
         except Exception:
             _batch_on = False
-        self._batch_toggle = QCheckBox(self.tr(
-            "Submit as a batch job (cheaper, runs in the background)"))
+        self._batch_toggle = QCheckBox(self.tr("Batch job (cheaper, async)"))
         self._batch_toggle.setChecked(_batch_on)
         self._batch_toggle.setStyleSheet(
             f"color: {COLOR_FONT_DIM}; font-size: 10px;")
