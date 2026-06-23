@@ -45,7 +45,7 @@ class Aglaia < Formula
   test do
     # No workspace + no display → launching the GUI isn't meaningful in CI, so
     # just assert the console script and its venv entry are wired up.
-    assert_predicate bin/"aglaia", :exist?
-    assert_predicate libexec/"venv/bin/aglaia", :exist?
+    assert_path_exists bin/"aglaia"
+    assert_path_exists libexec/"venv/bin/aglaia"
   end
 end
