@@ -48,11 +48,12 @@ from .engine import OcrEngine, OcrResult, register, engine_log
 
 MODEL = "mistral-ocr-latest"
 
-# Mistral OCR list price: ~1000 pages per US dollar for mistral-ocr-latest
-# (https://mistral.ai/news/mistral-ocr — "1000 pages / $"). Used only for a
-# pre-flight cost *estimate* in the UI; the real bill is per Mistral's
-# metering. Update if the published price changes.
-PRICE_PER_PAGE_USD = 0.001
+# Mistral OCR list price. `mistral-ocr-latest` now resolves to OCR 4
+# (https://mistral.ai/news/ocr-4 — $4 / 1000 pages standard API, i.e.
+# $0.004/page; batch API is $2/1000). Used only for a pre-flight cost
+# *estimate* in the UI; the real bill is per Mistral's metering. Update if
+# the published price changes.
+PRICE_PER_PAGE_USD = 0.004
 
 # Mistral exposes no public account-balance / remaining-credit API endpoint
 # (only per-response rate-limit headers). So the UI can't show live credit —
