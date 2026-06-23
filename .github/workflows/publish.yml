@@ -1,0 +1,53 @@
+# Build + publish the `aglaia` Python package to PyPI on a version tag.
+#
+# Uses uv (https://docs.astral.sh/uv/guides/package/) and PyPI Trusted
+# Publishing (OIDC) — no API token in secrets. One-time setup on PyPI:
+#   PyPI → project "aglaia" → Publishing → add a GitHub trusted publisher:
+#     owner=yb85, repo=aglaia, workflow=publish.yml, environment=pypi
+#
+# Note: this publishes the BASE wheel only. The `jbig2` extra depends on the
+# in-tree `aglaia_jbig2` maturin crate (a local path dep, not on PyPI), so that
+# extra is not installable from the published package until the crate is
+# published separately. The GUI/macOS deps stay optional extras, so the base
+# `pip install aglaia` is lean.
+name: publish
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch: {}   # manual trigger (e.g. TestPyPI dry run)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        # AGLAIA_VERSION isn't needed here — the version comes from
+        # pyproject [project].version.
+        run: uv build
+      - name: Check the artifacts
+        run: uvx twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi               # gate + binds the trusted publisher
+    permissions:
+      id-token: write               # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: astral-sh/setup-uv@v5
+      - name: Publish to PyPI (trusted publishing)
+        run: uv publish
