@@ -162,6 +162,14 @@ def _install_flash_debug(app) -> None:
           file=sys.stderr)
 
 
+def _qt_available() -> bool:
+    """True iff PySide6 is importable — i.e. a GUI-capable install. A bare
+    `pip install aglaia` / `aglaia-cli --without-gui` ships no Qt, so the
+    GUI can't launch and `main()` routes to headless without --headless."""
+    import importlib.util
+    return importlib.util.find_spec("PySide6") is not None
+
+
 def _qt_app() -> "QApplication":
     from PySide6.QtWidgets import QApplication
     app = QApplication(sys.argv[:1])  # do not pass user argv to Qt
@@ -796,6 +804,22 @@ def main(argv: list[str] | None = None) -> int:
             print("--headless requires positional inputs.", file=sys.stderr)
             return 2
         return _run_headless(cfg)
+
+    # No-GUI install (`aglaia-cli --without-gui`, `pip install aglaia` base):
+    # PySide6 isn't present, so there's no GUI to launch. Fall back to the
+    # headless pipeline automatically — the user shouldn't have to pass
+    # --headless when the GUI simply isn't installed.
+    if not _qt_available():
+        if cfg.has_inputs():
+            _trace("main: PySide6 absent → auto headless")
+            print("No GUI (PySide6 not installed) — running headless.",
+                  file=sys.stderr)
+            return _run_headless(cfg)
+        print("No GUI: PySide6 is not installed and no inputs were given.\n"
+              "Pass image / PDF / .agl paths to run the headless pipeline, or\n"
+              "install the GUI: pip install \"aglaia[gui,macos]\".",
+              file=sys.stderr)
+        return 2
 
     # GUI path.
     _trace("main: building QApplication")
