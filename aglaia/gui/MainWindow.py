@@ -3208,6 +3208,9 @@ class MainWindow(QMainWindow):
         if batch:
             # Batch: submit + leave pending; no per-page progress / finish.
             self._ocr_worker.batch_submitted.connect(self._on_batch_submitted)
+            # Clear the OCR-running frame once the submit thread actually ends
+            # (batch_submitted fires from inside run(), still "running").
+            self._ocr_worker.finished.connect(self._on_batch_thread_finished)
         else:
             self._ocr_worker.progress_scan.connect(self._on_ocr_progress)
             self._ocr_worker.finished_ok.connect(self._on_ocr_finished)
@@ -3224,6 +3227,15 @@ class MainWindow(QMainWindow):
                                "results later with 'Check result'.").format(
                                    n=n_jobs))
         self._update_ocr_frame_state()
+        self._refresh_batch_card()
+
+    def _on_batch_thread_finished(self) -> None:
+        # The submit thread ended → drop the OCR-running frame/overlay and
+        # resync the card + badges (the runs are pending, not stale).
+        self.status_bar_widget.progress.set_indeterminate(False)
+        self._update_ocr_frame_state()
+        self.ocr_state_changed.emit()
+        self._refresh_alt_views_if_visible()
         self._refresh_batch_card()
 
     def _refresh_batch_card(self) -> None:

@@ -102,8 +102,8 @@ class OcrWorker(QThread):
                 rows = ocr_repo.branches_needing_ocr(include_stale=True)
 
             total = len(rows)
-            self.started_total.emit(total)
             if total == 0:
+                self.started_total.emit(0)
                 self.log_line.emit("info", "OCR: nothing to do.")
                 self.finished_ok.emit(True, "")
                 return
@@ -116,10 +116,14 @@ class OcrWorker(QThread):
 
             # Batch path: submit a Mistral batch job and leave the runs
             # pending (filled later by "Check result"). Only for whole-doc
-            # cloud engines.
+            # cloud engines. Don't emit started_total — batch isn't a running
+            # OCR pass, so it must NOT show the "Génération OCR…" spinner.
             if self._batch and getattr(engine, "whole_doc", False):
                 self._submit_batch(rows, ocr_repo, conn)
                 return
+
+            # Non-batch: now show the progress bar.
+            self.started_total.emit(total)
 
             # Batched OCR: feed N pages per call so Surya's llama-server
             # `--parallel` slots stay busy across pages instead of doing

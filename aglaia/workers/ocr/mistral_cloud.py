@@ -44,7 +44,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .engine import OcrEngine, OcrResult, register, engine_log
+from .engine import BatchableOCR, OcrEngine, OcrResult, register, engine_log
 
 MODEL = "mistral-ocr-latest"
 
@@ -52,8 +52,10 @@ MODEL = "mistral-ocr-latest"
 # (https://mistral.ai/news/ocr-4 — $4 / 1000 pages standard API, i.e.
 # $0.004/page; batch API is $2/1000). Used only for a pre-flight cost
 # *estimate* in the UI; the real bill is per Mistral's metering. Update if
-# the published price changes.
-PRICE_PER_PAGE_USD = 0.004
+# the published price changes. Single source of truth — the UI derives its
+# "N pages/$" hint from these, so don't restate a rate elsewhere.
+PRICE_PER_PAGE_USD = 0.004        # standard API ($4 / 1000 pages)
+PRICE_PER_PAGE_USD_BATCH = 0.002  # batch API   ($2 / 1000 pages, ~50% off)
 
 # Mistral exposes no public account-balance / remaining-credit API endpoint
 # (only per-response rate-limit headers). So the UI can't show live credit —
@@ -122,11 +124,16 @@ def _images_to_pdf(images_rgb: list[np.ndarray],
 
 
 @register
-class MistralCloudEngine(OcrEngine):
+class MistralCloudEngine(BatchableOCR, OcrEngine):
     name = "mistral_cloud"
     display = "Cloud OCR (Mistral)"
     description = ("Cloud OCR via Mistral. Clean per-page Markdown, "
                    "any script. Needs an API key.")
+
+    # Capability traits (CloudOCR + BatchableOCR) → the OCR tab disables
+    # live OCR, shows the cost estimate, and offers the batch toggle/Jobs.
+    price_per_page_usd = PRICE_PER_PAGE_USD
+    price_per_page_usd_batch = PRICE_PER_PAGE_USD_BATCH
 
     # Tell OcrWorker to send every selected page in one call (one upload).
     whole_doc = True

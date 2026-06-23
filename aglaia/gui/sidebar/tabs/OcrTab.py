@@ -374,7 +374,7 @@ class OcrTab(QWidget):
         # apple_docs = Vision-fast for Latin + a complement only on the
         # few non-Latin lines, so it reads near-Vision speed with
         # gold-tier accuracy on mixed-script pages.
-        "apple_docs":   (("rabbit", COLOR_SUCCESS), ("medal", _MEDAL_GOLD)),
+        "apple_docs":   (("rabbit", COLOR_SUCCESS), ("medal", _MEDAL_SILVER)),
         "apple_vision": (("rabbit", COLOR_SUCCESS), ("medal", _MEDAL_BRONZE)),
         "paddle_vl":    (("turtle", COLOR_WARNING), ("medal", _MEDAL_SILVER)),
         "surya":        (("turtle", COLOR_ERROR), ("medal", _MEDAL_GOLD)),
@@ -728,11 +728,28 @@ class OcrTab(QWidget):
                 conn.commit()
         except Exception:
             pass
+        # Batch is ~half price — refresh the $ estimate.
+        self._refresh_cost_estimate()
+
+    def _current_engine(self):
+        """Instantiate the selected engine — the capability source the UI
+        reads (CloudOCR / BatchableOCR traits) instead of hard-coding names.
+        Returns None when no engine / not constructible."""
+        from aglaia.workers.ocr import ENGINE_REGISTRY
+        name = self.engine_group.current_key()
+        cls = ENGINE_REGISTRY.get(name) if name else None
+        if cls is None:
+            return None
+        try:
+            return cls()
+        except Exception:
+            return None
 
     def batch_enabled(self) -> bool:
-        """True when Cloud OCR is selected AND the batch toggle is on — the
-        run should submit a batch instead of OCR'ing synchronously."""
-        return (self.engine_group.current_key() == "mistral_cloud"
+        """True when a BatchableOCR engine is selected AND the batch toggle
+        is on — the run should submit a batch instead of OCR'ing now."""
+        eng = self._current_engine()
+        return (eng is not None and getattr(eng, "supports_batch", False)
                 and getattr(self, "_batch_toggle", None) is not None
                 and self._batch_toggle.isChecked())
 
@@ -1147,24 +1164,39 @@ class OcrTab(QWidget):
         lbl = getattr(self, "_cost_lbl", None)
         if lbl is None:
             return
-        if self.engine_group.current_key() != "mistral_cloud":
+        # Show the cost estimate for any CloudOCR-trait engine with a price —
+        # not just Mistral (so a priced plugin engine gets it too).
+        eng = self._current_engine()
+        if eng is None or not getattr(eng, "cloud", False) \
+                or float(getattr(eng, "price_per_page_usd", 0.0) or 0.0) <= 0:
             lbl.setVisible(False)
             return
-        from aglaia.workers.ocr.mistral_cloud import (
-            PRICE_PER_PAGE_USD, CONSOLE_URL)
+        std = float(getattr(eng, "price_per_page_usd", 0.0) or 0.0)
+        bat = float(getattr(eng, "price_per_page_usd_batch", 0.0) or 0.0)
+        is_batch = self.batch_enabled() and bat > 0
+        price = bat if is_batch else std
+        mode = self.tr("batch") if is_batch else self.tr("standard")
+        try:
+            from aglaia.workers.ocr.mistral_cloud import CONSOLE_URL
+        except Exception:
+            CONSOLE_URL = "https://console.mistral.ai/"
         n = int(getattr(self, "_pending_total", 0) or 0)
-        cost = n * PRICE_PER_PAGE_USD
+        cost = n * price
         if n <= 0:
             lbl.setText(self.tr("⚠ Cloud OCR — pages are uploaded to Mistral "
                                 "(billed per page)."))
         else:
             lbl.setText(self.tr(
-                "⚠ ≈ ${cost:.2f} — {n} page(s) uploaded to Mistral cloud"
-            ).format(cost=cost, n=n))
+                "⚠ ≈ ${cost:.2f} — {n} page(s) → Mistral cloud ({mode})"
+            ).format(cost=cost, n=n, mode=mode))
+        # Derive "pages/$" from the price constant (single source of truth) —
+        # no second hard-coded rate to drift. Prices change: link the console.
+        ppd = int(round(1.0 / price)) if price > 0 else 0
         lbl.setToolTip(self.tr(
-            "Estimate at ~1000 pages/$ (mistral-ocr-latest). Mistral exposes "
-            "no account-balance API — check remaining credit at {url}"
-        ).format(url=CONSOLE_URL))
+            "Estimate at Mistral's {mode} list price (~{ppd} pages/$, "
+            "mistral-ocr-latest) — prices may change. No account-balance API; "
+            "check remaining credit at {url}"
+        ).format(mode=mode, ppd=ppd, url=CONSOLE_URL))
         lbl.setVisible(True)
 
     def _refresh_engine_state(self) -> None:
@@ -1198,6 +1230,19 @@ class OcrTab(QWidget):
                     "Install button on the card to fetch its weights."
                 ).format(name=display)
             )
+        # Live OCR is gated by the engine's `supports_live` capability
+        # (CloudOCR sets it False — auto-firing would spend money per page).
+        cb = getattr(self, "_live_ocr_cb", None)
+        if cb is not None:
+            eng2 = self._current_engine()
+            supports_live = bool(getattr(eng2, "supports_live", True)) \
+                if eng2 is not None else True
+            if not supports_live and cb.isChecked():
+                cb.setChecked(False)
+            cb.setEnabled(supports_live)
+            cb.setToolTip("" if supports_live else self.tr(
+                "Unavailable for cloud OCR — it would auto-spend per page. "
+                "Run OCR manually."))
 
     def _open_model_downloader(self) -> None:
         w = self.window()

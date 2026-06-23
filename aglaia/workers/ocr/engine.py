@@ -50,6 +50,16 @@ class OcrEngine(abc.ABC):
     description: str = ""
     available: bool = False     # True once deps loaded successfully
 
+    # ── UI capabilities (the OCR tab reads these instead of hard-coding
+    #    engine names — so drop-in plugin engines drive the same UI) ──────
+    cloud: bool = False             # paid cloud engine: uploads pages, billed
+    supports_live: bool = True      # live/auto OCR sensible? (cloud → False:
+                                    # auto-firing would spend money per page)
+    supports_batch: bool = False    # async batch submission (cheaper); shows
+                                    # the batch toggle + Jobs UI on the card
+    price_per_page_usd: float = 0.0       # list price for the cost estimate
+    price_per_page_usd_batch: float = 0.0  # batch list price (0 = no batch)
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if not cls.__dict__.get("name") and cls.name in ("", "abstract"):
@@ -83,6 +93,29 @@ class OcrEngine(abc.ABC):
             src_dpis = [None] * len(images_rgb)
         return [self.recognize(img, languages, src_dpi=dpi)
                 for img, dpi in zip(images_rgb, src_dpis)]
+
+
+# ── Capability traits (composition) ──────────────────────────────────────
+# The OCR tab wires its UI from these, never from engine names — so a
+# drop-in plugin engine gets the same treatment by simply mixing the trait
+# in. Compose them onto an OcrEngine subclass:
+#   class GoogleDocAI(CloudOCR, OcrEngine):  cloud, priced, no batch
+#   class MistralCloudEngine(BatchableOCR, OcrEngine):  cloud + batch
+class CloudOCR:
+    """Trait: a paid cloud OCR engine — pages are uploaded and billed. The
+    OCR tab disables live (auto) OCR (auto-firing would spend money per
+    page) and shows a per-page cost estimate. Set ``price_per_page_usd``."""
+    cloud = True
+    supports_live = False
+    price_per_page_usd: float = 0.0
+
+
+class BatchableOCR(CloudOCR):
+    """Trait: a cloud engine that also supports async BATCH submission
+    (cheaper, processed in the background). The OCR tab shows the batch
+    toggle + Jobs UI. Set ``price_per_page_usd_batch``."""
+    supports_batch = True
+    price_per_page_usd_batch: float = 0.0
 
 
 ENGINE_REGISTRY: dict[str, type[OcrEngine]] = {}
