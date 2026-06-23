@@ -327,6 +327,46 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
       addEventListener('load', () => setTimeout(
         () => revealEls.forEach((el) => el.classList.add('in')), 1000));
 
+      // Tiny shell syntax highlighter for the install code tabs — runs FIRST,
+      // synchronously, before the `await import('lenis')` below, so it can
+      // never be skipped by a slow/failed dynamic import. Wraps comments /
+      // leading command / flags / quoted strings in spans; span text
+      // concatenates back to the original, so Copy (textContent) is intact.
+      try {
+        const hlEsc = (s: string) =>
+          s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const hlLine = (line: string): string => {
+          let code = line, comment = '';
+          const m = line.match(/(?:^|\s)#/);
+          if (m) {
+            const i = line.indexOf('#', m.index);
+            code = line.slice(0, i);
+            comment = line.slice(i);
+          }
+          let out = '', first = true;
+          const re = /(\s+)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\S+)/g;
+          let t: RegExpExecArray | null;
+          while ((t = re.exec(code))) {
+            if (t[1]) { out += t[1]; continue; }
+            if (t[2]) { out += `<span class="tok-str">${hlEsc(t[2])}</span>`; continue; }
+            const w = t[3];
+            if (first && /^[a-z]/i.test(w)) {
+              out += `<span class="tok-cmd">${hlEsc(w)}</span>`; first = false; continue;
+            }
+            first = false;
+            if (/^--?\w/.test(w)) { out += `<span class="tok-flag">${hlEsc(w)}</span>`; continue; }
+            out += hlEsc(w);
+          }
+          if (comment) out += `<span class="tok-comment">${hlEsc(comment)}</span>`;
+          return out;
+        };
+        document.querySelectorAll<HTMLElement>('.code__panel code').forEach((c) => {
+          c.innerHTML = (c.textContent || '').split('\n').map(hlLine).join('\n');
+        });
+      } catch (err) {
+        console.warn('Aglaïa: code highlight failed', err);
+      }
+
       // Before/after swipes — each drives its own clip divider, and hides a
       // corner label once its image is mostly slid away.
       document.querySelectorAll<HTMLElement>('.ba').forEach((ba) => {
@@ -371,39 +411,6 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
           document.querySelectorAll<HTMLElement>('.code__panel').forEach((p) =>
             p.classList.toggle('is-active', p.dataset.panel === k));
         });
-      });
-      // Tiny shell syntax highlighter — wraps comments / leading command /
-      // flags / quoted strings in spans. Span text concatenates back to the
-      // original, so Copy (textContent) is unaffected.
-      const hlEsc = (s: string) =>
-        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      function hlLine(line: string): string {
-        let code = line, comment = '';
-        const m = line.match(/(?:^|\s)#/);
-        if (m) {
-          const i = line.indexOf('#', m.index);
-          code = line.slice(0, i);
-          comment = line.slice(i);
-        }
-        let out = '', first = true;
-        const re = /(\s+)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\S+)/g;
-        let t: RegExpExecArray | null;
-        while ((t = re.exec(code))) {
-          if (t[1]) { out += t[1]; continue; }
-          if (t[2]) { out += `<span class="tok-str">${hlEsc(t[2])}</span>`; continue; }
-          const w = t[3];
-          if (first && /^[a-z]/i.test(w)) {
-            out += `<span class="tok-cmd">${hlEsc(w)}</span>`; first = false; continue;
-          }
-          first = false;
-          if (/^--?\w/.test(w)) { out += `<span class="tok-flag">${hlEsc(w)}</span>`; continue; }
-          out += hlEsc(w);
-        }
-        if (comment) out += `<span class="tok-comment">${hlEsc(comment)}</span>`;
-        return out;
-      }
-      document.querySelectorAll<HTMLElement>('.code__panel code').forEach((c) => {
-        c.innerHTML = (c.textContent || '').split('\n').map(hlLine).join('\n');
       });
 
       const copyBtn = document.querySelector<HTMLButtonElement>('.code__copy');
