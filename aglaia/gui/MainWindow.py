@@ -778,6 +778,9 @@ class MainWindow(QMainWindow):
             self.tr("Diagnostics…"), None, lambda: self._on_diagnostics()))
         help_menu.addAction(_act(
             self.tr("Report a Bug…"), None, lambda: self._on_report_bug()))
+        help_menu.addAction(_act(
+            self.tr("Contact (aglaia@bibli.cc)…"), None,
+            lambda: self._open_contact()))
         help_menu.addSeparator()
         help_menu.addAction(_act(
             self.tr("About Aglaïa"), None, lambda: self._open_about(),
@@ -791,6 +794,14 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl("https://aglaia.bibli.cc/docs"))
+
+    def _open_contact(self) -> None:
+        """Open the user's mail client to aglaia@bibli.cc (forwards to the
+        maintainer). Falls back silently if no mail handler is registered."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl(
+            "mailto:aglaia@bibli.cc?subject=Agla%C3%AFa"))
 
     # ── launcher round-trip ────────────────────────────────────────────
 
