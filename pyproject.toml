@@ -22,15 +22,30 @@ dependencies = [
     "pyyaml>=6.0.0",
     "rich>=13.0.0",
     "scipy>=1.11.0",
+]
+# NOTE: the OCR engines (surya, paddle-VL) are NOT base dependencies. They
+# are heavy and — critically — mutually exclusive: surya-ocr pins
+# huggingface-hub<1 while mlx-vlm (paddle-VL) needs >=1.5. A plain
+# `pip install aglaia` must resolve cleanly, so neither is in the base set.
+# `uv sync` (dev / the macOS bundle) reconciles both via the
+# [tool.uv] override-dependencies below; a loose pip install cannot, so
+# pick ONE engine extra. Apple Vision (macos extra) needs no Python OCR dep.
+
+[project.optional-dependencies]
+# OCR engine: Surya (cross-platform, GPU-optional). Pins huggingface-hub<1,
+# so it CANNOT be installed alongside the `paddle` extra in a loose pip
+# resolve — pick one. `pip install "aglaia[surya]"`.
+surya = [
     "surya-ocr>=0.20.0",
-    # Paddle OCR engine — pulls in paddleocr + paddlepaddle (CPU). Heavy
-    # but stable; matches what we benched.
+]
+# OCR engine: PaddleOCR-VL — the paddleocr orchestrator + CPU paddlepaddle +
+# the MLX vision-language model. Needs huggingface-hub>=1.5 (via mlx-vlm),
+# so it conflicts with `surya` in a loose resolve. `pip install "aglaia[paddle]"`.
+paddle = [
     "paddleocr[doc-parser]>=3.6.0",
     "paddlepaddle>=3.2.1",
     "mlx-vlm>=0.6.0",
 ]
-
-[project.optional-dependencies]
 # Cross-platform GUI (PySide6 + theme). Decoupled from `macos` so a
 # CLI-only / headless install (the base dependencies) stays slim — no
 # Qt download. The capture GUI on macOS needs `gui` + `macos` together.
@@ -111,12 +126,19 @@ where = ["."]
 include = ["aglaia*"]
 
 [tool.setuptools.package-data]
-# Ship the bundled assets + read-only config inside the wheel so a pip install
-# can find icons, logos, mode previews, calibration boards, default.yml and the
-# pipeline definitions (resolved package-relative via aglaia.assets).
+# Ship every runtime data file inside the wheel so a pip install works
+# without the source tree: icons/logos/previews/calibration boards,
+# default.yml + pipeline YAMLs (resolved via aglaia.assets), the SQLite
+# schema migrations (db.py globs schema/*.sql at runtime — omitting these
+# means "no such table: project" on first open), the model catalogue, and
+# the compiled Qt translations.
 aglaia = [
     "assets/**/*",
     "config/**/*",
+    "storage/schema/*.sql",
+    "app_data/*.json",
+    "i18n/*.ts",
+    "i18n/qm/*.qm",
 ]
 
 [dependency-groups]

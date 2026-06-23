@@ -46,9 +46,14 @@ jobs:
         # MUST include `gui` (PySide6) or the bundled .app crashes on launch with
         # ModuleNotFoundError: No module named 'PySide6'. Ship every extra except
         # `cuda` (Linux-GPU JAX wheels, irrelevant on the macOS arm64 target).
+        # surya + paddle are the OCR engines (now extras, not base deps). They
+        # have conflicting huggingface-hub pins; `uv sync` reconciles them via
+        # [tool.uv] override-dependencies (a loose pip install can't — hence
+        # the split). Both ship in the .app so all OCR backends are available.
         run: >-
           uv sync --extra gui --extra voice --extra macos --extra dev --extra package
           --extra jbig2 --extra cloud --extra keyring-bitwarden --extra keyring-1password
+          --extra surya --extra paddle
 
       - name: Tests (release gate)
         run: uv run pytest -q
