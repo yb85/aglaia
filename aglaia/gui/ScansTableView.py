@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, QMimeData, QPoint, QRect, Qt, Signal, QSize
+from PySide6.QtCore import QByteArray, QMimeData, QPoint, QRect, Qt, Signal, QSize, QTimer
 from PySide6.QtGui import QCursor, QDrag, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu,
