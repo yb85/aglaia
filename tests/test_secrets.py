@@ -5,7 +5,7 @@
 # Source-available under the PolyForm Shield License 1.0.0; any use except
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
-"""Secret storage (lib/app_data/secrets) — offline tests.
+"""Secret storage (aglaia/app_data/secrets) — offline tests.
 
 APP_DATA is redirected to a tmp dir; the OS keychain is forced to fail so
 the `.env` fallback path is exercised hermetically (no real Keychain
@@ -26,8 +26,8 @@ pytest.importorskip("keyring")
 def sec(tmp_path, monkeypatch):
     monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
-    import lib.app_data as ad
-    import lib.app_data.secrets as secrets
+    import aglaia.app_data as ad
+    import aglaia.app_data.secrets as secrets
     importlib.reload(ad)
     importlib.reload(secrets)
     # Force keychain unavailable so set()/get() use the .env fallback.

@@ -16,11 +16,11 @@ import io
 import numpy as np
 from PIL import Image
 
-from lib.storage.db import open_db
-from lib.storage.repo import (
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import (
     ProjectRepo, PipelineRepo, ImageRepo, ThumbRepo, ScanRepo, NodeRepo,
 )
-from lib.workers.ImportHelpers import reprocess_active_scans
+from aglaia.workers.ImportHelpers import reprocess_active_scans
 
 
 def _png(color: int) -> bytes:

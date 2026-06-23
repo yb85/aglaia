@@ -6,7 +6,7 @@
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
 """Unit tests for the line-geometry → Markdown heuristics in
-``lib.workers.md_export``.
+``aglaia.workers.md_export``.
 
 These exercise the document-level pipeline directly on synthetic line
 data (no DB, no OCR engine), one test per heuristic from issue #52.
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib.workers import md_export as mx
+from aglaia.workers import md_export as mx
 
 
 # ── Synthetic-page helpers ─────────────────────────────────────────

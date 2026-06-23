@@ -2,8 +2,8 @@
 
 Single source of truth for colors used in the Qt GUI. Every QSS string,
 inline `setStyleSheet(...)` call, and `QColor(...)` literal in
-`lib/gui/` references one of the `COLOR_*` tokens defined in
-`lib/gui/colors.py`. Two full palettes ship — **dark** and **light** —
+`aglaia/gui/` references one of the `COLOR_*` tokens defined in
+`aglaia/gui/colors.py`. Two full palettes ship — **dark** and **light** —
 and the active one is chosen at module import time, so the same token
 name resolves to the right value for whichever theme is live.
 
@@ -19,7 +19,7 @@ flipping the active palette repaints the whole UI correctly.
 
 ## How the active palette is picked
 
-`lib/gui/colors.py` holds two dicts, `_DARK` and `_LIGHT`. At import
+`aglaia/gui/colors.py` holds two dicts, `_DARK` and `_LIGHT`. At import
 time `_resolve_palette()` chooses one (resolution order):
 
 1. `AGLAIA_THEME` env var (`"light"` / `"dark"`), if set.
@@ -30,21 +30,21 @@ time `_resolve_palette()` chooses one (resolution order):
 
 The chosen palette's keys are injected into the module namespace via
 `globals().update(...)`, so consumers keep doing
-`from lib.gui.colors import COLOR_BG, COLOR_FONT_PRIMARY, ...` unchanged.
+`from aglaia.gui.colors import COLOR_BG, COLOR_FONT_PRIMARY, ...` unchanged.
 `active_palette_name()` reports `"dark"` / `"light"`; `qcolor(value)`
 parses any token string (`#rgb`, `#rrggbb`, `rgb(...)`, `rgba(...)`,
 named) into a `QColor` for painter / pen use without parallel `_QCOLOR`
 siblings.
 
-`apply_modern_theme(app, mode=...)` (in `lib/gui/theme.py`) wraps
+`apply_modern_theme(app, mode=...)` (in `aglaia/gui/theme.py`) wraps
 `qdarktheme` + the central `_EXTRA_QSS`. Switching themes at runtime
 needs an app restart for full fidelity: f-string QSS baked at widget
 construction won't re-render until the widget is reconstructed.
 
 ## Conventions
 
-- Tokens live in `lib/gui/colors.py` as keys of `_DARK` / `_LIGHT`.
-- Always use them via `from lib.gui.colors import COLOR_BG, ...`.
+- Tokens live in `aglaia/gui/colors.py` as keys of `_DARK` / `_LIGHT`.
+- Always use them via `from aglaia.gui.colors import COLOR_BG, ...`.
 - QSS strings interpolate via f-strings: `f"color: {COLOR_FONT_PRIMARY};"`.
 - Adding a token means adding it to **both** `_DARK` and `_LIGHT`
   (the import-time `assert set(_DARK) == set(_LIGHT)` fails otherwise).

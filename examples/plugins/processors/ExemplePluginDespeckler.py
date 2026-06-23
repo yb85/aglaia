@@ -38,16 +38,16 @@ import numpy as np
 
 # Everything a plugin needs is imported from the PUBLIC contract modules —
 # the same ones the built-in processors use. The plugin directory is placed
-# on sys.path at load time, so `lib.*` resolves identically here and in the
+# on sys.path at load time, so `aglaia.*` resolves identically here and in the
 # spawned multiprocessing workers.
-from lib.ImageBuffer import ImageBuffer
-from lib.processors.abstraction import (
+from aglaia.ImageBuffer import ImageBuffer
+from aglaia.processors.abstraction import (
     AbstractImageProcessor,
     AbstractProcessorOption,
     ReplayTrait,
 )
-from lib.processors.option_specs import _f, _i, _e
-from lib.processors.utils import is_binary, to_gray
+from aglaia.processors.option_specs import _f, _i, _e
+from aglaia.processors.utils import is_binary, to_gray
 
 
 # ── options ────────────────────────────────────────────────────────────────

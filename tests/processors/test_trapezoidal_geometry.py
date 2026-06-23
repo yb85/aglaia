@@ -5,13 +5,13 @@
 # Source-available under the PolyForm Shield License 1.0.0; any use except
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
-"""Unit tests for `lib.processors.geometry` — the math primitives behind TrapezoidalCorrection."""
+"""Unit tests for `aglaia.processors.geometry` — the math primitives behind TrapezoidalCorrection."""
 import math
 
 import numpy as np
 import pytest
 
-from lib.processors.geometry import (
+from aglaia.processors.geometry import (
     affine_rect_from_line, bbox_baseline, horizontal_vanishing_line,
     line_through, oob_fraction, ransac_vp, vertical_vp_from_line_pitch,
     vp_from_lines_svd, warp_extent,

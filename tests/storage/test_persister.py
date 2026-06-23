@@ -7,8 +7,8 @@
 
 import numpy as np
 
-from lib.storage.repo import ScanRepo, ThumbRepo, ImageRepo
-from lib.storage.persister import Persister
+from aglaia.storage.repo import ScanRepo, ThumbRepo, ImageRepo
+from aglaia.storage.persister import Persister
 
 
 def test_persist_image_creates_image_without_eager_thumb(seeded_db):

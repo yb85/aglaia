@@ -9,7 +9,7 @@ import io
 import pytest
 from PIL import Image
 
-from lib.storage.repo import (
+from aglaia.storage.repo import (
     BranchRepo, NodeRepo, ScanRepo, ImageRepo,
 )
 

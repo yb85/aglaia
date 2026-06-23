@@ -36,7 +36,7 @@ ORG = "aglaia-models"
 # this resolves to ~/Library/Application Support/Aglaia/models.
 _repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_repo_root))
-from lib.app_data import models_dir  # noqa: E402
+from aglaia.app_data import models_dir  # noqa: E402
 
 MODELS_DIR = Path(os.environ.get("AGLAIA_MODELS_DIR") or models_dir())
 
@@ -150,7 +150,7 @@ tags:
 ## How Aglaïa uses this
 
 Pulled by Aglaïa's in-app model downloader (see
-`lib/app_data/model-list.json`). Re-hosting here pins the file set we
+`aglaia/app_data/model-list.json`). Re-hosting here pins the file set we
 ship and gives a single org to trust for the entire OCR stack.
 """
 

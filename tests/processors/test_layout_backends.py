@@ -9,12 +9,12 @@ import cv2
 import numpy as np
 import pytest
 
-from lib.processors.layout_backends import get_backend
-from lib.processors.layout_backends.heuristic import HeuristicBackend
+from aglaia.processors.layout_backends import get_backend
+from aglaia.processors.layout_backends.heuristic import HeuristicBackend
 
 
 def _dbnet_model_present() -> bool:
-    from lib.processors.layout_backends.dbnet import _resolve_model_path
+    from aglaia.processors.layout_backends.dbnet import _resolve_model_path
     try:
         _resolve_model_path()
         return True
@@ -23,7 +23,7 @@ def _dbnet_model_present() -> bool:
 
 
 def _east_model_present() -> bool:
-    from lib.processors.layout_backends.east import _resolve_model_path
+    from aglaia.processors.layout_backends.east import _resolve_model_path
     try:
         _resolve_model_path()
         return True

@@ -40,7 +40,7 @@ def qapp():
 def mw(qapp):
     """A MainWindow with __init__ bypassed — only the QMainWindow base is
     initialised, plus the few attributes the capture helpers read."""
-    from lib.gui.MainWindow import MainWindow
+    from aglaia.gui.MainWindow import MainWindow
     m = MainWindow.__new__(MainWindow)
     QMainWindow.__init__(m)
     m._transform_items = [(None, "none", None), ("rotate-cw-square", "R90", 90)]
@@ -69,7 +69,7 @@ def test_make_live_capture_tab(mw):
 def test_preview_adapts_aspect_ratio(qapp):
     """The preview height tracks the frame AR (no crop, no AR change)."""
     from PySide6.QtGui import QImage, QPixmap
-    from lib.gui.sidebar.tabs.CaptureTab import CaptureTab
+    from aglaia.gui.sidebar.tabs.CaptureTab import CaptureTab
     ct = CaptureTab()
     ct.show()
     # Feed a 2:1 frame; height must come out at width/2, not the fixed slot.
@@ -101,7 +101,7 @@ def test_select_capture_camera_no_combo(mw):
 
 def test_dpi_readout(qapp):
     """The capture tab shows the DPI, flagged when uncalibrated."""
-    from lib.gui.sidebar.tabs.CaptureTab import CaptureTab
+    from aglaia.gui.sidebar.tabs.CaptureTab import CaptureTab
     ct = CaptureTab()
     ct.set_dpi(150.0, calibrated=True)
     assert "150" in ct.dpi_label.text()

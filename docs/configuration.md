@@ -1,13 +1,13 @@
 # Configuration
 
-The user-facing CLI is `lib/workers/cli.py` (`build_parser` → `parse_argv`),
+The user-facing CLI is `aglaia/workers/cli.py` (`build_parser` → `parse_argv`),
 shared by `aglaia.py` and the headless runner. Per-invocation choices are
 flags; runtime *preferences* (default engine, thumb size, theme, worker
-count) live in the per-user config DB (`lib/app_data/db.py`). See
+count) live in the per-user config DB (`aglaia/app_data/db.py`). See
 [gui.md](gui.md) for the app-data store.
 
 The `DEFAULT_CONFIG` / `DEFAULT_ARGS` + `-c path.yml` YAML layer (below)
-lives in `lib/workers/Initializer.py` and is fed a synthetic argv by the
+lives in `aglaia/workers/Initializer.py` and is fed a synthetic argv by the
 headless path. The sections below document that internal layer for code
 readers.
 
@@ -142,7 +142,7 @@ lives in the DB. See [storage.md](storage.md) for the schema.
 | Project file | `<project_dir>/<slug>.agl` |
 | Raw captures / imported pages | `scans` rows in the DB |
 | Per-step pipeline outputs | `nodes` + `images` rows (one node per step, labelled `03_pages_2ppf`, etc.) |
-| Exports (`--export pdf…` / `md`) | `<project_dir>/<slug>.pdf` and `<slug>.md` (written by `lib/workers/headless.py:_run_exports`) |
+| Exports (`--export pdf…` / `md`) | `<project_dir>/<slug>.pdf` and `<slug>.md` (written by `aglaia/workers/headless.py:_run_exports`) |
 
 For a new project, `<project_dir>` defaults to `--parent-dir` (or the input
 file's own parent) and `<slug>` derives from `--project-name` (or the input

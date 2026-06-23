@@ -17,8 +17,8 @@ import numpy as np
 import pikepdf
 import pytest
 
-from lib.workers.ocr import get_engine, ENGINE_REGISTRY
-from lib.workers.ocr import mistral_cloud as mc
+from aglaia.workers.ocr import get_engine, ENGINE_REGISTRY
+from aglaia.workers.ocr import mistral_cloud as mc
 
 
 def _bw(h=120, w=90):
@@ -193,7 +193,7 @@ def test_no_key_raises(monkeypatch):
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     monkeypatch.setattr(mc, "get_engine", lambda *_: e, raising=False)
     # force secrets to resolve empty
-    import lib.app_data.secrets as sec
+    import aglaia.app_data.secrets as sec
     monkeypatch.setattr(sec, "get_mistral_api_key", lambda: "")
     with pytest.raises(RuntimeError, match="No Mistral API key"):
         e.recognize_batch([_bw()], ["fr"])

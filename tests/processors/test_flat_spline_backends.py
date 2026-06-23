@@ -33,7 +33,7 @@ def problem():
 
 def test_mlx_flat_spline_objective(problem):
     mx = pytest.importorskip("mlx.core")
-    import lib.processors.page_dewarp_mlx as m
+    import aglaia.processors.page_dewarp_mlx as m
 
     pvec, dst, ki = problem
     vals = {}
@@ -69,7 +69,7 @@ def test_mlx_flat_spline_objective(problem):
 
 def test_mlx_flat_penalty_raises_objective(problem):
     mx = pytest.importorskip("mlx.core")
-    import lib.processors.page_dewarp_mlx as m
+    import aglaia.processors.page_dewarp_mlx as m
 
     pvec, dst, ki = problem
     pvec = pvec.copy()
@@ -99,7 +99,7 @@ def test_mlx_flat_penalty_raises_objective(problem):
 
 def test_padded_jax_flat_spline_runs(problem):
     pytest.importorskip("jax")
-    import lib.processors.page_dewarp_padded as p
+    import aglaia.processors.page_dewarp_padded as p
     from page_dewarp.options import cfg
 
     pvec, dst, ki = problem

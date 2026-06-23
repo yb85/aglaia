@@ -9,15 +9,15 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure repo root on sys.path so `import lib...` works without install
+# Ensure repo root on sys.path so `import aglaia...` works without install
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import pytest
 
-from lib.storage.db import open_db
-from lib.storage.repo import ProjectRepo, PipelineRepo
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import ProjectRepo, PipelineRepo
 
 
 @pytest.fixture()

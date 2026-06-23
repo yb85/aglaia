@@ -17,8 +17,8 @@ import cv2
 import numpy as np
 import pytest
 
-from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.TrapezoidalCorrection import (
+from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors.TrapezoidalCorrection import (
     TrapezoidalCorrection, TrapezoidalOption,
 )
 
@@ -170,5 +170,5 @@ def test_passthrough_when_too_few_lines():
 
 
 def test_chain_registry_includes_processor():
-    from lib.workers.IntegratedProcessingChain import processor_registry
+    from aglaia.workers.IntegratedProcessingChain import processor_registry
     assert processor_registry()["TrapezoidalCorrection"] is TrapezoidalCorrection

@@ -1,6 +1,6 @@
 # ImageBuffer
 
-`lib/ImageBuffer.py:ImageBuffer` — the canonical envelope passed between every part of the system.
+`aglaia/ImageBuffer.py:ImageBuffer` — the canonical envelope passed between every part of the system.
 
 ## Fields
 
@@ -51,7 +51,7 @@ When emitting `image_event`, `_emit_event` normalizes some keys for the GUI:
 
 ## write(collection, options, suffix=None, ...)
 
-`ImageBuffer` keeps a general-purpose disk writer (`lib/ImageBuffer.py`). It is **not** called by the live `IntegratedProcessingChain` — that path persists each step to the project `.agl` SQLite DB via `lib/storage/persister.py`. The logic below documents the envelope's own write behaviour, used by off-chain helpers.
+`ImageBuffer` keeps a general-purpose disk writer (`aglaia/ImageBuffer.py`). It is **not** called by the live `IntegratedProcessingChain` — that path persists each step to the project `.agl` SQLite DB via `aglaia/storage/persister.py`. The logic below documents the envelope's own write behaviour, used by off-chain helpers.
 
 Decides where to save based on this priority:
 

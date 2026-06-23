@@ -11,7 +11,7 @@
 Generates the printable A4 + US-Letter chessboard PDFs Aglaïa's **Full
 Calibration** uses. Because we generate the board ourselves at exact mm
 dimensions, the grid geometry is fixed and hard-coded in the calibrator
-(`lib/workers/Calibrator.py` / the `calibration:` defaults): a 7×10 SQUARE board
+(`aglaia/workers/Calibrator.py` / the `calibration:` defaults): a 7×10 SQUARE board
 → a **(6, 9)** internal-corner grid, **25 mm** squares.
 
 Run (dev extra installs reportlab):
@@ -68,7 +68,7 @@ from reportlab.lib.pagesizes import A4, LETTER
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-# Board geometry — KEEP IN SYNC with lib/workers/Calibrator.py defaults and the
+# Board geometry — KEEP IN SYNC with aglaia/workers/Calibrator.py defaults and the
 # `calibration:` block in docs/configuration. 7×10 squares → (6, 9) inner
 # corners. Changing these means re-printing AND updating the calibrator.
 SQUARE_SIZE_MM = 25

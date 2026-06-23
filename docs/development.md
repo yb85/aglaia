@@ -41,27 +41,27 @@ uv run python aglaia.py /tmp/test_scans.agl --headless -p config/pipelines/book_
 
 | Concern | File |
 |---|---|
-| Buffer envelope + write | `lib/ImageBuffer.py` |
-| Processor interface | `lib/processors/abstraction.py` |
-| Processors | `lib/processors/*.py` |
-| Chain abstractions | `lib/workers/chain_abstraction.py` |
-| Active chain | `lib/workers/IntegratedProcessingChain.py` |
-| Initializer (args, factory, template eval) | `lib/workers/Initializer.py` |
-| Camera calibration | `lib/workers/Calibrator.py` |
-| PDF I/O | `lib/workers/PDFprocessor.py` |
-| GUI process bridge | `lib/workers/ProcessMonitor.py` |
-| GUI main window | `lib/gui/MainWindow.py` |
-| GUI per-scan widget | `lib/gui/ScanItemWidget.py` |
-| Webcam thread | `lib/gui/WebcamThread.py` |
-| Voice recognition | `lib/gui/VoiceWorker.py` |
+| Buffer envelope + write | `aglaia/ImageBuffer.py` |
+| Processor interface | `aglaia/processors/abstraction.py` |
+| Processors | `aglaia/processors/*.py` |
+| Chain abstractions | `aglaia/workers/chain_abstraction.py` |
+| Active chain | `aglaia/workers/IntegratedProcessingChain.py` |
+| Initializer (args, factory, template eval) | `aglaia/workers/Initializer.py` |
+| Camera calibration | `aglaia/workers/Calibrator.py` |
+| PDF I/O | `aglaia/workers/PDFprocessor.py` |
+| GUI process bridge | `aglaia/workers/ProcessMonitor.py` |
+| GUI main window | `aglaia/gui/MainWindow.py` |
+| GUI per-scan widget | `aglaia/gui/ScanItemWidget.py` |
+| Webcam thread | `aglaia/gui/WebcamThread.py` |
+| Voice recognition | `aglaia/gui/VoiceWorker.py` |
 
 ## Adding a processor
 
 See `docs/processors.md` — "Writing a new processor". One step:
 
-1. Drop a new file in `lib/processors/` with an `AbstractImageProcessor`
+1. Drop a new file in `aglaia/processors/` with an `AbstractImageProcessor`
    subclass declaring `OPTIONS` (and an optional `OPTION_CLASS`). The
-   registry (`lib/processors/registry.py`) auto-discovers it — there is no
+   registry (`aglaia/processors/registry.py`) auto-discovers it — there is no
    `OPTION_MAP` / `PROCESSOR_REGISTRY` to edit.
 
 ## Multiprocessing constraints
@@ -138,7 +138,7 @@ Vision / Speech recognition output, true macOS compositing.
 ## Conventions
 
 - All numeric pixel/length quantities are in **DPI-aware millimeters** where possible (`margin_mm`, `square_size_mm`). Convert with `px = int((mm / 25.4) * dpi)`.
-- Results are persisted to the SQLite-backed project (`lib/storage/`), not to filesystem step folders. The `NN_` step prefix (used for timing rows / pipeline-preview labels) is generated automatically — don't put it in the YAML `name:` field.
+- Results are persisted to the SQLite-backed project (`aglaia/storage/`), not to filesystem step folders. The `NN_` step prefix (used for timing rows / pipeline-preview labels) is generated automatically — don't put it in the YAML `name:` field.
 - Buffers crossing process boundaries must be `.copy()`'d (or about-to-be-finalized).
 - New CLI flags should default from `DEFAULT_ARGS` and be overridable in YAML `args:` blocks.
 
@@ -146,10 +146,10 @@ Vision / Speech recognition output, true macOS compositing.
 
 ```bash
 # Print effective pipeline definition (with templates resolved literally)
-uv run python -c "from lib.workers.Initializer import load_pipeline_def; from pprint import pp; pp(load_pipeline_def('config/pipelines/book_curved_x2.yaml'))"
+uv run python -c "from aglaia.workers.Initializer import load_pipeline_def; from pprint import pp; pp(load_pipeline_def('config/pipelines/book_curved_x2.yaml'))"
 
 # Dump current calibration
-uv run python -c "from lib.workers.Calibrator import load_calibration; from pprint import pp; pp(load_calibration())"
+uv run python -c "from aglaia.workers.Calibrator import load_calibration; from pprint import pp; pp(load_calibration())"
 
 # List doxapy binarization algorithms
 uv run python -c "import doxapy; print([a for a in dir(doxapy.Binarization.Algorithms) if not a.startswith('_')])"

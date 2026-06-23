@@ -26,7 +26,7 @@ import platform as _plat
 import sys as _sys
 
 REPO = Path(SPECPATH).resolve()
-ICON_ICNS = str(REPO / "assets" / "app" / "Aglaia.icns")
+ICON_ICNS = str(REPO / "aglaia" / "assets" / "app" / "Aglaia.icns")
 
 # ── code signing ─────────────────────────────────────────────────────
 #
@@ -78,7 +78,7 @@ if CODESIGN_IDENTITY is None:
 # pyinstaller; ``scripts/fetch_llama_server.py`` automates this for
 # any of the four supported (os, arch) combinations.
 #
-# Path resolved at runtime by ``lib/workers/ocr/surya.py``:
+# Path resolved at runtime by ``aglaia/workers/ocr/surya.py``:
 #   * frozen → ``sys._MEIPASS / "llama-server[.exe]"``
 #   * dev    → ``vendor/llama-server/<plat>/llama-server[.exe]``
 def _llama_server_subdir() -> str | None:
@@ -110,24 +110,29 @@ if _llama_subdir is not None:
 
 # ── data files shipped inside the .app ───────────────────────────────
 # Static assets now live in the top-level `assets/` tree and are resolved at
-# runtime via `lib.assets.asset_path` (-> <MEIPASS>/assets in the bundle), so
+# runtime via `aglaia.assets.asset_path` (-> <MEIPASS>/assets in the bundle), so
 # they must ship under "assets/…". We ship only the subdirs the app loads at
 # runtime — NOT the large site-only brand backgrounds (assets/brand/aglaia_bg*,
 # aglaia_usage) — to keep the bundle lean.
+# Assets + read-only config live INSIDE the aglaia package now and are resolved
+# package-relative (aglaia.assets.asset_path / config_path -> aglaia/assets,
+# aglaia/config). The bundle ships them at the SAME package-relative paths so
+# `Path(__file__).parent / 'assets'` resolves under <MEIPASS>/aglaia. We ship
+# only the runtime subdirs — NOT the large site-only brand backgrounds.
 datas = [
-    (str(REPO / "config"), "config"),
-    (str(REPO / "assets" / "icons"), "assets/icons"),
-    (str(REPO / "assets" / "modes"), "assets/modes"),
+    (str(REPO / "aglaia" / "config"), "aglaia/config"),
+    (str(REPO / "aglaia" / "assets" / "icons"), "aglaia/assets/icons"),
+    (str(REPO / "aglaia" / "assets" / "modes"), "aglaia/assets/modes"),
     # Theme-aware wordmarks (About dialog / startup) + the 1024 logo.
-    (str(REPO / "assets" / "brand" / "aglaia-light.png"), "assets/brand"),
-    (str(REPO / "assets" / "brand" / "aglaia-dark.png"), "assets/brand"),
-    (str(REPO / "assets" / "brand" / "aglaia2-1024.png"), "assets/brand"),
-    (str(REPO / "lib" / "app_data" / "model-list.json"), "lib/app_data"),
-    # App + document icons. Kept at the original "lib/app_data" bundle path the
-    # macOS plist (CFBundleIconFile / CFBundleTypeIconFile) + filetype_register
+    (str(REPO / "aglaia" / "assets" / "brand" / "aglaia-light.png"), "aglaia/assets/brand"),
+    (str(REPO / "aglaia" / "assets" / "brand" / "aglaia-dark.png"), "aglaia/assets/brand"),
+    (str(REPO / "aglaia" / "assets" / "brand" / "aglaia2-1024.png"), "aglaia/assets/brand"),
+    (str(REPO / "aglaia" / "app_data" / "model-list.json"), "aglaia/app_data"),
+    # App + document icons. Kept at the "aglaia/app_data" bundle path the macOS
+    # plist (CFBundleIconFile / CFBundleTypeIconFile) + filetype_register
     # reference by name — only the SOURCE path changed.
-    (str(REPO / "assets" / "app" / "Aglaia.icns"), "lib/app_data"),
-    (str(REPO / "assets" / "app" / "AglaiaDoc.icns"), "lib/app_data"),
+    (str(REPO / "aglaia" / "assets" / "app" / "Aglaia.icns"), "aglaia/app_data"),
+    (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "aglaia/app_data"),
 ]
 
 # Surya/transformers/huggingface_hub ship YAML configs + tokenizer
@@ -143,8 +148,8 @@ for pkg in ("surya", "transformers", "tokenizers", "huggingface_hub",
 # Plugin processors are imported via the registry lookup at runtime,
 # so PyInstaller can't see them from the static graph.
 hiddenimports = (
-    collect_submodules("lib.processors")
-    + collect_submodules("lib.workers")
+    collect_submodules("aglaia.processors")
+    + collect_submodules("aglaia.workers")
     + ["pyobjc", "Vision", "Speech", "AVFoundation"]
     # JBIG2 encoder (maturin/PyO3). Editable installs leave the compiled
     # `_native` .so in the crate source dir, so name it explicitly or the
@@ -174,7 +179,7 @@ for _pkg in ("mlx", "vosk"):
 block_cipher = None
 
 a = Analysis(
-    ["aglaia.py"],
+    ["aglaia/__main__.py"],
     pathex=[str(REPO)],
     binaries=list(_llama_binaries) + list(_jbig2_binaries) + list(_native_pkg_binaries),
     datas=datas,
@@ -272,7 +277,7 @@ app = BUNDLE(
         "NSMicrophoneUsageDescription":
             "Aglaïa uses the microphone for voice control.",
         # `.agl` document type binding — same UTI as
-        # lib/app_data/filetype_register.plist_snippet().
+        # aglaia/app_data/filetype_register.plist_snippet().
         "CFBundleDocumentTypes": [{
             "CFBundleTypeName": "Aglaïa project",
             "CFBundleTypeRole": "Editor",

@@ -7,28 +7,28 @@
 
 """Guard the frozen-build processor discovery fallback.
 
-In a PyInstaller bundle the `lib/processors` directory does not exist on disk,
+In a PyInstaller bundle the `aglaia/processors` directory does not exist on disk,
 so `pkgutil.iter_modules` finds nothing and the registry falls back to a
 hard-coded list of built-in module names (`_BUILTIN_PROCESSOR_MODULES`). If a
 new built-in processor is added but not listed there, the bundled app would
 silently skip it ("Unknown processor … Skipping") while the source build works
 fine. This test fails loudly in that case."""
 
-from lib.processors import registry
+from aglaia.processors import registry
 
 
 def test_hardcoded_builtin_list_matches_discovery():
     import os
     import sys
 
-    import lib.processors as _pkg
+    import aglaia.processors as _pkg
 
     registry.all_processors()  # force discovery
     hardcoded = set(registry._BUILTIN_PROCESSOR_MODULES)
     pkg_dir = _pkg.__path__[0]
 
     # Module (short) names of every processor whose source lives directly in
-    # lib/processors/ — i.e. the built-ins (plugins live under APP_DATA and are
+    # aglaia/processors/ — i.e. the built-ins (plugins live under APP_DATA and are
     # excluded). The frozen app can only find these via the hard-coded list.
     builtin_module_names = set()
     for info in registry.all_processors().values():

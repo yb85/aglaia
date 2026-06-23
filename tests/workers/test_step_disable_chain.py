@@ -17,16 +17,16 @@ import cv2
 import numpy as np
 import pytest
 
-from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.Binarizer import BinarizerOption
-from lib.processors.SkewFinder import SkewFinderOption
-from lib.workers.IntegratedProcessingChain import IntegratedProcessingChain
-from lib.workers.chain_abstraction import SimpleChainElement
-from lib.storage.db import open_db
-from lib.storage.repo import (
+from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors.Binarizer import BinarizerOption
+from aglaia.processors.SkewFinder import SkewFinderOption
+from aglaia.workers.IntegratedProcessingChain import IntegratedProcessingChain
+from aglaia.workers.chain_abstraction import SimpleChainElement
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import (
     NodeRepo, PipelineRepo, ProjectRepo, ScanRepo, StepOverrideRepo,
 )
-from lib.storage.persister import Persister
+from aglaia.storage.persister import Persister
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -119,7 +119,7 @@ def test_disabled_step_emits_passthrough_node(tmp_path):
 
     _run_chain(db_path, pid, scan_id, root_id, raw)
 
-    from lib.storage.repo import ImageRepo
+    from aglaia.storage.repo import ImageRepo
     conn = open_db(db_path)
     nodes = {int(n["step_idx"]): n for n in NodeRepo(conn).by_scan(scan_id)}
     root_px = _decode(ImageRepo(conn).get(image_id)["blob"])

@@ -58,10 +58,10 @@ back to DPI-based fractions only when `h_med` can't be estimated
 (too few char-like CCs).
 
 **See**:
-- `lib/processors/PageDewarper.py:_text_mask_dpi` — kernel = `2 × h_med`,
+- `aglaia/processors/PageDewarper.py:_text_mask_dpi` — kernel = `2 × h_med`,
   TEXT_MAX_THICKNESS = `3 × h_med`, EDGE_MAX_LENGTH = `3 × h_med`,
   SPAN_MIN_WIDTH = `10 × h_med`.
-- `lib/processors/TrapezoidalCorrection.py` — same scheme, mirrored.
+- `aglaia/processors/TrapezoidalCorrection.py` — same scheme, mirrored.
 
 ### 1.2 Hidden assumption: input is binary (or grayscale)
 
@@ -145,8 +145,8 @@ We proved this matters by comparing fits with/without mask on
 changed when the mask was applied.
 
 **See**:
-- `lib/processors/geometry.py:baseline_from_ink(..., span_mask=...)`.
-- `lib/processors/TrapezoidalCorrection.py` builds the per-span mask from
+- `aglaia/processors/geometry.py:baseline_from_ink(..., span_mask=...)`.
+- `aglaia/processors/TrapezoidalCorrection.py` builds the per-span mask from
   cinfo tight masks (one image per span; OR'd union of cinfo
   rect-placed tight masks).
 
@@ -184,9 +184,9 @@ saved pipeline doesn't preserve it.
 
 **Rule**: every new processor option must be wired in THREE places:
 
-1. **Dataclass** (`lib/processors/<Processor>.py`): `field_name: type = default`
+1. **Dataclass** (`aglaia/processors/<Processor>.py`): `field_name: type = default`
    in the `<Processor>Option` dataclass.
-2. **Spec** (`lib/processors/option_specs.py`): a `_f` / `_i` / `_e` / `_b`
+2. **Spec** (`aglaia/processors/option_specs.py`): a `_f` / `_i` / `_e` / `_b`
    entry in the `OPTION_SPECS["<Processor>"]` dict. Determines UI
    widget kind, range, step, help text.
 3. **YAML** (`config/pipelines/*.yaml`): an entry in each pipeline
@@ -221,7 +221,7 @@ unchanged.
 each import their own copy of the module. Editing the source after
 worker start doesn't update the running workers.
 
-**Rule**: any code change to `lib/processors/*.py` or `lib/workers/*.py`
+**Rule**: any code change to `aglaia/processors/*.py` or `aglaia/workers/*.py`
 requires worker restart. The GUI pool persists across scan processing
 runs; full app restart is the safest path. Verify your fix is live
 by adding a one-shot `print()` and watching the log_queue.
@@ -241,7 +241,7 @@ already pulled from the queue by that dead worker are LOST.
   cap memory growth: `mx.clear_cache()`.
 - Don't pre-fetch from the queue in workers; `Queue.get(timeout=…)`
   per-scan is fine.
-- See `lib/workers/IntegratedProcessingChain.py` — single-scan-per-worker
+- See `aglaia/workers/IntegratedProcessingChain.py` — single-scan-per-worker
   loop.
 
 ### 1.10 Hard-coded image bound checks (256 MB cap)
@@ -256,7 +256,7 @@ limit of 256 megabytes".
 
 **Rule**: viewer-side downscaling is a render-only concern. Don't
 let it propagate to storage or pipeline. `_png_data_url()` in
-`lib/web/routes/debug.py` clamps max(width, height) ≤ 2400 px for
+`aglaia/web/routes/debug.py` clamps max(width, height) ≤ 2400 px for
 PNG encode. Storage (`images` table, debug_artifacts) keeps native
 resolution.
 
@@ -266,7 +266,7 @@ resolution.
 
 ### 2.1 Adding a new processor
 
-A processor lives in `lib/processors/<Name>.py` and exposes:
+A processor lives in `aglaia/processors/<Name>.py` and exposes:
 
 ```python
 @dataclass
@@ -308,7 +308,7 @@ Checklist:
 ### 2.2 Debug visualisation
 
 Each processor that produces non-trivial output should have a
-visualiser in `lib/web/routes/debug.py:_RENDERERS`. The renderer
+visualiser in `aglaia/web/routes/debug.py:_RENDERERS`. The renderer
 takes `(img, parent, meta)` and returns
 `[{"url": data_url, "label": str}]`.
 
@@ -328,7 +328,7 @@ text via `_label_bar(canvas, text)`. Span overlays via
 ### 2.3 Pipeline-editor wiring
 
 The Qt and Web pipeline editors are auto-generated from
-`lib/processors/option_specs.py`. To add a field to the editor:
+`aglaia/processors/option_specs.py`. To add a field to the editor:
 
 ```python
 OPTION_SPECS["MyProcessor"] = {
@@ -403,8 +403,8 @@ Always test pipelines end-to-end:
 uv run python -c "
 import sys, cv2
 sys.path.insert(0, '.')
-from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.TrapezoidalCorrection import TrapezoidalCorrection, TrapezoidalOption
+from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors.TrapezoidalCorrection import TrapezoidalCorrection, TrapezoidalOption
 raw = cv2.imread('/path/to/test.png', cv2.IMREAD_GRAYSCALE)
 buf = ImageBuffer(buffer=raw, type=ImageType.BW)
 buf.dpi = 300.0; buf.meta = {}; buf.branch_label = 'A'
@@ -470,8 +470,8 @@ objectives. Inside `PageDewarper.process()` finally clause:
 
 ```python
 try:
-    import lib.processors.page_dewarp_mlx
-    lib.processors.page_dewarp_mlx.clear_caches()
+    import aglaia.processors.page_dewarp_mlx
+    aglaia.processors.page_dewarp_mlx.clear_caches()
 except Exception:
     pass
 ```

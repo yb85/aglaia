@@ -11,7 +11,7 @@ heavy upright page)."""
 
 import numpy as np
 
-from lib.processors.geometry import (
+from aglaia.processors.geometry import (
     block_justified_mask, detect_column_quad_from_baselines,
 )
 

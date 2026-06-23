@@ -9,7 +9,7 @@ import io
 import numpy as np
 from PIL import Image
 
-from lib.storage.repo import (
+from aglaia.storage.repo import (
     ProjectRepo, PipelineRepo, CalibrationRepo, ImageRepo, ThumbRepo,
     ScanRepo, NodeRepo,
 )
@@ -72,8 +72,8 @@ def test_snap_create_is_atomic_under_concurrent_writers(tmp_path):
     raising UNIQUE constraint violations.
     """
     import threading
-    from lib.storage.db import open_db
-    from lib.storage.repo import ProjectRepo, PipelineRepo, ScanRepo
+    from aglaia.storage.db import open_db
+    from aglaia.storage.repo import ProjectRepo, PipelineRepo, ScanRepo
 
     db_path = tmp_path / "race.sqlite"
     main = open_db(db_path)

@@ -9,7 +9,7 @@ import pickle
 
 import numpy as np
 
-from lib.ImageBuffer import ImageBuffer, ImageType
+from aglaia.ImageBuffer import ImageBuffer, ImageType
 
 
 def test_pickle_strips_parent_and_children():

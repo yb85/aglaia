@@ -8,7 +8,7 @@ Pipelines live in `config/pipelines/*.yaml`. Default: `config/pipelines/book_cur
 name: "<human-readable name>"
 pipeline:
   - name: "<step instance name>"        # required; becomes the node label (prefixed NN_)
-    processor: "<ProcessorClassName>"   # required; an auto-discovered processor in lib/processors/
+    processor: "<ProcessorClassName>"   # required; an auto-discovered processor in aglaia/processors/
     options:
       <key>: <value>
       ...
@@ -20,7 +20,7 @@ Up to **99 steps** per pipeline (hard limit to keep the 2-digit prefix consisten
 
 For each step, `Initializer` computes `instance_name = f"{idx:02d}_{slugify(name, separator='_')}"`. Example: a step named `"pages_2ppf"` in position 3 becomes `03_pages_2ppf`. This string is the persisted node's `step_name` (and the `event_type` in `image_event`s) — **not** a filesystem directory.
 
-The live `IntegratedProcessingChain` persists each step's output to the project's `.agl` SQLite file as a `nodes` row (+ an `images` row) via `lib/storage/persister.py` (`persist_step`). Every step stores its image, so every node has a real `image_id` (lineage and the stamped replay parameters live alongside it). The end-of-chain replay pass still fuses the per-step geometric transforms into one warp from the raw image for the final output.
+The live `IntegratedProcessingChain` persists each step's output to the project's `.agl` SQLite file as a `nodes` row (+ an `images` row) via `aglaia/storage/persister.py` (`persist_step`). Every step stores its image, so every node has a real `image_id` (lineage and the stamped replay parameters live alongside it). The end-of-chain replay pass still fuses the per-step geometric transforms into one warp from the raw image for the final output.
 
 ## Unit-aware options
 
@@ -51,13 +51,13 @@ See `docs/processors.md` for full per-processor details.
 
 | `processor:` | Option dataclass | Source |
 |---|---|---|
-| `DPIfixer` | `DPIfixerOption` | `lib/processors/DPIfixer.py` |
-| `SkewFinder` | `SkewFinderOption` | `lib/processors/SkewFinder.py` |
-| `PageDetector` | `PageOption` | `lib/processors/PageDetector.py` |
-| `Binarizer` | `BinarizerOption` | `lib/processors/Binarizer.py` |
-| `TrapezoidalCorrection` | `TrapezoidalOption` | `lib/processors/TrapezoidalCorrection.py` |
-| `PageDewarper` | `DewarpOption` | `lib/processors/PageDewarper.py` |
-| `MarginSetter` | `MarginSetterOption` | `lib/processors/MarginSetter.py` |
+| `DPIfixer` | `DPIfixerOption` | `aglaia/processors/DPIfixer.py` |
+| `SkewFinder` | `SkewFinderOption` | `aglaia/processors/SkewFinder.py` |
+| `PageDetector` | `PageOption` | `aglaia/processors/PageDetector.py` |
+| `Binarizer` | `BinarizerOption` | `aglaia/processors/Binarizer.py` |
+| `TrapezoidalCorrection` | `TrapezoidalOption` | `aglaia/processors/TrapezoidalCorrection.py` |
+| `PageDewarper` | `DewarpOption` | `aglaia/processors/PageDewarper.py` |
+| `MarginSetter` | `MarginSetterOption` | `aglaia/processors/MarginSetter.py` |
 
 Unknown processor names print a warning and are skipped.
 

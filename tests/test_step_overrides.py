@@ -9,8 +9,8 @@
 import os
 import tempfile
 
-from lib.storage.db import open_db
-from lib.storage.repo import StepOverrideRepo
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import StepOverrideRepo
 
 
 def _db():

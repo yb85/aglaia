@@ -18,8 +18,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lib.workers.ocr import apple_docs as ad
-from lib.workers.ocr import apple_caps as caps
+from aglaia.workers.ocr import apple_docs as ad
+from aglaia.workers.ocr import apple_caps as caps
 
 
 # ── helpers ─────────────────────────────────────────────────────────
@@ -325,7 +325,7 @@ def test_probe_apple_caps_shape():
 # ── engine registration + availability ──────────────────────────────
 
 def test_engine_registered():
-    from lib.workers.ocr import ENGINE_REGISTRY
+    from aglaia.workers.ocr import ENGINE_REGISTRY
     assert "apple_docs" in ENGINE_REGISTRY
     eng = ENGINE_REGISTRY["apple_docs"]()
     assert eng.name == "apple_docs"

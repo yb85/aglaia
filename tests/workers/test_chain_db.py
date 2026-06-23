@@ -16,16 +16,16 @@ import time
 import numpy as np
 import pytest
 
-from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.SkewFinder import SkewFinderOption
-from lib.workers.IntegratedProcessingChain import IntegratedProcessingChain
-from lib.workers.chain_abstraction import SimpleChainElement
-from lib.storage.db import open_db
-from lib.storage.repo import (
+from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors.SkewFinder import SkewFinderOption
+from aglaia.workers.IntegratedProcessingChain import IntegratedProcessingChain
+from aglaia.workers.chain_abstraction import SimpleChainElement
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import (
     BranchRepo, ImageRepo, NodeRepo, PipelineRepo,
     ProjectRepo, ScanRepo, ThumbRepo,
 )
-from lib.storage.persister import Persister
+from aglaia.storage.persister import Persister
 
 
 @pytest.fixture(scope="module")
@@ -107,7 +107,7 @@ def test_one_step_chain_persists_branch(tmp_path, mp_ctx):
     img = ImageRepo(conn).get(leaf["image_id"])
     assert img is not None
     assert ThumbRepo(conn).get(leaf["image_id"], 256) is None
-    from lib.storage.persister import make_thumb
+    from aglaia.storage.persister import make_thumb
     blob, w, h = make_thumb(bytes(img["blob"]), 256)
     ThumbRepo(conn).upsert(leaf["image_id"], 256, w, h, blob)
     assert ThumbRepo(conn).get(leaf["image_id"], 256) is not None

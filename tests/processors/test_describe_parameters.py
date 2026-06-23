@@ -7,10 +7,10 @@
 
 """Processor parameter descriptions (essential / full)."""
 
-from lib.processors.abstraction import render_param_description
-from lib.processors.DPIfixer import DPIfixer, DPIfixerOption
-from lib.processors.Binarizer import Binarizer, BinarizerOption
-from lib.processors.PageDewarper import PageDewarper, DewarpOption
+from aglaia.processors.abstraction import render_param_description
+from aglaia.processors.DPIfixer import DPIfixer, DPIfixerOption
+from aglaia.processors.Binarizer import Binarizer, BinarizerOption
+from aglaia.processors.PageDewarper import PageDewarper, DewarpOption
 
 
 def test_essential_is_compact_oneliner():

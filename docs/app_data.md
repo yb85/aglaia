@@ -2,7 +2,7 @@
 
 Aglaïa keeps all per-user state outside the repo, resolved through
 [`platformdirs`](https://github.com/tox-dev/platformdirs) (vendor
-`bibli.cc`, app `Aglaia`). Implemented in `lib/app_data/__init__.py`.
+`bibli.cc`, app `Aglaia`). Implemented in `aglaia/app_data/__init__.py`.
 
 ## Directories
 
@@ -34,7 +34,7 @@ For tests / portable installs:
 
 ## Config DB (`aglaia-config.db`)
 
-SQLite, created + seeded on first connect (`lib/app_data/db.py`). Tables:
+SQLite, created + seeded on first connect (`aglaia/app_data/db.py`). Tables:
 
 - `config(key TEXT PK, value TEXT)` — JSON-encoded values; `get(key,
   default)` / `set(key, value)`. Canonical keys (`KEY_*`): theme,

@@ -9,7 +9,7 @@ without discarding short body lines."""
 
 import numpy as np
 
-from lib.processors.geometry import (
+from aglaia.processors.geometry import (
     segment_baselines_vblocks,
     cluster_blocks_by_margins,
     detect_column_quad_from_baselines,

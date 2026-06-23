@@ -1,9 +1,9 @@
 # Markdown export
 
-`lib/workers/md_export.py` turns the OCR text stored in `ocr_runs` into a single
+`aglaia/workers/md_export.py` turns the OCR text stored in `ocr_runs` into a single
 free-flowing Markdown file. Entry point: `write_markdown(conn, output_path)` —
 used by the GUI export menu (`MainWindow`) and the headless CLI
-(`lib/workers/headless.py`, `--export … md`).
+(`aglaia/workers/headless.py`, `--export … md`).
 
 Structural markers (`<!-- scan #N · page P -->`, `<!-- branch X -->`) are emitted
 as HTML comments so they vanish in the rendered document but survive a future
@@ -96,7 +96,7 @@ from geometry by a **document-level** pass over all line pages
 Tests: `tests/workers/test_md_export.py` — one case per heuristic on synthetic
 line data, plus the clustering/utility units.
 
-## Optional LLM refinement (`lib/workers/ocr/llm_refine.py`)
+## Optional LLM refinement (`aglaia/workers/ocr/llm_refine.py`)
 
 The geometry recovers *structure* but can't fix what OCR got wrong at the
 character/semantic level: broken accents, mis-split words, garbled Greek, a

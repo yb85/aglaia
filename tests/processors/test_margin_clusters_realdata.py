@@ -15,11 +15,11 @@ import cv2
 import numpy as np
 import pytest
 
-from lib.processors import geometry as g
-from lib.processors.TrapezoidalCorrection import (TrapezoidalCorrection,
+from aglaia.processors import geometry as g
+from aglaia.processors.TrapezoidalCorrection import (TrapezoidalCorrection,
                                                   TrapezoidalOption)
-from lib.processors.geometry import baseline_from_ink
-from lib.processors.utils import binarize_fixed
+from aglaia.processors.geometry import baseline_from_ink
+from aglaia.processors.utils import binarize_fixed
 
 PAGES = ["070_B", "256_A", "198_B", "191_B", "161_A"]
 OUT_DIR = Path("debug/margin_validation")
@@ -65,7 +65,7 @@ def _trap_input_image(conn, page: str):
 
 def _legacy_quad(baselines):
     """Pre-§3.6.7 edge path: anchor box + max-cardinality RANSAC."""
-    from lib.processors.geometry import (_fit_line_lstsq, _fit_line_ransac,
+    from aglaia.processors.geometry import (_fit_line_lstsq, _fit_line_ransac,
                                          select_per_side_anchors)
     left_idxs, right_idxs, _ = select_per_side_anchors(baselines)
     if len(left_idxs) < 3 or len(right_idxs) < 3:

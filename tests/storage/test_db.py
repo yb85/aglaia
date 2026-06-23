@@ -5,7 +5,7 @@
 # Source-available under the PolyForm Shield License 1.0.0; any use except
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
-from lib.storage.db import open_db
+from aglaia.storage.db import open_db
 
 
 def test_open_creates_schema(tmp_path):
@@ -31,7 +31,7 @@ def test_open_idempotent(tmp_path):
 
 
 def test_trigger_marks_parent_not_leaf(seeded_db):
-    from lib.storage.repo import ImageRepo, NodeRepo, ScanRepo
+    from aglaia.storage.repo import ImageRepo, NodeRepo, ScanRepo
     db, pid = seeded_db
     img_id = ImageRepo(db).insert(b"\x00" * 16, "PNG", "BW", 4, 4, 72.0)
     scan_id = ScanRepo(db).create("import", pid)

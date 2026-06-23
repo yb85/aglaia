@@ -7,7 +7,7 @@ Single SQLite file per project: `<workspace>/<slug>.agl`.
 ## Module map
 
 ```
-lib/storage/
+aglaia/storage/
   __init__.py          re-exports
   db.py                open_db / ensure_schema / PRAGMAs
   schema/0001_initial.sql … 0010_step_overrides.sql   (applied in order)

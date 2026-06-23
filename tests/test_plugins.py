@@ -22,9 +22,9 @@ def app_data(tmp_path, monkeypatch):
     isolated per test."""
     monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path))
     # Re-import fresh so module-level caches (if any) bind to the temp dir.
-    import lib.app_data as _ad
+    import aglaia.app_data as _ad
     importlib.reload(_ad)
-    from lib.app_data import plugins as _pl
+    from aglaia.app_data import plugins as _pl
     importlib.reload(_pl)
     yield _pl
     # Drop any plugin modules + sys.path entries the test imported.
@@ -110,7 +110,7 @@ def test_import_accepted_only_acknowledged(app_data):
 def test_ocr_plugin_registers_engine(app_data):
     pl = app_data
     _drop(pl, "ocr", "myengine_plugin", """
-        from lib.workers.ocr.engine import OcrEngine, register
+        from aglaia.workers.ocr.engine import OcrEngine, register
 
         @register
         class MyTestEngine(OcrEngine):
@@ -120,14 +120,14 @@ def test_ocr_plugin_registers_engine(app_data):
     """)
     pl.acknowledge(pl.scan_pending()[0])
     pl.import_accepted("ocr")
-    from lib.workers.ocr.engine import ENGINE_REGISTRY
+    from aglaia.workers.ocr.engine import ENGINE_REGISTRY
     assert "mytest_engine" in ENGINE_REGISTRY
 
 
 def test_processor_registry_picks_up_plugin(app_data, monkeypatch):
     pl = app_data
     _drop(pl, "processors", "MyProcPlugin", """
-        from lib.processors.abstraction import AbstractImageProcessor
+        from aglaia.processors.abstraction import AbstractImageProcessor
 
         class MyPluginProc(AbstractImageProcessor):
             SUMMARY = "test plugin processor"
@@ -136,7 +136,7 @@ def test_processor_registry_picks_up_plugin(app_data, monkeypatch):
     pl.acknowledge(pl.scan_pending()[0])
 
     # Reset registry discovery so it re-runs with our temp plugin dir.
-    from lib.processors import registry as reg
+    from aglaia.processors import registry as reg
     monkeypatch.setattr(reg, "_DISCOVERED", False)
     monkeypatch.setattr(reg, "_REGISTRY", {})
     procs = reg.all_processors()

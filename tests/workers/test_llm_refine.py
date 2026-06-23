@@ -6,13 +6,13 @@
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
 """Unit tests for the optional LLM Markdown refinement layer
-(``lib.workers.ocr.llm_refine``). The Apple backend can't run off
+(``aglaia.workers.ocr.llm_refine``). The Apple backend can't run off
 macOS 26, so these exercise the page-splitting, fail-open, and dispatch
 logic with deterministic mock/null backends.
 """
 from __future__ import annotations
 
-from lib.workers.ocr import llm_refine as lr
+from aglaia.workers.ocr import llm_refine as lr
 
 
 SAMPLE = """<!-- aglaia-export: book -->

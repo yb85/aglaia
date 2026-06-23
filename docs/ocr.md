@@ -1,10 +1,10 @@
 # OCR engines
 
 OCR runs **off-chain** (after the pipeline), driven by `OcrWorker`
-(`lib/workers/OcrWorker.py`). Engines live in `lib/workers/ocr/` behind a
+(`aglaia/workers/OcrWorker.py`). Engines live in `aglaia/workers/ocr/` behind a
 common interface, selectable per document from the OCR tab.
 
-## Engine interface (`lib/workers/ocr/engine.py`)
+## Engine interface (`aglaia/workers/ocr/engine.py`)
 
 Subclass `OcrEngine`:
 
@@ -55,7 +55,7 @@ Both live in `engine.py` (one place for picker, env, and DB key):
 `mistral_cloud` needs an API key. Stored in the OS keychain via `keyring`
 (macOS Keychain / Windows Credential Locker / Linux Secret Service), with
 a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain backend is
-available (`lib/app_data/secrets.py`). The key never touches the project
+available (`aglaia/app_data/secrets.py`). The key never touches the project
 DB or the config DB. Install with `uv sync --extra cloud`.
 
 ## Engine→GUI logging

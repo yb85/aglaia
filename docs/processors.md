@@ -1,8 +1,8 @@
 # Processors
 
-All processors live in `lib/processors/`. Each has:
+All processors live in `aglaia/processors/`. Each has:
 
-- A `*Option` dataclass extending `AbstractProcessorOption` (`lib/processors/abstraction.py`).
+- A `*Option` dataclass extending `AbstractProcessorOption` (`aglaia/processors/abstraction.py`).
 - A class extending `AbstractImageProcessor`.
 
 ## Processor contract (`AbstractImageProcessor`)
@@ -29,7 +29,7 @@ keys with no matching option field).
 inherits: `debug` (bool), `debug_dir` (str?), `timeout_s` (float). They are
 hidden from the parameter descriptions.
 
-## DPIfixer (`lib/processors/DPIfixer.py`)
+## DPIfixer (`aglaia/processors/DPIfixer.py`)
 
 Clamp `ImageBuffer.dpi` into `[min_dpi, max_dpi]` via `cv2.resize`. `INTER_CUBIC` for upsampling, `INTER_AREA` for downsampling. Updates `meta["roi"]` (point coords scaled). No-op if change <1 dpi.
 
@@ -41,7 +41,7 @@ options:
 
 Use it both as **input clamp** (early) and **normalize** (e.g. force exactly 300dpi by setting both bounds equal).
 
-## SkewFinder (`lib/processors/SkewFinder.py`)
+## SkewFinder (`aglaia/processors/SkewFinder.py`)
 
 Two-pass projection-profile deskew:
 
@@ -65,7 +65,7 @@ options:
 
 ## LayoutBackend (text detection)
 
-`lib/processors/layout_backends/` — pluggable abstraction picked via the `backend:` YAML option on `PageDetector`.
+`aglaia/processors/layout_backends/` — pluggable abstraction picked via the `backend:` YAML option on `PageDetector`.
 
 | Backend | Model | GPU |
 |---|---|---|
@@ -77,7 +77,7 @@ options:
 
 Each backend reports `uses_gpu`. The chain stamps `meta['gpu'] = True` on every node produced by a GPU-backed processor; the web UI then renders a 🚀 next to the step in the per-scan timing bar.
 
-## PageDetector (`lib/processors/PageDetector.py`)
+## PageDetector (`aglaia/processors/PageDetector.py`)
 
 Apple Vision text detection → merge overlapping x-spans → optional reduce-to-N → emit child buffers.
 
@@ -106,7 +106,7 @@ options:
 
 **Requires macOS + Apple Vision** (the `apple_vision` backend). If the Vision backend is unavailable, `auto` falls back to EAST → DBnet → heuristic.
 
-## Binarizer (`lib/processors/Binarizer.py`)
+## Binarizer (`aglaia/processors/Binarizer.py`)
 
 ![Local adaptive binarization: an unevenly-lit page (left) becomes clean black-on-white text (right), the shadow gradient removed.](figures/binarize_example.jpg)
 
@@ -133,7 +133,7 @@ ROI masking (`_apply_roi_mask`): if the input buffer carries a `meta["roi"]` pol
 
 BW inputs are a no-op (pass-through).
 
-## TrapezoidalCorrection (`lib/processors/TrapezoidalCorrection.py`)
+## TrapezoidalCorrection (`aglaia/processors/TrapezoidalCorrection.py`)
 
 Keystone (pure perspective) rectification: text-line baselines → vanishing point (RANSAC + TLS) → column quadrilateral → Zhang-He metric aspect recovery → single `cv2.warpPerspective`.
 
@@ -153,7 +153,7 @@ options:
 
 Falls back to passthrough (`Status.REVIEW`) when too few baselines or the quad fails convexity/area/aspect sanity checks.
 
-## PageDewarper (`lib/processors/PageDewarper.py`)
+## PageDewarper (`aglaia/processors/PageDewarper.py`)
 
 **Dewarping** removes the curvature + perspective that make a photographed
 book page look bowed: near the spine the page curves and tilts, so every text
@@ -177,7 +177,7 @@ re-projects it flat, recovering straight lines. The chain runs deskew first
 Sheet-model dewarping built on the `page-dewarp` library; optimizer backend is
 MLX (Apple Metal) → padded JAX → SciPy Powell (`backend: auto`).
 
-Four sheet models (`sheet_model`, see `lib/processors/sheet_models.py`):
+Four sheet models (`sheet_model`, see `aglaia/processors/sheet_models.py`):
 
 - `cylindrical` (default) — stock page-dewarp cubic z(x): every horizontal
   slice shares one height profile (2 shape DOF: α, β).
@@ -259,7 +259,7 @@ When `debug: true` or `--debug`, writes intermediate visualizations to `<workspa
 
 JAX cache lives at `./.jax_cache/` (auto-created). Persisting compilation across runs saves ~5s startup.
 
-## Apple Vision detection (`lib/processors/layout_backends/apple_vision.py`)
+## Apple Vision detection (`aglaia/processors/layout_backends/apple_vision.py`)
 
 `AppleVisionBackend` is the `apple_vision` `LayoutBackend` used by
 PageDetector for text-box detection:
@@ -269,17 +269,17 @@ PageDetector for text-box detection:
 It uses `VNRecognizeTextRequest` with `RecognitionLevelAccurate` and language
 correction disabled, wrapped in `objc.autorelease_pool` to keep memory bounded.
 Text *recognition* for OCR is a separate concern — the `apple_vision` /
-`apple_docs` OCR engines live under `lib/workers/ocr/` (see [OCR](ocr.md)).
+`apple_docs` OCR engines live under `aglaia/workers/ocr/` (see [OCR](ocr.md)).
 
 ## Writing a new processor
 
-1. Add a file in `lib/processors/`.
+1. Add a file in `aglaia/processors/`.
 2. Define an option dataclass:
 
 ```python
 from dataclasses import dataclass
-from lib.processors.abstraction import AbstractProcessorOption, AbstractImageProcessor
-from lib.ImageBuffer import ImageBuffer
+from aglaia.processors.abstraction import AbstractProcessorOption, AbstractImageProcessor
+from aglaia.ImageBuffer import ImageBuffer
 
 @dataclass
 class MyOption(AbstractProcessorOption):
@@ -289,8 +289,8 @@ class MyOption(AbstractProcessorOption):
 3. Define the processor:
 
 ```python
-from lib.processors.abstraction import ReplayTrait
-from lib.processors.option_specs import _i
+from aglaia.processors.abstraction import ReplayTrait
+from aglaia.processors.option_specs import _i
 
 class MyProcessor(AbstractImageProcessor):
     name: str = "MyProcessor"
@@ -306,8 +306,8 @@ class MyProcessor(AbstractImageProcessor):
         return buf
 ```
 
-4. **Nothing to register.** `lib/processors/registry.py` auto-discovers
-   the class on first access — it scans `lib/processors/*.py` for
+4. **Nothing to register.** `aglaia/processors/registry.py` auto-discovers
+   the class on first access — it scans `aglaia/processors/*.py` for
    `AbstractImageProcessor` subclasses that declare `OPTIONS`. The GUI
    add-step menu, the pipeline loader (`Initializer`), and the worker
    chain (`IntegratedProcessingChain`) all read through the registry; no
@@ -334,18 +334,18 @@ dropping a `*.py` file into the per-user plugin dirs:
 <APP_DATA>/plugins/ocr/          OcrEngine subclass decorated @register
 ```
 
-(`<APP_DATA>` = `lib/app_data.plugins_dir()`; on macOS
+(`<APP_DATA>` = `aglaia/app_data.plugins_dir()`; on macOS
 `~/Library/Application Support/Aglaia/plugins/…`.)
 
 **Trust gate.** Code is not run blindly. At GUI startup
-`lib/gui/plugin_trust.py` (wired in `aglaia.py:_qt_app`) shows a warning
+`aglaia/gui/plugin_trust.py` (wired in `aglaia.py:_qt_app`) shows a warning
 for every file that is new or whose content changed since it was
 accepted, offering **Add / Delete / Skip**. Accepted files are recorded
 in the `plugins` table of `aglaia-config.db` with a sha256.
 
 **Invariant — import == code execution.** Discovery
-(`lib.app_data.plugins.import_accepted()`, called by the processor
-registry and `lib/workers/ocr/__init__.py`) imports *only* accepted,
+(`aglaia.app_data.plugins.import_accepted()`, called by the processor
+registry and `aglaia/workers/ocr/__init__.py`) imports *only* accepted,
 sha-matching files; an unacknowledged or modified file is never imported.
 Plugin dirs are placed on `sys.path` so a plugin's module name resolves
 identically inside spawned pipeline workers (spawn re-imports by name).

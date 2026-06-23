@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.workers.ImportHelpers import reprocess_branch
+from aglaia.workers.ImportHelpers import reprocess_branch
 
 FIXTURE = (Path(__file__).resolve().parents[2]
            / "test_data" / "test_augustin"

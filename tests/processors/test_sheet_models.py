@@ -10,7 +10,7 @@ conditions, derivative, model-name canonicalisation, bending energy."""
 import numpy as np
 import pytest
 
-from lib.processors import sheet_models as sm
+from aglaia.processors import sheet_models as sm
 
 
 # ---------------------------------------------------------------------------

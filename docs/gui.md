@@ -29,30 +29,30 @@ the content pane between the **Capture**, **Import**, **Pipeline**, **OCR** and
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Sidebar tab widgets live in `lib/gui/sidebar/tabs/` (`CaptureTab`,
+Sidebar tab widgets live in `aglaia/gui/sidebar/tabs/` (`CaptureTab`,
 `ImportTab`, `PipelineTab`, `OcrTab`, `ExportTab`); the `ActivityBar` +
-content `QStackedWidget` are assembled in `lib/gui/sidebar/SidebarPanel.py`.
+content `QStackedWidget` are assembled in `aglaia/gui/sidebar/SidebarPanel.py`.
 
 ## Threads / processes
 
 - **MainWindow** runs on the Qt main thread.
-- **WebcamThread** (`lib/gui/WebcamThread.py`) — QThread, `cv2.VideoCapture`, applies rotation/mirror/flip per frame, emits `change_pixmap_signal`. `get_frame()` returns the latest BGR frame on demand. 30 FPS cap.
-- **ProcessMonitor** (`lib/workers/ProcessMonitor.py`) — QThread that blocks on `log_queue.get(timeout=0.1)` and re-emits messages as Qt signals on the main thread. Handles `image_event`, `worker_started`, `log_info/warning`, `error`, and `timing` (printed via Rich).
-- **VoiceWorker** (`lib/gui/VoiceWorker.py`) — QThread, Apple `SFSpeechRecognizer` + `AVAudioEngine`. Emits `command_detected(action)` and `transcription_update(text)`. Skipped if `pyobjc Speech` import fails.
+- **WebcamThread** (`aglaia/gui/WebcamThread.py`) — QThread, `cv2.VideoCapture`, applies rotation/mirror/flip per frame, emits `change_pixmap_signal`. `get_frame()` returns the latest BGR frame on demand. 30 FPS cap.
+- **ProcessMonitor** (`aglaia/workers/ProcessMonitor.py`) — QThread that blocks on `log_queue.get(timeout=0.1)` and re-emits messages as Qt signals on the main thread. Handles `image_event`, `worker_started`, `log_info/warning`, `error`, and `timing` (printed via Rich).
+- **VoiceWorker** (`aglaia/gui/VoiceWorker.py`) — QThread, Apple `SFSpeechRecognizer` + `AVAudioEngine`. Emits `command_detected(action)` and `transcription_update(text)`. Skipped if `pyobjc Speech` import fails.
 - **Processing chain** — separate worker processes started by `IntegratedProcessingChain.start()`. Workers persist each step directly to the project `.agl` SQLite DB (no separate writer process).
 
 ## Workflow
 
-Projects are a single SQLite `<slug>.agl` file — there are no per-step output directories on disk. Raw captures and imports become `scans` rows plus a raw root `nodes` row pointing at a `COLOR` image blob (`lib/storage/persister.py` `Persister`); every pipeline result is persisted as a further node. The only sibling files are slug-prefixed debug dirs and the export target.
+Projects are a single SQLite `<slug>.agl` file — there are no per-step output directories on disk. Raw captures and imports become `scans` rows plus a raw root `nodes` row pointing at a `COLOR` image blob (`aglaia/storage/persister.py` `Persister`); every pipeline result is persisted as a further node. The only sibling files are slug-prefixed debug dirs and the export target.
 
-1. `initialize(mode="capture")` (`lib/workers/Initializer.py`) parses args/config and builds `args.options`. For capture mode `args.options["paths"]` holds only `root`, `debug_prefix`, and `export` — no `raw`/`output` dirs.
+1. `initialize(mode="capture")` (`aglaia/workers/Initializer.py`) parses args/config and builds `args.options`. For capture mode `args.options["paths"]` holds only `root`, `debug_prefix`, and `export` — no `raw`/`output` dirs.
 2. `load_calibration()` reads `config/camera_params.json`. If present, `cv2.getOptimalNewCameraMatrix` is computed at capture time and each grabbed frame is undistorted before it is persisted (no on-disk save).
-3. `create_processing_chain(args, log_queue, db_path=…)` builds the `IntegratedProcessingChain` (`lib/workers/Initializer.py`). `chain.start()` spawns the multiprocessing workers — they persist each step straight to the project DB (no separate writer process).
+3. `create_processing_chain(args, log_queue, db_path=…)` builds the `IntegratedProcessingChain` (`aglaia/workers/Initializer.py`). `chain.start()` spawns the multiprocessing workers — they persist each step straight to the project DB (no separate writer process).
 4. `load_existing_scans` rebuilds the right-hand panel **from the SQLite DB** (`ScanRepo.list_active` → `NodeRepo`), replaying every persisted node into its `ScanItemWidget` and seeding `current_idx` from the highest scan idx.
 5. `WebcamThread`, `ProcessMonitor`, `VoiceWorker` start.
 6. On user action:
    - **Scan** (key `Space`/`S`, voice `scan|check|next|photo`, SIFT auto-trigger, button — all funnel through `MainWindow.capture`): grab frame → undistort (if calibrated) → BGR→RGB → in one DB session create the scan + persist the COLOR blob + raw root node (`Persister.persist_image` / `persist_node`, `ScanRepo.set_root`) → spawn the raw `ScanItemWidget` → enqueue an `ImageBuffer` (carrying `scan_id`/`parent_node_id`/`pipeline_version_id`) on the chain input queue. No `.jpg` is written.
-   - **Import** (Import tab → `_on_sidebar_import_requested` → `lib/workers/ImportHelpers.py`): `enqueue_image_files` / `enqueue_pdf_files` persist each image — and each PDF page, rendered per-page via pypdfium2 (`pdf_extract.render_page`) — as a scan + raw root node, emit a `scan_imported` `log_queue` event, and enqueue the `ImageBuffer`. `ProcessMonitor` re-emits the event; `MainWindow.on_scan_imported` spawns the raw widget immediately, before any worker stage completes.
+   - **Import** (Import tab → `_on_sidebar_import_requested` → `aglaia/workers/ImportHelpers.py`): `enqueue_image_files` / `enqueue_pdf_files` persist each image — and each PDF page, rendered per-page via pypdfium2 (`pdf_extract.render_page`) — as a scan + raw root node, emit a `scan_imported` `log_queue` event, and enqueue the `ImageBuffer`. `ProcessMonitor` re-emits the event; `MainWindow.on_scan_imported` spawns the raw widget immediately, before any worker stage completes.
    - **Trash/undo** (`Backspace`/`D`, voice `trash|delete|cancel`): pop last from history, then **soft-delete** the scan in the DB (`ScanRepo.soft_delete` sets `scans.deleted_at`) so it drops out of the active list. No blobs are removed.
    - **Quit** (⌘Q / Ctrl+Q via `QKeySequence.StandardKey`, voice `done|quit`): closes the window.
    - **Rotate** (`R`): cycles preview rotation by 90°.
@@ -61,7 +61,7 @@ Projects are a single SQLite `<slug>.agl` file — there are no per-step output 
 
 ## ScanItemWidget
 
-`lib/gui/ScanItemWidget.py`. One per captured scan. Shows the file's progression through pipeline steps:
+`aglaia/gui/ScanItemWidget.py`. One per captured scan. Shows the file's progression through pipeline steps:
 
 - `raw` thumb → one thumb per pipeline step (`pipeline_steps` = the `instance_name`s computed in `MainWindow.__init__`).
 - `output` thumb is the latest persisted result for the scan.
@@ -134,7 +134,7 @@ in `keycontrols`.
 
 ## OCR tab
 
-The sidebar **OCR** tab (`lib/gui/sidebar/tabs/OcrTab.py`) picks an engine via a
+The sidebar **OCR** tab (`aglaia/gui/sidebar/tabs/OcrTab.py`) picks an engine via a
 `RadioCardGroup` and fires `run_requested(engine, languages, mode, complement)`
 → `MainWindow._on_ocr_run_requested` → `OcrWorker`.
 
@@ -150,7 +150,7 @@ Engine cards:
   unavailable the Vision text is kept. The gate is a system param (default
   **0.7**): env `AGLAIA_OCR_CONFIDENCE_GATE` → SQLite `KEY_OCR_CONFIDENCE_GATE`
   → default, resolved by `resolve_confidence_gate()`. Raise it to offload more
-  lines, lower it to offload fewer. See `lib/workers/ocr/apple_docs.py`.
+  lines, lower it to offload fewer. See `aglaia/workers/ocr/apple_docs.py`.
 - **Apple Vision** (`apple_vision`) — the flat `VNRecognizeTextRequest`
   path with the geometric Markdown heuristics.
 - **Surya** / **PaddleOCR-VL** — standalone VLM engines (needed off-mac and
@@ -169,10 +169,10 @@ Engine cards:
   the user to **run OCR again** to continue. Page mapping is positional
   (Mistral page *i* → the *i*-th selected scan). Needs the `cloud` extra
   (`uv sync --extra cloud`) and an API key. See
-  `lib/workers/ocr/mistral_cloud.py`.
+  `aglaia/workers/ocr/mistral_cloud.py`.
 
   *API key* — set via the card's **Set API key…** button (masked dialog).
-  Resolution order (`lib/app_data/secrets.py`): env `MISTRAL_API_KEY` →
+  Resolution order (`aglaia/app_data/secrets.py`): env `MISTRAL_API_KEY` →
   `APP_DATA/.env` → **OS keychain** (`keyring`). `.env` is checked before the
   keychain so a dotenv-style dev never triggers a keychain unlock prompt.
   *Write* prefers the OS keychain, falling back to a cleartext `APP_DATA/.env`
@@ -180,7 +180,7 @@ Engine cards:
   Optional password-manager backends: `uv sync --extra keyring-bitwarden` /
   `--extra keyring-1password` (keyring auto-discovers them).
 
-**Gating** (`lib/workers/ocr/apple_caps.py`): not macOS → both Apple cards
+**Gating** (`aglaia/workers/ocr/apple_caps.py`): not macOS → both Apple cards
 disabled ("macOS only"); macOS pre-26 → only the Document card disabled
 ("Requires macOS 26+"); macOS 26+ → both enabled. If the default card ends up
 disabled, the tab falls back to the first enabled card. The Document engine
@@ -188,7 +188,7 @@ needs **no** Apple Intelligence.
 
 ## Export
 
-The sidebar **Export** tab (`lib/gui/sidebar/tabs/ExportTab.py`) shows three
+The sidebar **Export** tab (`aglaia/gui/sidebar/tabs/ExportTab.py`) shows three
 format cards picked via a radio group, then one **Export** button dispatched by
 `MainWindow._on_export_clicked` on the selected key:
 

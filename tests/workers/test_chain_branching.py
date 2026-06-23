@@ -17,14 +17,14 @@ import cv2
 import numpy as np
 import pytest
 
-from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.processors.PageDetector import PageOption
-from lib.processors.SkewFinder import SkewFinderOption
-from lib.workers.IntegratedProcessingChain import IntegratedProcessingChain
-from lib.workers.chain_abstraction import SimpleChainElement
-from lib.storage.db import open_db
-from lib.storage.repo import BranchRepo, NodeRepo, PipelineRepo, ProjectRepo, ScanRepo
-from lib.storage.persister import Persister
+from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors.PageDetector import PageOption
+from aglaia.processors.SkewFinder import SkewFinderOption
+from aglaia.workers.IntegratedProcessingChain import IntegratedProcessingChain
+from aglaia.workers.chain_abstraction import SimpleChainElement
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import BranchRepo, NodeRepo, PipelineRepo, ProjectRepo, ScanRepo
+from aglaia.storage.persister import Persister
 
 
 @pytest.fixture(scope="module", autouse=True)

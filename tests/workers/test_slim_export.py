@@ -22,11 +22,11 @@ import sqlite3
 
 from PIL import Image
 
-from lib.storage.db import open_db
-from lib.storage.repo import (
+from aglaia.storage.db import open_db
+from aglaia.storage.repo import (
     BranchRepo, ImageRepo, NodeRepo, PipelineRepo, ProjectRepo, ScanRepo,
 )
-from lib.workers.slim_export import slim_export, slim_in_place
+from aglaia.workers.slim_export import slim_export, slim_in_place
 
 
 def _png(color: int = 0) -> bytes:

@@ -18,10 +18,10 @@ current_dir = os.getcwd()
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from lib.ImageBuffer import ImageBuffer, ImageType
-from lib.workers.IntegratedProcessingChain import IntegratedProcessingChain
-from lib.workers.chain_abstraction import SimpleChainElement
-from lib.processors.SkewFinder import SkewFinderOption
+from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.workers.IntegratedProcessingChain import IntegratedProcessingChain
+from aglaia.workers.chain_abstraction import SimpleChainElement
+from aglaia.processors.SkewFinder import SkewFinderOption
 
 def test_chain():
     print("Testing IntegratedProcessingChain...")

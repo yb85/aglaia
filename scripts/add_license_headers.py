@@ -31,7 +31,7 @@ HEADER = """\
 
 MARKER = "SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0"
 
-INCLUDE_DIRS = ("lib/", "scripts/", "tests/", "scanproj/", "aglaia_jbig2/")
+INCLUDE_DIRS = ("aglaia/", "scripts/", "tests/", "scanproj/", "aglaia_jbig2/")
 INCLUDE_FILES = {
     "aglaia.py", "inspect_binarization.py", "process_1ppf_empty.py",
     "ocr_run.py", "replay_chain.py", "migrate_page_order.py",

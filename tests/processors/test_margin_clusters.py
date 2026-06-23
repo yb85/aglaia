@@ -17,7 +17,7 @@ Failure modes covered:
 import numpy as np
 import pytest
 
-from lib.processors import geometry as g
+from aglaia.processors import geometry as g
 
 
 W, H = 1400.0, 2000.0

@@ -12,7 +12,7 @@ import io
 import pikepdf
 from PIL import Image
 
-from lib.workers import pdf_export
+from aglaia.workers import pdf_export
 
 
 def _bw_row(w=200, h=260, dpi=300):

@@ -7,7 +7,7 @@
 
 """pipeline_step_descriptions — per-step essential/full blurbs."""
 
-from lib.workers.Initializer import pipeline_step_descriptions
+from aglaia.workers.Initializer import pipeline_step_descriptions
 
 
 def test_descriptions_for_known_steps():

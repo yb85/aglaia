@@ -101,9 +101,23 @@ keyring-1password = [
 testpaths = ["tests"]
 addopts = "-ra -q"
 
+[project.scripts]
+# `pip install aglaia` → an `aglaia` command (the GUI/CLI entry; routes through
+# aglaia/__main__.py so multiprocessing-spawn is wired up first).
+aglaia = "aglaia.__main__:run"
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["lib*", "scanproj*"]
+include = ["aglaia*"]
+
+[tool.setuptools.package-data]
+# Ship the bundled assets + read-only config inside the wheel so a pip install
+# can find icons, logos, mode previews, calibration boards, default.yml and the
+# pipeline definitions (resolved package-relative via aglaia.assets).
+aglaia = [
+    "assets/**/*",
+    "config/**/*",
+]
 
 [dependency-groups]
 dev = [

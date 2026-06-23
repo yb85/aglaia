@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib.processors.PageDetector import _pair_score, smart_merge
+from aglaia.processors.PageDetector import _pair_score, smart_merge
 
 
 PAGE_W = 1000
