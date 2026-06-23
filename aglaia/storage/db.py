@@ -117,7 +117,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     )
     applied = {r[0] for r in conn.execute(
         "SELECT filename FROM _schema_migrations")}
-    for f in sorted(SCHEMA_DIR.glob("*.sql")):
+    files = sorted(SCHEMA_DIR.glob("*.sql"))
+    if not files:
+        # Zero migrations = the schema dir didn't ship (packaging bug). Fail
+        # loudly instead of leaving an empty, table-less DB behind.
+        raise RuntimeError(
+            f"No schema migrations found in {SCHEMA_DIR} — the bundle is "
+            "missing aglaia/storage/schema/*.sql.")
+    for f in files:
         if f.name in applied:
             continue
         sql = f.read_text()
