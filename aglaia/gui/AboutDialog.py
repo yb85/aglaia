@@ -46,7 +46,7 @@ def app_version() -> str:
         import tomllib
         from pathlib import Path
         root = Path(__file__).resolve().parents[2]
-        data = tomllib.loads((root / "pyproject.toml").read_text())
+        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
         return str(data["project"]["version"])
     except Exception:
         return "0.0.0"

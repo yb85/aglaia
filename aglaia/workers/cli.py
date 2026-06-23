@@ -240,7 +240,7 @@ def run_list_commands(cfg: "CliConfig") -> bool:
             name = p.stem
             try:
                 import yaml as _yaml
-                name = (_yaml.safe_load(p.read_text()) or {}).get("name") or p.stem
+                name = (_yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("name") or p.stem
             except Exception:
                 pass
             print(f"  {p.stem:24} {name}")

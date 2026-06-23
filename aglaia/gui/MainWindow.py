@@ -2483,7 +2483,7 @@ class MainWindow(QMainWindow):
             try:
                 import yaml as _yaml
                 doc = _yaml.safe_load(
-                    Path(self.pipeline_yaml_path).read_text()
+                    Path(self.pipeline_yaml_path).read_text(encoding="utf-8")
                 ) or {}
                 for step in doc.get("pipeline", []) or []:
                     proc = step.get("processor", "")
@@ -2711,7 +2711,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentWidget(self._pipeline_editor_tab)
             return
         try:
-            initial_yaml = Path(self.pipeline_yaml_path).read_text()
+            initial_yaml = Path(self.pipeline_yaml_path).read_text(encoding="utf-8")
         except Exception as e:
             QMessageBox.warning(self, self.tr("Pipeline editor"),
                                 self.tr("Could not load pipeline: {err}").format(err=e))
@@ -2741,7 +2741,7 @@ class MainWindow(QMainWindow):
         if self._apply_pipeline_callback is None:
             QMessageBox.information(self, self.tr("Pipeline editor"),
                                     self.tr("Pipeline saved but no live-swap callback is wired."))
-            Path(self.pipeline_yaml_path).write_text(new_yaml)
+            Path(self.pipeline_yaml_path).write_text(new_yaml, encoding="utf-8")
             self._close_pipeline_tab()
             return
         self.status_label.setText(

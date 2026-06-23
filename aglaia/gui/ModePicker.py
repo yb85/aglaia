@@ -243,7 +243,7 @@ class ModePickerPanel(QWidget):
             if p.name in mode_pipelines or p.name in bundled:
                 continue
             try:
-                nm = parse_yaml(p.read_text()).get("name") or p.stem
+                nm = parse_yaml(p.read_text(encoding="utf-8")).get("name") or p.stem
             except OSError:
                 nm = p.stem
             self._add_card(f"file:{p.name}", str(nm), None, p, lucide="layers")
@@ -348,6 +348,6 @@ class ModePickerPanel(QWidget):
 
 def parse_yaml_name(path: Path) -> str:
     try:
-        return (parse_yaml(path.read_text()).get("name") or path.stem).strip()
+        return (parse_yaml(path.read_text(encoding="utf-8")).get("name") or path.stem).strip()
     except OSError:
         return path.stem

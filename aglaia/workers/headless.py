@@ -417,7 +417,7 @@ def run(cfg: CliConfig) -> int:
     try:
         ProjectRepo(conn).init(name=slug, slug=slug)
         pipeline_version_id = PipelineRepo(conn).upsert(
-            pipeline_path.read_text(),
+            pipeline_path.read_text(encoding="utf-8"),
             pipeline_def.get("name"),
             step_count=len(pipeline_def.get("pipeline", [])),
         )

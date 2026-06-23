@@ -334,7 +334,7 @@ def _load_yaml_defaults() -> dict[str, Any]:
     if not _DEFAULTS_YAML.is_file():
         return out
     try:
-        data = yaml.safe_load(_DEFAULTS_YAML.read_text())
+        data = yaml.safe_load(_DEFAULTS_YAML.read_text(encoding="utf-8"))
     except Exception:
         return out
     args = (data or {}).get("args") or {}

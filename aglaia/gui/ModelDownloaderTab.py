@@ -123,7 +123,7 @@ def _load_model_specs() -> list[ModelSpec]:
     for p in candidates:
         try:
             if p.is_file():
-                raw = json.loads(p.read_text())
+                raw = json.loads(p.read_text(encoding="utf-8"))
                 break
         except Exception:
             continue

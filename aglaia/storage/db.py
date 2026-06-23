@@ -120,7 +120,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     for f in sorted(SCHEMA_DIR.glob("*.sql")):
         if f.name in applied:
             continue
-        sql = f.read_text()
+        sql = f.read_text(encoding="utf-8")
         try:
             conn.executescript(sql)
         except sqlite3.OperationalError as e:

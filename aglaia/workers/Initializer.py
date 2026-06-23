@@ -295,7 +295,7 @@ DEFAULT_ARGS = {
 
 def load_yaml_config(path):
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
     except Exception as e:
         print(f"Error loading config file {path}: {e}")
@@ -430,7 +430,7 @@ def load_pipeline_def(path):
     dropped in favour of per-processor unit-aware options (e.g.
     Binarizer's `window_mm` + `window_px`)."""
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
     except Exception as e:
         print(f"Error loading pipeline {path}: {e}")
