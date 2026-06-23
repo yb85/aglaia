@@ -98,8 +98,8 @@ the app 300 DPI when the photo is really ~110 and every one of those is ~3×
 off — strokes break up, thin lines vanish, noise survives. The picture looks
 fine to your eye; the math is wrong.
 
-![The same ~110 DPI photo cleaned as if it were 300 DPI (left, broken) vs at
-its true DPI (right, clean)](./assets/dpi-comparison.png)
+![The same 100 DPI photo cleaned as if it were 300 DPI (left, broken) vs at
+its true 100 DPI (right, clean)](./assets/dpi-comparison.png)
 
 **Set it in the app.**
 
