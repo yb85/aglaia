@@ -172,6 +172,22 @@ def _qt_available() -> bool:
 
 def _qt_app() -> "QApplication":
     from PySide6.QtWidgets import QApplication
+    # Patch CFBundleName BEFORE QApplication registers the process with the
+    # window server — the Cmd-Tab / Dock-tile label is read once at that
+    # moment. Doing it after (the macOS block lower down) only relabels the
+    # menu bar. Best-effort: when launched as a bare `python -m aglaia`, the
+    # Python framework may already have registered "Python" before our code
+    # imports, in which case only the .app bundle can fully fix Cmd-Tab.
+    if sys.platform == "darwin":
+        try:
+            from Foundation import NSBundle
+            _b = NSBundle.mainBundle()
+            _info = _b.localizedInfoDictionary() or _b.infoDictionary()
+            if _info is not None:
+                _info["CFBundleName"] = "Aglaïa"
+                _info["CFBundleDisplayName"] = "Aglaïa"
+        except Exception:
+            pass
     app = QApplication(sys.argv[:1])  # do not pass user argv to Qt
     # App identity — window grouping, About box, and (with the macOS block
     # below) the Dock tile name when launched as the bare `aglaia` script.

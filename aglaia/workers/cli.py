@@ -121,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "paths", nargs="*", type=Path,
-        help="One .scanproj.sqlite file, OR one or more PDFs, OR one or more image files.",
+        help="One .agl project file, OR one or more PDFs, OR one or more image files.",
     )
     p.add_argument("--workers", type=int, default=None,
                    help="Number of pipeline worker processes (overrides config).")
@@ -387,7 +387,7 @@ def classify_inputs(cfg: CliConfig) -> None:
     if proj:
         if len(proj) > 1 or pdfs or imgs:
             raise SystemExit(
-                "When opening a project, pass exactly one .scanproj.sqlite "
+                "When opening a project, pass exactly one .agl "
                 "file and no other inputs."
             )
         cfg.source = "project"
