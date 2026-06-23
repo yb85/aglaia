@@ -109,11 +109,25 @@ class MistralBatchWorker(QThread):
             jobs = repo.pending()
             for job in jobs:
                 jid = job["job_id"]
-                status, err = mistral_batch.poll(api_key, jid)
+                try:
+                    status, err = mistral_batch.poll(api_key, jid)
+                except Exception as e:
+                    self.log_line.emit(
+                        "error", f"[mistral_batch] poll {jid} failed: "
+                        f"{type(e).__name__}: {e}")
+                    pending += 1
+                    continue
                 repo.set_status(jid, status, err)
                 run_ids = MistralBatchRepo.run_ids_of(job)
                 if status == "SUCCESS":
-                    md_pages = mistral_batch.fetch_markdown(api_key, jid)
+                    try:
+                        md_pages = mistral_batch.fetch_markdown(api_key, jid)
+                    except Exception as e:
+                        self.log_line.emit(
+                            "error", f"[mistral_batch] fetch {jid} failed: "
+                            f"{type(e).__name__}: {e}")
+                        pending += 1
+                        continue
                     for i, rid in enumerate(run_ids):
                         md = md_pages[i] if i < len(md_pages) else ""
                         w, h = _dims_for_run(conn, rid)
@@ -123,13 +137,17 @@ class MistralBatchWorker(QThread):
                     imported += 1
                     self.log_line.emit(
                         "info", f"[mistral_batch] imported job {jid} "
-                        f"({len(run_ids)} page(s))")
+                        f"({len(run_ids)} page(s), {len(md_pages)} md page(s))")
                 elif status in mistral_batch.FAILED_STATUSES:
                     for rid in run_ids:
                         ocr_repo.fail(rid, f"batch {status}: {err or ''}")
                     failed += 1
+                    self.log_line.emit(
+                        "warn", f"[mistral_batch] job {jid} {status}")
                 else:
                     pending += 1
+                    self.log_line.emit(
+                        "info", f"[mistral_batch] job {jid} {status}")
             conn.commit()
         finally:
             conn.close()

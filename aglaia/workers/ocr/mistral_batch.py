@@ -124,11 +124,21 @@ def fetch_markdown(api_key: str, job_id: str) -> list[str]:
     status = str(getattr(job, "status", "") or "")
     if status != "SUCCESS":
         raise RuntimeError(f"job {job_id} not ready (status={status})")
-    out_id = getattr(job, "output_file", None)
+    out_id = getattr(job, "output_file", None) or getattr(job, "output_file_id", None)
     if not out_id:
         raise RuntimeError(f"job {job_id} has no output_file")
-    raw = client.files.download(file_id=out_id).read()
-    text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+    dl = client.files.download(file_id=out_id)
+    # The SDK's download return shape varies by version: a stream with
+    # .read(), an object with .content/.text, or raw bytes/str.
+    if hasattr(dl, "read"):
+        data = dl.read()
+    elif hasattr(dl, "content"):
+        data = dl.content
+    elif hasattr(dl, "text"):
+        data = dl.text
+    else:
+        data = dl
+    text = data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else str(data)
     pages: list[str] = []
     for ln in text.splitlines():
         ln = ln.strip()
