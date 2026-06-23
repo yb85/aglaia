@@ -18,7 +18,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="${REPO_ROOT}/dist/Aglaia.app"
-BG="${REPO_ROOT}/packaging/dmg/dmg-bg.png"
+BG="${REPO_ROOT}/aglaia/assets/brand/aglaia_bg_arrow.png"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
     "${APP}/Contents/Info.plist" 2>/dev/null || echo '0.0.0')"
 DMG_NAME="Aglaia-${VERSION}"
@@ -48,7 +48,12 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 ditto "$APP" "$STAGE_DIR/Aglaia.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 mkdir -p "$STAGE_DIR/.background"
-cp "$BG" "$STAGE_DIR/.background/background.png"
+# The brand bg is a large hi-res PNG (2424×1536). Resample to a 2× retina
+# tile (1280×800) tagged 144 dpi so Finder renders it at the window's
+# 640×400 *point* bounds (set in the osascript below) — crisp on Retina,
+# correctly scaled on 1×. (The old bg was a 1× 640×400 image.)
+sips -z 800 1280 -s dpiWidth 144 -s dpiHeight 144 \
+    "$BG" --out "$STAGE_DIR/.background/background.png" >/dev/null
 # Mark hidden so Finder doesn't render the dot-folder when the user
 # mounts the DMG. Combination of chflags + SetFile catches both old
 # (Carbon) and new (HFS) listings.
