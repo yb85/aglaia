@@ -23,9 +23,9 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QHBoxLayout, QHeaderView, QLabel,
-    QPushButton, QSizePolicy, QSpinBox, QStyledItemDelegate, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QHBoxLayout,
+    QHeaderView, QLabel, QPushButton, QSizePolicy, QSpinBox,
+    QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from aglaia.gui.colors import COLOR_PRIMARY
@@ -142,7 +142,11 @@ class ScansDpiTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.setIconSize(QPixmap(_THUMB_PX, _THUMB_PX).size())
-        self.table.setSortingEnabled(True)
+        # Live sorting OFF on purpose: with it on, committing a DPI edit
+        # re-sorts the table mid-commit and the edited value can land on the
+        # wrong row or be dropped (a classic QTableWidget+sorting bug) — so
+        # a rerun would use the OLD DPI. Header clicks sort one-shot instead.
+        self.table.setSortingEnabled(False)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(COL_SOURCE, QHeaderView.ResizeMode.Stretch)
@@ -210,7 +214,11 @@ class ScansDpiTab(QWidget):
         self.table.resizeColumnToContents(COL_CHECK)
         self.table.resizeColumnToContents(COL_THUMB)
         self.table.resizeColumnToContents(COL_DPI)
-        self.table.setSortingEnabled(True)
+        # Live sorting OFF on purpose: with it on, committing a DPI edit
+        # re-sorts the table mid-commit and the edited value can land on the
+        # wrong row or be dropped (a classic QTableWidget+sorting bug) — so
+        # a rerun would use the OLD DPI. Header clicks sort one-shot instead.
+        self.table.setSortingEnabled(False)
         self._select_all.setChecked(False)
         self._updating = False
 
@@ -305,12 +313,29 @@ class ScansDpiTab(QWidget):
         self._updating = False
 
     def _on_header_clicked(self, section: int) -> None:
-        if section == COL_THUMB:
-            # Re-sort by name instead — the thumbnail column has no order.
-            self.table.sortItems(COL_NAME)
+        # One-shot sort (live sorting is off — see the table setup). The
+        # thumbnail column has no order, so sort by name there. Re-clicking
+        # the same column toggles ascending/descending.
+        col = COL_NAME if section == COL_THUMB else section
+        if getattr(self, "_sort_col", None) == col and \
+                getattr(self, "_sort_order", Qt.SortOrder.AscendingOrder) \
+                == Qt.SortOrder.AscendingOrder:
+            order = Qt.SortOrder.DescendingOrder
+        else:
+            order = Qt.SortOrder.AscendingOrder
+        self._sort_col, self._sort_order = col, order
+        self.table.sortItems(col, order)
 
     # ── apply ────────────────────────────────────────────────────────────
     def _on_apply(self) -> None:
+        # Commit any still-open inline editor FIRST. Clicking the button
+        # while the DPI spinbox is focused doesn't reliably flush its value
+        # into the model, so we'd otherwise read (and reprocess with) the
+        # OLD DPI and the cell would keep showing it. clearFocus() fires the
+        # editor's focus-out → the delegate commits to the model.
+        fw = QApplication.focusWidget()
+        if isinstance(fw, QAbstractSpinBox):
+            fw.clearFocus()
         # Reprocess only scans whose DPI actually CHANGED — and only among
         # checked rows. Setting the DPI deletes that scan's processing data
         # and reruns it from raw (reprocess_active_scans wipes branches +
