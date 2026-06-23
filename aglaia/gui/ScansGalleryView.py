@@ -228,10 +228,18 @@ class ScansGalleryView(QWidget):
                 else max(0, len(self._scans) - 1)
         else:
             self._scan_idx = 0
-        # Stage focus: prefer DB-recorded chosen, else preserve prev, else
-        # default to last stage (== final pipeline output, what the user
-        # normally wants to see).
-        self._stage_idx = self._pick_default_stage(prev_stage)
+        # Stage focus. On a *same-scan* refresh (toggle rerun, branch_ready,
+        # thumb-ready — the focused scan id didn't change) keep the user on
+        # the stage they're viewing; otherwise yanking back to the DB-chosen
+        # output (replay) on every background event makes stage navigation
+        # and the disable toggle unusable. Only consult the default-stage
+        # provider when the focused scan actually changed (scan switch /
+        # jump-to-latest / first load).
+        new_scan = self._scans[self._scan_idx][0] if self._scans else None
+        same_scan = (prev_scan is not None and new_scan == prev_scan
+                     and not jump_to_latest)
+        self._stage_idx = self._pick_default_stage(prev_stage,
+                                                   prefer_prev=same_scan)
         # Evict cache entries for now-missing scans.
         valid = {s[0] for s in self._scans}
         for key in list(self._cache.keys()):
@@ -239,9 +247,14 @@ class ScansGalleryView(QWidget):
                 self._cache.pop(key, None)
         self._present()
 
-    def _pick_default_stage(self, prev_stage: Optional[str]) -> int:
+    def _pick_default_stage(self, prev_stage: Optional[str],
+                            *, prefer_prev: bool = False) -> int:
         if not self._scans or not self._stages:
             return 0
+        # 0. Same-scan refresh: hold the user's current stage above all else
+        #    (a background reload must not relocate the view).
+        if prefer_prev and prev_stage is not None and prev_stage in self._stages:
+            return self._stages.index(prev_stage)
         # 1. DB-recorded chosen stage for the focused scan.
         if self._default_stage_provider is not None:
             try:
