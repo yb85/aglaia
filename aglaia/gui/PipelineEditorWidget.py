@@ -84,7 +84,7 @@ DEFAULT_PIPELINE_PATH = PIPELINES_DIR / "book_curved_x2.yaml"
 
 
 def load_yaml_text(path: Path) -> str:
-    return Path(path).read_text()
+    return Path(path).read_text(encoding="utf-8")
 
 
 def parse_yaml(text: str) -> dict:
@@ -957,7 +957,7 @@ class PipelineEditorWidget(QWidget):
         if not path.is_file():
             return
         try:
-            self.load_yaml(path.read_text())
+            self.load_yaml(path.read_text(encoding="utf-8"))
             self._loaded_path = path_str
         except OSError as e:
             QMessageBox.warning(
@@ -1031,7 +1031,7 @@ class PipelineEditorWidget(QWidget):
         path = PIPELINES_DIR / f"{slug}.yaml"
         try:
             PIPELINES_DIR.mkdir(parents=True, exist_ok=True)
-            path.write_text(self.to_yaml())
+            path.write_text(self.to_yaml(), encoding="utf-8")
         except OSError as e:
             QMessageBox.warning(
                 self, self.tr("Save failed"),
@@ -1205,7 +1205,7 @@ class _SavedPipelinesListView(QWidget):
 
     def _make_row(self, path: Path) -> QWidget:
         try:
-            doc = parse_yaml(path.read_text())
+            doc = parse_yaml(path.read_text(encoding="utf-8"))
         except OSError:
             doc = {}
         name = doc.get("name") or path.stem
@@ -1373,7 +1373,7 @@ class PipelineEditorTab(QWidget):
     def _open_editor(self, path_str: str) -> None:
         if path_str:
             try:
-                yaml_text = Path(path_str).read_text()
+                yaml_text = Path(path_str).read_text(encoding="utf-8")
             except OSError:
                 yaml_text = self._initial_yaml
         else:

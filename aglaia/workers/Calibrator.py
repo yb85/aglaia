@@ -116,14 +116,14 @@ def save_calibration(mtx, dist, dpi, resolution, new_mtx=None,
         "zoom_at_capture": zoom_at_capture,
     }
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
 
 def load_calibration(path="config/camera_params.json"):
     if not os.path.exists(path):
         return None
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             return {
                 "mtx": np.array(data["camera_matrix"]),

@@ -360,9 +360,9 @@ def _register_linux(*, app_path: Path | None,
     desktop_p.parent.mkdir(parents=True, exist_ok=True)
     xml_p.parent.mkdir(parents=True, exist_ok=True)
     desktop_p.write_text(_LINUX_DESKTOP.format(
-        exec_cmd=exec_cmd, mime=PROJECT_MIME))
+        exec_cmd=exec_cmd, mime=PROJECT_MIME), encoding="utf-8")
     xml_p.write_text(_LINUX_MIME_XML.format(
-        mime=PROJECT_MIME, ext=PROJECT_EXT_NODOT))
+        mime=PROJECT_MIME, ext=PROJECT_EXT_NODOT), encoding="utf-8")
 
     # Best-effort cache refresh.
     for cmd in (

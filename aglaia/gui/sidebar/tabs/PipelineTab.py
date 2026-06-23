@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from aglaia.gui.colors import (
     COLOR_BG_BUTTON,
     COLOR_BG_BUTTON_HOVER,
+    COLOR_ERROR,
     COLOR_FONT_DIM,
     COLOR_FONT_MUTED,
     COLOR_FONT_INVERSE,
@@ -116,7 +117,7 @@ class _BackendsView(QWidget):
 
             glyph = QLabel("●")
             glyph.setStyleSheet(
-                f"color: {COLOR_SUCCESS if ok else COLOR_FONT_DIM}; "
+                f"color: {COLOR_SUCCESS if ok else COLOR_ERROR}; "
                 "font-size: 10px;"
             )
             row.addWidget(glyph)

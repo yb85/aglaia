@@ -16,6 +16,7 @@ so the watchdog, sampler, and worker self-recycle all need this metric.
 import ctypes
 import ctypes.util
 import subprocess
+import sys
 
 
 _UNIT_MULTIPLIER = {
@@ -77,33 +78,44 @@ def _rusage_footprint_mb(pid: int) -> float:
     return info.ri_phys_footprint / (1024.0 * 1024.0)
 
 
+def _psutil_rss_mb(pid: int) -> float:
+    """RSS (MB) via psutil, or -1.0 if unavailable. The cross-platform
+    fallback — good enough on Linux/Windows where the macOS phys_footprint
+    metric doesn't exist."""
+    try:
+        import psutil
+        return psutil.Process(int(pid)).memory_info().rss / (1024.0 * 1024.0)
+    except Exception:
+        return -1.0
+
+
 def phys_footprint_mb(pid: int) -> float:
     """Return phys_footprint (MB) for `pid`, or -1.0 on failure.
 
-    Prefers proc_pid_rusage (fast, no task suspension); falls back to
-    `vmmap -summary` parsing. Pure — safe to import in spawned workers.
+    On macOS prefers proc_pid_rusage (fast, no task suspension), then
+    `vmmap -summary` parsing — the metric Activity Monitor shows. Off
+    macOS (Linux/Windows) those tools don't exist, so fall back to
+    psutil RSS. Pure — safe to import in spawned workers.
     """
-    mb = _rusage_footprint_mb(pid)
-    if mb >= 0.0:
-        return mb
-    try:
-        out = subprocess.run(
-            ["vmmap", "-summary", str(pid)],
-            capture_output=True, text=True, timeout=3.0,
-        ).stdout
-    except Exception:
-        return -1.0
-    for line in out.splitlines():
-        if not line.startswith("Physical footprint:"):
-            continue
-        raw = line.split(":", 1)[1].strip()
-        digits = raw.rstrip("KMGT")
-        suffix = raw[len(digits):]
+    if sys.platform == "darwin":
+        mb = _rusage_footprint_mb(pid)
+        if mb >= 0.0:
+            return mb
         try:
-            return float(digits) * _UNIT_MULTIPLIER.get(suffix, 1.0)
-        except ValueError:
-            return -1.0
-    return -1.0
+            out = subprocess.run(
+                ["vmmap", "-summary", str(pid)],
+                capture_output=True, text=True, timeout=3.0,
+            ).stdout
+            for line in out.splitlines():
+                if not line.startswith("Physical footprint:"):
+                    continue
+                raw = line.split(":", 1)[1].strip()
+                digits = raw.rstrip("KMGT")
+                suffix = raw[len(digits):]
+                return float(digits) * _UNIT_MULTIPLIER.get(suffix, 1.0)
+        except Exception:
+            pass
+    return _psutil_rss_mb(pid)
 
 
 def thread_count(pid: int) -> int:

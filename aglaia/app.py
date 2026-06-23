@@ -346,7 +346,7 @@ def _choice_from_cfg(cfg: CliConfig) -> Optional["StartupChoice"]:
         parent.mkdir(parents=True, exist_ok=True)
         from slugify import slugify
         pipeline_path = resolve_pipeline_path(cfg.pipeline)
-        yaml_text = pipeline_path.read_text() if pipeline_path else ""
+        yaml_text = pipeline_path.read_text(encoding="utf-8") if pipeline_path else ""
         mode = (StartupWindow.MODE_PDF if cfg.source == "pdfs"
                 else StartupWindow.MODE_IMAGES)
         choice = StartupChoice(
@@ -460,7 +460,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     # Pipeline override from --pipeline if user passed one.
     pipeline_arg_path = resolve_pipeline_path(cfg.pipeline)
     if pipeline_arg_path is not None and choice.mode != StartupWindow.MODE_OPEN:
-        choice.pipeline_yaml = pipeline_arg_path.read_text()
+        choice.pipeline_yaml = pipeline_arg_path.read_text(encoding="utf-8")
 
     pipeline_path = _write_project_pipeline(slug, choice.pipeline_yaml)
     args.pipeline = pipeline_path
@@ -491,7 +491,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     try:
         ProjectRepo(conn).init(name=slug, slug=slug)
         pipeline_version_id = PipelineRepo(conn).upsert(
-            pipeline_path.read_text(),
+            pipeline_path.read_text(encoding="utf-8"),
             pipeline_def.get("name"),
             step_count=len(pipeline_def.get("pipeline", [])),
         )
@@ -527,7 +527,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
              "pipeline_version_id": pipeline_version_id, "args": args}
 
     def apply_pipeline_callback(new_yaml: str, reprocess: bool):
-        pipeline_path.write_text(new_yaml)
+        pipeline_path.write_text(new_yaml, encoding="utf-8")
 
         def _worker():
             new_def = load_pipeline_def(pipeline_path) or {}
@@ -668,7 +668,10 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         pipeline_idle_callback=is_pipeline_idle_callback,
         stop_pipeline_callback=stop_pipeline_callback,
     )
-    window.show()
+    # showMaximized (not show): __init__ already maximised, but a plain
+    # show() here reverts the window to its never-sized Normal state on
+    # Windows → a tiny default window. Re-assert maximised on all platforms.
+    window.showMaximized()
     splash.finish(window)
 
     # ── layout heuristic-fallback gate ──────────────────────────
@@ -810,7 +813,7 @@ def _write_project_pipeline(slug: str, yaml_text: str) -> Path:
     fd, name = tempfile.mkstemp(prefix=f"{slug}-", suffix=".pipeline.yaml")
     os.close(fd)
     target = Path(name)
-    target.write_text(yaml_text)
+    target.write_text(yaml_text, encoding="utf-8")
     atexit.register(lambda p=target: p.unlink(missing_ok=True))
     return target
 
