@@ -90,7 +90,7 @@ pipeline:
       processing_dpi: 150            # Downsample to 150dpi for detection only
       rescale_threshold: 0.01
       backend: auto                  # apple_vision → east → dbnet → heuristic
-      min_contrast: 0.7
+      min_contrast: 0.5              # drop bleed-through ghosts (<0.5), keep dim real pages
 
   - name: "dpi_normalize_output"
     processor: "DPIfixer"

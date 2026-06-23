@@ -21,7 +21,7 @@ pipeline:
     rescale_threshold: 0.01
     processing_dpi: 100.0
     backend: auto
-    min_contrast: 0.7
+    min_contrast: 0.5
 - name: dpi_normalize_output
   processor: DPIfixer
   options:

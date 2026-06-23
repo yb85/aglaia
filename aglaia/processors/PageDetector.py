@@ -42,9 +42,11 @@ class PageOption(AbstractProcessorOption):
     #   range_i  = p95 - p5 inside page i
     #   relative = range_i / max(range_j)
     # Single-page scans always normalise to 1.0 → never dropped.
-    # Legitimate text pages typically sit > 0.7; bleed-through < 0.5.
-    # 0 = disabled; 0.7 default.
-    min_contrast: float = 0.7
+    # Well-lit pages sit > 0.7, but a real page in the gutter shadow / under
+    # uneven lighting can dip to ~0.6 (e.g. a 2-page spread where one side is
+    # brighter); bleed-through ghosts stay < 0.5. So the cutoff is 0.5 — drop
+    # ghosts, keep dim-but-real pages. 0 = disabled.
+    min_contrast: float = 0.5
     # Smart-merge tunables. See `smart_merge` / `_pair_score`.
     merge_threshold: float = 0.60
     merge_gap_weight: float = 0.4
@@ -245,10 +247,11 @@ class PageDetector(AbstractImageProcessor):
         "backend": _e("auto",
                       ["auto", "east", "dbnet", "apple_vision", "heuristic"],
                       "Text detector backend. auto = apple_vision on macOS else EAST → DBnet → heuristic."),
-        "min_contrast": _f(0.7, 0.0, 1.0, 0.05,
+        "min_contrast": _f(0.5, 0.0, 1.0, 0.05,
                            "Drop pages whose (p95−p5) pixel range is below this fraction "
-                           "of the max across all merged pages in the scan. Legitimate text "
-                           "> 0.7; bleed-through < 0.5. 0 = disabled."),
+                           "of the max across all merged pages in the scan. Well-lit pages "
+                           "> 0.7, dim/shadowed-but-real pages ~0.6; bleed-through < 0.5. "
+                           "0 = disabled."),
         "merge_threshold": _f(0.60, 0.0, 1.5, 0.05,
                               "Auto-merge any adjacent page pair whose mergeability "
                               "score is ≥ this. Lower = merge more aggressively.",
