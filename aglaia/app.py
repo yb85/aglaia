@@ -195,6 +195,38 @@ def _qt_app() -> "QApplication":
     app.setApplicationDisplayName("Aglaïa")
     app.setOrganizationName("Aglaïa")
     app.setDesktopFileName("aglaia")  # Linux: ties the window to aglaia.desktop
+
+    # macOS delivers a double-clicked .agl as a FileOpen event (not argv).
+    # Capture it: stash the path so the launcher loop opens that project
+    # instead of the StartupWindow; if a project window is already up, hand
+    # back to the launcher to reopen the new file.
+    from PySide6.QtCore import QEvent as _QEvent, QObject as _QObject
+
+    class _FileOpenFilter(_QObject):
+        def eventFilter(self, obj, ev):
+            try:
+                if ev.type() == _QEvent.Type.FileOpen:
+                    path = ev.file()
+                    if path:
+                        app.setProperty("aglaia_open_file", path)
+                        from PySide6.QtWidgets import QMainWindow
+                        live = [w for w in app.topLevelWidgets()
+                                if isinstance(w, QMainWindow) and w.isVisible()]
+                        if live:
+                            app.setProperty("aglaia_restart", "reopen")
+                            app.setProperty("aglaia_reopen_path", path)
+                            app.setProperty("aglaia_open_file", None)
+                            for w in live:
+                                w.close()
+                    return True
+            except Exception:
+                pass
+            return False
+
+    _fof = _FileOpenFilter()
+    app.installEventFilter(_fof)
+    app._aglaia_file_open_filter = _fof  # keep a ref alive
+
     if os.environ.get("AGLAIA_FLASH_DEBUG"):
         _install_flash_debug(app)
     # Install i18n translator BEFORE any widget is built so the first
@@ -259,6 +291,21 @@ def _qt_app() -> "QApplication":
                 pass
         except Exception:
             pass
+    # First launch as the bundled .app: auto-register the .agl ↔ app binding
+    # so double-clicking a project just works (no trip to Settings). Once,
+    # gated on running from a real .app (not a CLI/source run).
+    try:
+        from aglaia.app_data.filetype_register import (
+            filetype_registration_available, register_filetype)
+        if filetype_registration_available():
+            from aglaia.app_data import db as cfg
+            with cfg.session() as conn:
+                if not cfg.get(conn, cfg.KEY_FILETYPE_ASSOC_DONE, False):
+                    register_filetype()
+                    cfg.set(conn, cfg.KEY_FILETYPE_ASSOC_DONE, True)
+                    conn.commit()
+    except Exception as e:
+        print(f"filetype auto-register: skipped ({e})", file=sys.stderr)
     # First-run welcome / permissions screen — set expectations before macOS
     # pops its own camera / keychain prompts. Shown once (welcome_seen flag).
     try:
@@ -855,10 +902,18 @@ def main(argv: list[str] | None = None) -> int:
     restart_action: Optional[str] = None
     first = True
     while True:
+        if first:
+            # Drain a macOS FileOpen (double-clicked .agl) queued at launch so
+            # we open that project instead of the StartupWindow.
+            app.processEvents()
+        _open_file = app.property("aglaia_open_file")
         if first and cfg.has_inputs():
             choice = _choice_from_cfg(cfg)
             if choice is None:
                 return 2
+        elif _open_file:
+            app.setProperty("aglaia_open_file", None)
+            choice = _choice_for_open_path(Path(str(_open_file)))
         elif restart_action == "reopen":
             # In-place "Slim-down" round-trip: the prior window closed
             # (its chain is stopped, so the DB file is free), optionally

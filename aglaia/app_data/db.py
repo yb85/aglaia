@@ -97,6 +97,8 @@ KEY_DEBUG_OVERLAYS = "debug_overlays_shown"   # bool — Debug viewer's "Show
                                   # sessions.
 KEY_WELCOME_SEEN = "welcome_seen"  # bool — first-run welcome/permissions
                                    # screen has been shown + dismissed.
+KEY_FILETYPE_ASSOC_DONE = "filetype_assoc_done"  # bool — auto-registered the
+                                   # .agl ↔ app binding once (first .app launch).
 KEY_MISTRAL_BATCH = "mistral_batch"  # bool — Cloud OCR (Mistral) submits a
                                    # batch job (cheaper, async) instead of a
                                    # synchronous OCR run. Remembered across
@@ -127,6 +129,7 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_LIVE_OCR: False,
     KEY_DEBUG_OVERLAYS: False,
     KEY_WELCOME_SEEN: False,
+    KEY_FILETYPE_ASSOC_DONE: False,
     KEY_MISTRAL_BATCH: False,
 }
 

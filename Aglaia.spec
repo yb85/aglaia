@@ -133,6 +133,11 @@ datas = [
     # reference by name — only the SOURCE path changed.
     (str(REPO / "aglaia" / "assets" / "app" / "Aglaia.icns"), "aglaia/app_data"),
     (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "aglaia/app_data"),
+    # CFBundleTypeIconFile resolves the document icon relative to
+    # Contents/Resources/ ROOT — so the .agl icon must sit there, not only in
+    # the aglaia/app_data subdir (where filetype_register reads it). Drop a
+    # copy at the root for the Finder file icon.
+    (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "."),
 ]
 
 # Surya/transformers/huggingface_hub ship YAML configs + tokenizer
