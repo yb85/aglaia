@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-_ICON_DIR = Path(__file__).resolve().parent / "modes"
+from lib.assets import asset_path as _asset_path
+_ICON_DIR = _asset_path("modes")
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class PipelineMode:
     name: str
     description: str
     pipeline: str  # yaml filename, resolved under app_data.pipelines_dir()
-    icon: str      # basename in lib/app_data/modes/ (no extension)
+    icon: str      # basename in assets/modes/ (no extension)
 
     def icon_path(self, *, prefer_svg: bool = True) -> Optional[Path]:
         exts = ("svg", "png") if prefer_svg else ("png", "svg")

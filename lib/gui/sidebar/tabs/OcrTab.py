@@ -385,7 +385,7 @@ class OcrTab(QWidget):
     # (paddle, surya), with the legacy Apple Vision engine last.
     _ENGINE_ORDER = ("apple_docs", "mistral_cloud", "paddle_vl", "surya",
                      "apple_vision")
-    # Per-engine card icon (bundled SVGs in lib/gui/icons/). Apple engines →
+    # Per-engine card icon (bundled SVGs in assets/icons/). Apple engines →
     # apple mark, Mistral → Mistral mark, generic VLMs → an OCR glyph.
     _ENGINE_ICONS = {
         "apple_docs": "apple",

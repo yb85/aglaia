@@ -26,7 +26,7 @@ import platform as _plat
 import sys as _sys
 
 REPO = Path(SPECPATH).resolve()
-ICON_ICNS = str(REPO / "lib" / "app_data" / "Aglaia.icns")
+ICON_ICNS = str(REPO / "assets" / "app" / "Aglaia.icns")
 
 # ── code signing ─────────────────────────────────────────────────────
 #
@@ -109,22 +109,25 @@ if _llama_subdir is not None:
             _llama_binaries.append((str(entry), "."))
 
 # ── data files shipped inside the .app ───────────────────────────────
+# Static assets now live in the top-level `assets/` tree and are resolved at
+# runtime via `lib.assets.asset_path` (-> <MEIPASS>/assets in the bundle), so
+# they must ship under "assets/…". We ship only the subdirs the app loads at
+# runtime — NOT the large site-only brand backgrounds (assets/brand/aglaia_bg*,
+# aglaia_usage) — to keep the bundle lean.
 datas = [
     (str(REPO / "config"), "config"),
-    (str(REPO / "lib" / "gui" / "icons"), "lib/gui/icons"),
-    (str(REPO / "lib" / "app_data" / "model-list.json"),
-     "lib/app_data"),
-    (str(REPO / "lib" / "app_data" / "aglaia2-1024.png"),
-     "lib/app_data"),
-    # Theme-aware wordmarks for the About dialog title.
-    (str(REPO / "lib" / "app_data" / "aglaia-light.png"),
-     "lib/app_data"),
-    (str(REPO / "lib" / "app_data" / "aglaia-dark.png"),
-     "lib/app_data"),
-    (str(REPO / "lib" / "app_data" / "Aglaia.icns"),
-     "lib/app_data"),
-    (str(REPO / "lib" / "app_data" / "AglaiaDoc.icns"),
-     "lib/app_data"),
+    (str(REPO / "assets" / "icons"), "assets/icons"),
+    (str(REPO / "assets" / "modes"), "assets/modes"),
+    # Theme-aware wordmarks (About dialog / startup) + the 1024 logo.
+    (str(REPO / "assets" / "brand" / "aglaia-light.png"), "assets/brand"),
+    (str(REPO / "assets" / "brand" / "aglaia-dark.png"), "assets/brand"),
+    (str(REPO / "assets" / "brand" / "aglaia2-1024.png"), "assets/brand"),
+    (str(REPO / "lib" / "app_data" / "model-list.json"), "lib/app_data"),
+    # App + document icons. Kept at the original "lib/app_data" bundle path the
+    # macOS plist (CFBundleIconFile / CFBundleTypeIconFile) + filetype_register
+    # reference by name — only the SOURCE path changed.
+    (str(REPO / "assets" / "app" / "Aglaia.icns"), "lib/app_data"),
+    (str(REPO / "assets" / "app" / "AglaiaDoc.icns"), "lib/app_data"),
 ]
 
 # Surya/transformers/huggingface_hub ship YAML configs + tokenizer

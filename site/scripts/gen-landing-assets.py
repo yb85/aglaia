@@ -241,8 +241,8 @@ with full_project(BAL) as conn:
     save(fith(final_img(conn, s, "A"), 820), "band-slide-5.jpg", q=68)
 
 
-# ── continuity-camera usage diagram (line-art, app_data) ─────────────
-save(fitw(Image.open(ROOT / "lib" / "app_data" / "aglaia_usage.png").convert("RGB"), 760),
+# ── continuity-camera usage diagram (line-art, assets/brand) ─────────
+save(fitw(Image.open(ROOT / "assets" / "brand" / "aglaia_usage.png").convert("RGB"), 760),
      "usage.jpg", q=86)
 
 # NOTE: replay-distorted.webp / replay-restored.webp (the smart-replay

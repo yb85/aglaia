@@ -74,7 +74,8 @@ from lib.gui.colors import (
 # `stroke="currentColor"` so we swap that in for the requested color before
 # handing the SVG to QSvgRenderer — gives us palette-aware icons without
 # shipping multiple colour variants.
-_ICONS_DIR = Path(__file__).parent / "icons"
+from lib.assets import asset_path as _asset_path
+_ICONS_DIR = _asset_path("icons")
 
 
 # Extra QSS layered on top of qdarktheme's base stylesheet. Keeps things
@@ -640,7 +641,7 @@ def _render_svg_tinted(name: str, color: Optional[str], size: int):
 
 def lucide(name: str, *, color: Optional[str] = None, size: int = 20) -> QIcon:
     """Lucide-style icon (https://lucide.dev) loaded from the bundled
-    `lib/gui/icons/*.svg`. ``currentColor`` is retinted to `color` (or
+    `assets/icons/*.svg`. ``currentColor`` is retinted to `color` (or
     palette text). Returns an empty QIcon when the SVG is missing."""
     pix = _render_svg_tinted(name, color, size)
     return QIcon(pix) if pix is not None else QIcon()

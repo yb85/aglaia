@@ -644,9 +644,9 @@ class StartupWindow(QDialog):
         # Wordmark image instead of styled text — pick the variant that
         # matches the active colour scheme; fall back to text if the asset
         # is missing.
-        from lib import app_data
+        from lib.assets import asset_path
         scheme = "dark" if active_palette_name() == "dark" else "light"
-        logo_path = Path(app_data.__file__).parent / f"aglaia-{scheme}.png"
+        logo_path = asset_path("brand", f"aglaia-{scheme}.png")
         pm = QPixmap(str(logo_path))
         if not pm.isNull():
             dpr = self.devicePixelRatioF() or 1.0

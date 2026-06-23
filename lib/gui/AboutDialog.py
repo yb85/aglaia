@@ -71,7 +71,8 @@ def _logo_data_uri(target_h: int = 44) -> str | None:
             win = app.palette().color(QPalette.ColorRole.Window)
             dark = win.lightness() < 128
         fname = "aglaia-dark.png" if dark else "aglaia-light.png"
-        path = Path(__file__).resolve().parents[1] / "app_data" / fname
+        from lib.assets import asset_path
+        path = asset_path("brand", fname)
         if not path.is_file():
             return None
         raw = path.read_bytes()
