@@ -24,8 +24,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QHBoxLayout, QHeaderView, QLabel,
-    QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QPushButton, QSizePolicy, QSpinBox, QStyledItemDelegate, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from aglaia.gui.colors import COLOR_PRIMARY
@@ -34,6 +34,35 @@ from aglaia.storage.db import db_session
 
 COL_CHECK, COL_THUMB, COL_NAME, COL_DPI, COL_SOURCE, COL_TIME = range(6)
 _THUMB_PX = 44
+
+
+class _DpiDelegate(QStyledItemDelegate):
+    """Integer-DPI editor for the DPI column. A plain QSpinBox with an
+    OPAQUE background filling the whole cell — the default editor let the
+    cell's own text + pencil icon show through (the "doubled text" overlay)."""
+
+    def createEditor(self, parent, option, index):  # noqa: N802
+        sb = QSpinBox(parent)
+        sb.setRange(1, 4000)
+        sb.setAccelerated(True)
+        sb.setAutoFillBackground(True)   # opaque → no bleed-through
+        sb.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        return sb
+
+    def setEditorData(self, editor, index):  # noqa: N802
+        try:
+            editor.setValue(int(round(float(
+                index.data(Qt.ItemDataRole.EditRole) or 0))))
+        except Exception:
+            editor.setValue(0)
+
+    def setModelData(self, editor, model, index):  # noqa: N802
+        editor.interpretText()
+        model.setData(index, float(editor.value()), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):  # noqa: N802
+        # Fill the entire cell so nothing underneath peeks out.
+        editor.setGeometry(option.rect)
 
 
 def _format_source(source: str, source_ref: Optional[str]) -> str:
@@ -119,6 +148,7 @@ class ScansDpiTab(QWidget):
         hh.setSectionResizeMode(COL_SOURCE, QHeaderView.ResizeMode.Stretch)
         # The thumbnail column is not meaningfully sortable.
         hh.sectionClicked.connect(self._on_header_clicked)
+        self.table.setItemDelegateForColumn(COL_DPI, _DpiDelegate(self.table))
         self.table.itemChanged.connect(self._on_item_changed)
         # Single click on a DPI cell opens its editor (no double-click needed).
         self.table.cellClicked.connect(self._on_cell_clicked)
@@ -213,6 +243,16 @@ class ScansDpiTab(QWidget):
     def _selected_rows(self) -> list[int]:
         return sorted({idx.row() for idx in self.table.selectionModel().selectedRows()})
 
+    def _checked_rows(self) -> list[int]:
+        """Rows whose checkbox is ticked — the explicit multi-edit set
+        (independent of which row is highlighted)."""
+        out = []
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, COL_CHECK)
+            if it is not None and it.checkState() == Qt.CheckState.Checked:
+                out.append(r)
+        return out
+
     def _on_cell_clicked(self, row: int, col: int) -> None:
         """Single click on a DPI cell jumps straight into its editor."""
         if col != COL_DPI:
@@ -225,21 +265,32 @@ class ScansDpiTab(QWidget):
         if self._updating:
             return
         col, row = item.column(), item.row()
-        sel = self._selected_rows()
-        propagate = row in sel and len(sel) > 1
         self._updating = True
         try:
-            if col == COL_CHECK and propagate:
-                state = item.checkState()
-                for r in sel:
-                    self.table.item(r, COL_CHECK).setCheckState(state)
+            if col == COL_CHECK:
+                # Toggling one checkbox while several rows are highlighted
+                # toggles all of them (selection-driven, as before).
+                sel = self._selected_rows()
+                if row in sel and len(sel) > 1:
+                    state = item.checkState()
+                    for r in sel:
+                        self.table.item(r, COL_CHECK).setCheckState(state)
             elif col == COL_DPI:
                 val = float(item.data(Qt.ItemDataRole.EditRole) or 0)
                 if val <= 0:
                     return
-                if propagate:
-                    for r in sel:
-                        self.table.item(r, COL_DPI).setData(Qt.ItemDataRole.EditRole, val)
+                # Editing a CHECKED row's DPI applies to every checked row —
+                # the checkbox is the explicit multi-edit set (the user may
+                # have checked rows without highlighting them).
+                checked = self._checked_rows()
+                if row in checked and len(checked) > 1:
+                    # Capture item refs before mutating — setData re-sorts the
+                    # table live, so row indices would go stale mid-loop;
+                    # QTableWidgetItem refs survive the re-sort.
+                    cells = [self.table.item(r, COL_DPI) for r in checked]
+                    for cell in cells:
+                        if cell is not None and cell is not item:
+                            cell.setData(Qt.ItemDataRole.EditRole, val)
         finally:
             self._updating = False
 
