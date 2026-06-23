@@ -287,10 +287,11 @@ class CaptureTab(QWidget):
         self.btn_full_calibrate.setStyleSheet(_BTN_QSS)
         self.btn_full_calibrate.setToolTip(
             self.tr(
-                "Print A4_chessboard.pdf at 100% (not 'fit to page') and glue it "
-                "to a rigid flat backing. Run, then tilt the board to all sides "
-                "and into the frame corners across the samples; keep it still and "
-                "glare-free. Last sample: hold it flat at book distance."
+                "Print the board in assets/calibration/ at 100% (not 'fit to "
+                "page') and glue it to a rigid flat backing. Run, then tilt the "
+                "board to all sides and into the frame corners across the "
+                "samples; keep it still and glare-free. Last sample: hold it "
+                "flat at book distance."
             )
         )
         self.btn_dpi_calibrate = QPushButton(self.tr("Calibrate DPI"))

@@ -8,9 +8,9 @@ Capture mode benefits from a calibrated camera matrix to:
 
 ## Target
 
-`A4_chessboard.pdf` / `letter_chessboard.pdf` (repo root). We **generate**
-these ourselves — `scripts/gen_calibration_board.py` (needs the `dev` extra for
-`reportlab`) — so the grid geometry is fixed and hard-coded:
+`assets/calibration/calibration-chessboard_{A4,Letter}_7x10sq_25mm.pdf`. We
+**generate** these ourselves — `scripts/gen_calibration_board.py` (needs the
+`dev` extra for `reportlab`) — so the grid geometry is fixed and hard-coded:
 
 | Parameter | Value | Config key |
 |---|---|---|

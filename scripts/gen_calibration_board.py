@@ -18,8 +18,8 @@ Run (dev extra installs reportlab):
 
     uv run --extra dev python scripts/gen_calibration_board.py
 
-Outputs `A4_chessboard.pdf` and `letter_chessboard.pdf` at the repo root
-(the print targets the GUI points the user at).
+Outputs self-describing PDFs into `assets/calibration/`, e.g.
+`calibration-chessboard_A4_7x10sq_25mm.pdf` (paper · squares · square size).
 
 ═══════════════════════════════════════════════════════════════════════════
 PHYSICAL BOARD PREPARATION
@@ -106,6 +106,19 @@ def generate_calibration_board(filename, paper_size, square_size_mm=SQUARE_SIZE_
                 x = start_x + (col * square_size_pt)
                 y = start_y + (row * square_size_pt)
                 c.rect(x, y, square_size_pt, square_size_pt, stroke=0, fill=1)
+
+    # Grey caption in the bottom margin: purpose + square size + the one
+    # instruction people forget. Anchored to the page bottom so it always
+    # lands in the margin regardless of paper size.
+    c.setFillColorRGB(0.5, 0.5, 0.5)
+    c.setFont("Helvetica", 8.5)
+    c.drawCentredString(
+        page_width / 2.0, 30,
+        f"Aglaïa camera-calibration chessboard  ·  {square_size_mm} mm squares"
+        f"  ·  print at 100% (no scaling)")
+    c.drawCentredString(
+        page_width / 2.0, 18,
+        "Glue to a flat, rigid support before use.")
     c.save()
 
     margin_x_mm = (page_width - board_width_pt) / 2.0 / mm
@@ -118,14 +131,18 @@ def generate_calibration_board(filename, paper_size, square_size_mm=SQUARE_SIZE_
     print()
 
 
+def _board_filename(paper_name: str) -> str:
+    """Self-describing name: paper · squares · square size."""
+    return (f"calibration-chessboard_{paper_name}_"
+            f"{COLS}x{ROWS}sq_{SQUARE_SIZE_MM}mm.pdf")
+
+
 if __name__ == "__main__":
-    # Output at the repo root — the print targets the GUI references.
-    output_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out_dir = os.path.join(repo_root, "assets", "calibration")
+    os.makedirs(out_dir, exist_ok=True)
 
-    print("Generating A4 board…")
-    generate_calibration_board(
-        os.path.join(output_dir, "A4_chessboard.pdf"), A4)
-
-    print("Generating US-Letter board…")
-    generate_calibration_board(
-        os.path.join(output_dir, "letter_chessboard.pdf"), LETTER)
+    for paper_name, paper_size in (("A4", A4), ("Letter", LETTER)):
+        print(f"Generating {paper_name} board…")
+        generate_calibration_board(
+            os.path.join(out_dir, _board_filename(paper_name)), paper_size)

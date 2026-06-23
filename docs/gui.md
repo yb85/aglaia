@@ -95,7 +95,7 @@ The three views surface it differently, all via `MainWindow.cell_disable_states`
 - **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `config/camera_params.json`. Restart capture to pick up the new calibration.
 - **Calibrate DPI** — single-sample, updates only the DPI field while keeping the existing camera matrix.
 
-Print `A4_chessboard.pdf` (in repo root) on real A4 to use as the calibration target. Default board is 5×8 inner corners at 30mm squares (see `config/default.yml:calibration`).
+Print `assets/calibration/calibration-chessboard_A4_7x10sq_25mm.pdf` on real A4 (at 100%) as the calibration target — generate it with `scripts/gen_calibration_board.py`. Default board is 6×9 inner corners at 25mm squares (see `docs/calibration.md`).
 
 ## Voice commands
 
