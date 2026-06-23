@@ -336,21 +336,23 @@ class ScansDpiTab(QWidget):
         fw = QApplication.focusWidget()
         if isinstance(fw, QAbstractSpinBox):
             fw.clearFocus()
-        # Reprocess only scans whose DPI actually CHANGED — and only among
-        # checked rows. Setting the DPI deletes that scan's processing data
-        # and reruns it from raw (reprocess_active_scans wipes branches +
-        # the node subtree, then re-enqueues).
+        # Reprocess every scan whose DPI actually CHANGED — regardless of its
+        # checkbox. The checkboxes are ONLY a group-edit convenience (edit one
+        # checked row → all checked rows follow); they do NOT gate what gets
+        # applied. Setting the DPI deletes that scan's processing data and
+        # reruns it from raw (reprocess wipes branches + the node subtree,
+        # then re-enqueues).
         edits: dict[int, float] = {}   # scan_id → new dpi
         images: dict[int, float] = {}  # image_id → new dpi
         for r in range(self.table.rowCount()):
-            if self.table.item(r, COL_CHECK).checkState() != Qt.CheckState.Checked:
-                continue
             dpi_item = self.table.item(r, COL_DPI)
+            chk = self.table.item(r, COL_CHECK)
+            if dpi_item is None or chk is None:
+                continue
             dpi = float(dpi_item.data(Qt.ItemDataRole.EditRole) or 0)
             orig = float(dpi_item.data(Qt.ItemDataRole.UserRole) or 0)
             if dpi <= 0 or dpi == orig:
                 continue  # unchanged → nothing to reprocess
-            chk = self.table.item(r, COL_CHECK)
             edits[int(chk.data(Qt.ItemDataRole.UserRole))] = dpi
             images[int(chk.data(Qt.ItemDataRole.UserRole + 1))] = dpi
         if not edits:
