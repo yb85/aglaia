@@ -587,19 +587,21 @@ class ScansGalleryView(QWidget):
             # eat their own clicks first via standard child hit-test.
             self._install_cell_click(img_host, int(node_id), label)
         # Per-page disable toggle — top-left. Only shown for toggleable
-        # steps (linear COORDINATE/PIXEL_VALUE processors); a red "ban"
-        # glyph means this step is currently skipped for this page, a
-        # neutral "circle" means active. Click flips it (reruns the page).
+        # steps (linear COORDINATE/PIXEL_VALUE processors). A red struck-out
+        # "wrench-off" glyph means this step is currently skipped for this
+        # page; a neutral "wrench" means active. Click flips it (reruns the
+        # page). A permanent dark scrim pill keeps the icon legible on any
+        # image — the old faint grey glyph at 0.55 opacity was invisible.
         if toggleable and node_id is not None:
-            tog_size = 28
-            tog_glyph = "ban" if is_disabled else "circle"
-            tog_color = COLOR_ERROR if is_disabled else COLOR_FONT_PLACEHOLDER
+            tog_size = 26
+            tog_glyph = "wrench-off" if is_disabled else "wrench"
+            tog_color = COLOR_ERROR if is_disabled else COLOR_FONT_ON_BUTTON
             gpix = _lp(tog_glyph, color=tog_color, size=tog_size)
             gpix.setDevicePixelRatio(2.0)
             tog = QToolButton(img_host)
             tog.setIcon(QPixmap(gpix))
             tog.setIconSize(QSize(tog_size, tog_size))
-            tog.setFixedSize(tog_size + 4, tog_size + 4)
+            tog.setFixedSize(tog_size + 10, tog_size + 10)
             tog.setCursor(Qt.CursorShape.PointingHandCursor)
             tog.setAutoRaise(False)
             tog.setToolTip(
@@ -608,13 +610,11 @@ class ScansGalleryView(QWidget):
                 self.tr("Click to disable this step for this page")
             )
             tog.setStyleSheet(
-                "QToolButton{background:transparent; border:none; padding:0; margin:0;}"
-                f"QToolButton:hover{{background:{COLOR_OUTLINE_GHOST}; border-radius:4px;}}"
+                "QToolButton{"
+                f"background:{COLOR_SCRIM_MEDIUM}; border:none; "
+                "border-radius:6px; padding:0; margin:0;}"
+                f"QToolButton:hover{{background:{COLOR_SCRIM_STRONG};}}"
             )
-            from PySide6.QtWidgets import QGraphicsOpacityEffect
-            seff = QGraphicsOpacityEffect(tog)
-            seff.setOpacity(0.9 if is_disabled else 0.55)
-            tog.setGraphicsEffect(seff)
             tog.move(6, 6)
             tog.raise_()
             tog.clicked.connect(
@@ -677,14 +677,14 @@ class ScansGalleryView(QWidget):
             trash_btn.raise_()
 
         if is_disabled and not is_trashed:
-            # Faint red wash + big "ban" glyph so a disabled stage reads as
-            # "skipped" without hiding the (passthrough) image underneath.
+            # Faint red wash + big "wrench-off" glyph so a disabled stage reads
+            # as "skipped" without hiding the (passthrough) image underneath.
             from PySide6.QtWidgets import QGraphicsOpacityEffect
             deff = QGraphicsOpacityEffect(img_lbl)
             deff.setOpacity(0.55)
             img_lbl.setGraphicsEffect(deff)
             ban_size = min(96, max(48, int(cell_h * 0.35)))
-            bpix = _lp("ban", color=COLOR_ERROR, size=ban_size)
+            bpix = _lp("wrench-off", color=COLOR_ERROR, size=ban_size)
             bpix.setDevicePixelRatio(2.0)
             ban_lbl = QLabel(img_host)
             ban_lbl.setPixmap(QPixmap(bpix))

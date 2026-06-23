@@ -645,6 +645,12 @@ class ScanItemWidget(QWidget):
                     self.debug_requested.emit(nid, txt))
 
             is_trashed = data.get("trashed", False)
+            # Is the displayed stage per-page disabled? (mirrors the gallery
+            # treatment: dim wash + big struck-out "wrench-off" filigrane).
+            disabled_here = False
+            if node_info and node_info.get("node_id") is not None:
+                _tog_d, disabled_here = step_states.get(
+                    int(node_info["node_id"]), (False, False))
             if is_trashed:
                 # Repaint the thumb with a 55 % white wash + a large
                 # faint trash glyph centred on top — reads as "muted /
@@ -678,6 +684,34 @@ class ScanItemWidget(QWidget):
                 _wp.end()
                 lbl.setPixmap(washed)
                 lbl.setStyleSheet(f"border: 1px solid {COLOR_OUTLINE_STRONG}; "
+                                  f"background-color: {COLOR_BG_HINT}; "
+                                  "border-radius: 4px;")
+            elif disabled_here:
+                # Disabled stage: dim wash + centred red "wrench-off" glyph,
+                # same affordance as the gallery's disabled overlay. Painted
+                # into the pixmap (not a QGraphicsEffect) so it composes with
+                # the parent thumbs_container opacity effect.
+                washed = QPixmap(pix.size())
+                washed.fill(Qt.GlobalColor.transparent)
+                _wp = QPainter(washed)
+                _wp.drawPixmap(0, 0, pix)
+                _wp.fillRect(washed.rect(), qcolor(COLOR_FONT_DIM))
+                from aglaia.gui.theme import lucide_pixmap as _lp
+                fil_size = max(24, int(min(pix.width(), pix.height()) * 0.45))
+                fil = _lp("wrench-off", color=COLOR_ERROR, size=fil_size)
+                if not fil.isNull():
+                    dpr = max(int(fil.devicePixelRatio()), 1)
+                    fw = fil.width() // dpr
+                    fh = fil.height() // dpr
+                    _wp.setOpacity(0.7)
+                    _wp.drawPixmap(
+                        (pix.width() - fw) // 2,
+                        (pix.height() - fh) // 2,
+                        fw, fh, fil,
+                    )
+                _wp.end()
+                lbl.setPixmap(washed)
+                lbl.setStyleSheet(f"border: 1px solid {COLOR_ERROR}; "
                                   f"background-color: {COLOR_BG_HINT}; "
                                   "border-radius: 4px;")
             else:
