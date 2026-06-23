@@ -41,6 +41,16 @@ def _client(api_key: str):
     return Mistral(api_key=api_key)
 
 
+def _norm_status(s) -> str:
+    """Normalise a job status to a bare upper-case string. The SDK may hand
+    back a str-enum, an enum whose ``str()`` is ``BatchJobStatus.SUCCESS``,
+    or mixed case — so `get` and `list` agreed on the wire but compared
+    unequal in code ('Check result' said *processing* while the Jobs table
+    said *SUCCESS*)."""
+    s = getattr(s, "value", s)
+    return str(s or "").rsplit(".", 1)[-1].strip().upper()
+
+
 # ── PDF chunking ─────────────────────────────────────────────────────────
 def _chunk_pdfs(eng: MistralCloudEngine, img_rows: list[dict]
                 ) -> list[tuple[bytes, int]]:
@@ -111,7 +121,7 @@ def submit(api_key: str, img_rows: list[dict], run_ids: list[int],
 def poll(api_key: str, job_id: str) -> tuple[str, Optional[str]]:
     """Return ``(status, error_text|None)`` for a job."""
     job = _client(api_key).batch.jobs.get(job_id=job_id)
-    status = str(getattr(job, "status", "") or "")
+    status = _norm_status(getattr(job, "status", ""))
     err = getattr(job, "errors", None)
     return status, (str(err) if err else None)
 
@@ -121,7 +131,7 @@ def fetch_markdown(api_key: str, job_id: str) -> list[str]:
     order. Raises if the job isn't SUCCESS or the output is unreadable."""
     client = _client(api_key)
     job = client.batch.jobs.get(job_id=job_id)
-    status = str(getattr(job, "status", "") or "")
+    status = _norm_status(getattr(job, "status", ""))
     if status != "SUCCESS":
         raise RuntimeError(f"job {job_id} not ready (status={status})")
     out_id = getattr(job, "output_file", None) or getattr(job, "output_file_id", None)
@@ -187,7 +197,7 @@ def list_jobs(api_key: str) -> list[dict]:
         md = getattr(j, "metadata", None) or {}
         rows.append({
             "id": getattr(j, "id", ""),
-            "status": str(getattr(j, "status", "") or ""),
+            "status": _norm_status(getattr(j, "status", "")),
             "created_at": _job_created_iso(j),
             "project": md.get(META_PROJECT, ""),
             "chunk": md.get(META_CHUNK, ""),
