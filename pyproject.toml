@@ -49,8 +49,13 @@ paddle = [
 # Cross-platform GUI (PySide6 + theme). Decoupled from `macos` so a
 # CLI-only / headless install (the base dependencies) stays slim — no
 # Qt download. The capture GUI on macOS needs `gui` + `macos` together.
+# GUI uses only QtCore/QtGui/QtSvg/QtWidgets — all in pyside6-essentials.
+# Deliberately NOT the full `pyside6` meta-package: that pulls
+# pyside6-addons → QtWebEngine, which (a) aglaia never imports, (b) bloats
+# the install to ~2 GB, and (c) ships a nested helper app that fails
+# Homebrew's ad-hoc codesign ("code object is not signed at all").
 gui = [
-    "pyside6>=6.7.0",
+    "pyside6-essentials>=6.7.0",
     "pyqtdarktheme>=2.1.0",
 ]
 # Cross-platform offline voice control (Linux/Windows; macOS uses Apple
