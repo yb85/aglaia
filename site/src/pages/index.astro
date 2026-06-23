@@ -1,6 +1,9 @@
 ---
 const GITHUB = 'https://github.com/yb85/aglaia';
-const LATEST = `${GITHUB}/releases/latest`;
+// Direct download of the newest macOS (Apple Silicon) DMG — the release CI
+// publishes a stable-named copy so this URL never needs the version. Avoids
+// dumping new users on the GitHub releases page.
+const DOWNLOAD = `${GITHUB}/releases/latest/download/Aglaia-macos-arm64.dmg`;
 const KOFI = 'https://ko-fi.com/yb_85';
 
 // Icons match the app sidebar tabs (lucide): camera, sliders-horizontal,
@@ -51,7 +54,7 @@ const powers = [
           <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
           Tip
         </a>
-        <a class="btn btn--sm" href={LATEST} data-download>Download</a>
+        <a class="btn btn--sm" href={DOWNLOAD} data-download>Download</a>
       </nav>
     </header>
 
@@ -69,7 +72,7 @@ const powers = [
             <span class="lede__l3">No flatbed, no bulky rig: just you, your laptop and your phone.</span>
           </p>
           <div class="cta reveal">
-            <a class="btn" href={LATEST} data-download>Download for macOS</a>
+            <a class="btn" href={DOWNLOAD} data-download>Download for macOS</a>
             <a class="btn btn--ghost" href="/docs">Read the docs →</a>
           </div>
           <p class="fineprint reveal">Linux and Windows versions coming soon…</p>
@@ -292,7 +295,7 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
           <h2>Digitize your shelf.</h2>
           <p>Free, source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, and yours to extend.</p>
           <div class="cta">
-            <a class="btn btn--lg" href={LATEST} data-download>Download for macOS</a>
+            <a class="btn btn--lg" href={DOWNLOAD} data-download>Download for macOS</a>
             <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
           </div>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>

@@ -114,6 +114,14 @@ jobs:
           cd dist
           shasum -a 256 Aglaia-*.dmg | tee SHA256SUMS.txt
 
+      - name: Stable-named copy (version-agnostic direct download)
+        # The landing page links to
+        #   releases/latest/download/Aglaia-macos-arm64.dmg
+        # so "Download for macOS" always grabs the newest build without
+        # threading the version through the URL. Ship it alongside the
+        # versioned asset (which the Cask / formula pin by sha256).
+        run: cp dist/Aglaia-*.dmg dist/Aglaia-macos-arm64.dmg
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
