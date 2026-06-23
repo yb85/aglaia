@@ -2956,7 +2956,10 @@ class MainWindow(QMainWindow):
             # (scan_imported, branch_ready). Yanking them to the newest
             # scan mid-review is annoying. `reload()` without
             # `jump_to_latest` keeps `prev_scan` + `prev_stage`.
-            self._scans_gallery.reload()
+            # `invalidate_nodes`: branch_ready means a (re)processed scan
+            # just landed new node ids — drop the cached node_ids so the
+            # per-stage toggle doesn't point at a dead node.
+            self._scans_gallery.reload(invalidate_nodes=True)
 
     # ── live-OCR debounced scheduler ──────────────────────────────────
 
@@ -3504,7 +3507,10 @@ class MainWindow(QMainWindow):
                 pass
         elif getattr(self, "_view_mode", "grid") == "gallery":
             try:
-                self._scans_gallery.reload()
+                # The toggle reruns the scan → new node ids; drop the
+                # gallery's stale (scan,stage)->node_id cache so the wrench
+                # state + click target track the rebuilt tree.
+                self._scans_gallery.reload(invalidate_nodes=True)
             except Exception:
                 pass
         else:

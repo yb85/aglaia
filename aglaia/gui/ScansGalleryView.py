@@ -200,7 +200,17 @@ class ScansGalleryView(QWidget):
 
     # ── public API ─────────────────────────────────────────────────
     def reload(self, *, scan_to_focus: Optional[int] = None,
-               jump_to_latest: bool = False) -> None:
+               jump_to_latest: bool = False,
+               invalidate_nodes: bool = False) -> None:
+        # A reprocess rebuilds a scan's nodes with NEW ids, but the cache
+        # keys the resolved `node_id` by (scan_id, stage). On a data-change
+        # reload (toggle, branch_ready) drop the whole cache so node_ids
+        # re-resolve fresh — otherwise the per-stage disable toggle reads a
+        # dead node_id (wrong wrench state; clicking can't re-enable). Plain
+        # reloads (thumb-ready ticks) keep the cache: node_ids are unchanged
+        # there and re-decoding pixmaps every 120 ms would thrash.
+        if invalidate_nodes:
+            self._cache.clear()
         prev_scan = self._scans[self._scan_idx][0] if self._scans else None
         prev_stage = self._stages[self._stage_idx] if self._stages else None
         self._scans = list(self._scans_provider() or [])
