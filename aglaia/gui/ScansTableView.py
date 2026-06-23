@@ -235,7 +235,7 @@ class _ThumbCell(QLabel):
         if self._disabled:
             self.setStyleSheet(
                 f"QLabel{{border: 2px solid {COLOR_ERROR}; "
-                "border-radius: 2px; background: transparent;}}")
+                f"border-radius: 2px; background: transparent;}}")
         elif self._selected:
             self.setStyleSheet(
                 f"QLabel{{border: 2px solid {SELECTED_BORDER}; "
@@ -243,7 +243,7 @@ class _ThumbCell(QLabel):
         else:
             self.setStyleSheet(
                 f"QLabel{{border: 1px solid {COLOR_OUTLINE_GHOST}; "
-                "border-radius: 2px; background: transparent;}}")
+                f"border-radius: 2px; background: transparent;}}")
 
     def mousePressEvent(self, ev):  # noqa: N802
         if ev.button() == Qt.MouseButton.LeftButton and self._toggleable:
@@ -696,6 +696,20 @@ class ScansTableView(QScrollArea):
         self._v.setSpacing(0)             # zero-gap rows for the table feel
         self._v.addStretch(1)
         self.setWidget(self._host)
+
+        # Thumbnails build asynchronously (ThumbLoader thread pool). Each row
+        # sets its thumb pixmap once at build time, so when a thumb lands later
+        # we must rebuild to pick it up — otherwise the cells stay blank until
+        # the user switches views. Coalesce the `ready` burst into one refresh,
+        # only while visible (grid + gallery do the same).
+        self._thumb_ready_timer = QTimer(self)
+        self._thumb_ready_timer.setSingleShot(True)
+        self._thumb_ready_timer.setInterval(120)
+        self._thumb_ready_timer.timeout.connect(
+            lambda: self.refresh() if self.isVisible() else None)
+        _ready = getattr(thumb_loader, "ready", None)
+        if _ready is not None:
+            _ready.connect(lambda _img_id: self._thumb_ready_timer.start())
 
     def set_thumb_height(self, h: int) -> None:
         h = max(MIN_THUMB_H, min(MAX_THUMB_H, int(h)))

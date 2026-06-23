@@ -117,17 +117,26 @@ class _ThumbJob(QRunnable):
         self._done = done
 
     def run(self) -> None:  # noqa: D401 — Qt API
+        # `ok` means "a thumb is now available", NOT "the job ran". If the
+        # source image was garbage-collected (e.g. a reprocess dropped a branch,
+        # so a stale card still references the gone image_id), we must report
+        # ok=False — reporting True makes the view re-request, which misses, which
+        # re-schedules this same doomed job: an infinite loop that starves the
+        # thumb thread-pool (every other thumb stays blank) and pegs the GUI.
         ok = False
         try:
             conn = _thumb_worker_conn(self._db_path)
             thumbs = ThumbRepo(conn)
-            if thumbs.get(self._image_id, self._max_dim) is None:
+            if thumbs.get(self._image_id, self._max_dim) is not None:
+                ok = True                      # already built
+            else:
                 src = ImageRepo(conn).get(self._image_id)
                 if src is not None:
                     blob, w, h = make_thumb(bytes(src["blob"]), self._max_dim)
                     thumbs.upsert(self._image_id, self._max_dim, w, h, blob)
                     conn.commit()
-            ok = True
+                    ok = True                  # built it
+                # src is None → image gone → ok stays False, no re-request.
         except Exception:
             ok = False
         # Emitted from the worker thread; the receiver (ThumbLoader) lives on
