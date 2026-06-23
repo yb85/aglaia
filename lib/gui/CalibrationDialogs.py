@@ -34,15 +34,15 @@ window.
 from __future__ import annotations
 
 from collections import deque
-from typing import Optional
+from typing import Callable, Optional
 
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QSize, QTimer, Signal
+from PySide6.QtGui import QColor, QDoubleValidator, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from lib.gui.colors import (
@@ -125,8 +125,91 @@ class _LivePreviewLabel(QLabel):
         p.end()
 
 
+class _LineMeasureLabel(QLabel):
+    """A frozen frame on which the user clicks two points to mark a line of
+    known physical length. Paints the fitted frame + the two points + the
+    line; maps clicks back to frame-pixel coords so the measured length is in
+    the original frame's resolution. Calls ``on_change(points)`` whenever the
+    point set changes (``points`` = list of (x, y) frame coords, 0–2 long)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(360)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self._frame: Optional[np.ndarray] = None
+        self._points: list[tuple[float, float]] = []
+        self._scale = 1.0
+        self._offset = (0.0, 0.0)
+        self.on_change: Optional[Callable[[list], None]] = None
+
+    def set_frame(self, bgr: Optional[np.ndarray]) -> None:
+        self._frame = bgr
+        self._points = []
+        self.update()
+        if self.on_change:
+            self.on_change([])
+
+    def clear_points(self) -> None:
+        self._points = []
+        self.update()
+        if self.on_change:
+            self.on_change([])
+
+    def points(self) -> list:
+        return list(self._points)
+
+    def mousePressEvent(self, ev) -> None:  # noqa: N802
+        if self._frame is None or self._scale <= 0:
+            return
+        ox, oy = self._offset
+        ix = (ev.position().x() - ox) / self._scale
+        iy = (ev.position().y() - oy) / self._scale
+        h, w = self._frame.shape[:2]
+        if not (0 <= ix <= w and 0 <= iy <= h):
+            return
+        if len(self._points) >= 2:
+            self._points = []       # third click starts a fresh line
+        self._points.append((float(ix), float(iy)))
+        self.update()
+        if self.on_change:
+            self.on_change(list(self._points))
+
+    def paintEvent(self, _ev) -> None:  # noqa: N802
+        if self._frame is None:
+            super().paintEvent(_ev)
+            return
+        rgb = cv2.cvtColor(self._frame, cv2.COLOR_BGR2RGB)
+        rgb = np.ascontiguousarray(rgb)
+        h, w, _ = rgb.shape
+        qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+        pix = QPixmap.fromImage(qimg)
+        ww, wh = self.width(), self.height()
+        scale = min(ww / w, wh / h) if w and h else 1.0
+        dw, dh = int(w * scale), int(h * scale)
+        dx, dy = (ww - dw) // 2, (wh - dh) // 2
+        self._scale = scale
+        self._offset = (dx, dy)
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.drawPixmap(dx, dy, dw, dh, pix)
+        pts = [(dx + px * scale, dy + py * scale) for px, py in self._points]
+        pen = QPen(QColor("#22c55e"), 2)
+        pen.setCosmetic(True)
+        p.setPen(pen)
+        if len(pts) == 2:
+            p.drawLine(int(pts[0][0]), int(pts[0][1]),
+                       int(pts[1][0]), int(pts[1][1]))
+        for (cx, cy) in pts:
+            p.drawEllipse(int(cx) - 4, int(cy) - 4, 8, 8)
+        p.end()
+
+
 class DpiCalibrationDialog(QDialog):
-    """Medium modal: live preview → capture-and-refine OR trace-manually."""
+    """Medium modal: method picker → (card live/trace) OR (ruler measure)."""
 
     calibration_committed = Signal(float, float, float, object, object)
 
@@ -166,24 +249,29 @@ class DpiCalibrationDialog(QDialog):
         v.setContentsMargins(14, 14, 14, 12)
         v.setSpacing(8)
 
-        caption = QLabel(self.tr(
-            "Hold an ISO ID-1 credit-card-sized object flat in the "
-            "frame. The green outline is the auto-detected card."
-        ))
-        caption.setWordWrap(True)
-        v.addWidget(caption)
+        # Mutable caption — changes per stage (picker / card / ruler).
+        self._caption = QLabel()
+        self._caption.setWordWrap(True)
+        v.addWidget(self._caption)
 
-        # Stack: 0 = live, 1 = manual trace.
+        # Stack: 0 = method picker, 1 = card live, 2 = card manual trace,
+        # 3 = ruler measure (click a known distance on a frozen frame).
         self._stack = QStackedWidget()
         v.addWidget(self._stack, 1)
 
-        self._live_preview = _LivePreviewLabel()
+        self._stack.addWidget(self._build_picker_page())     # 0
+
+        self._live_preview = _LivePreviewLabel()             # 1
         self._stack.addWidget(self._live_preview)
 
-        self._pick = _PickLabel()
+        self._pick = _PickLabel()                            # 2
         self._pick.setMinimumHeight(360)
         self._pick._on_change = self._on_corners_changed
         self._stack.addWidget(self._pick)
+
+        self._ruler = _LineMeasureLabel()                    # 3
+        self._ruler.on_change = self._on_ruler_points_changed
+        self._stack.addWidget(self._ruler)
 
         self._status = QLabel(self.tr("Waiting for camera…"))
         self._status.setStyleSheet(
@@ -192,11 +280,25 @@ class DpiCalibrationDialog(QDialog):
         self._status.setWordWrap(True)
         v.addWidget(self._status)
 
-        # Hold-steady auto-capture toggle (live stage only).
+        # Hold-steady auto-capture toggle (card live stage only).
         self._chk_auto = QCheckBox(self.tr("Auto-capture when the card holds steady"))
         self._chk_auto.setChecked(True)
         self._chk_auto.setStyleSheet(f"color: {COLOR_FONT_MUTED};")
         v.addWidget(self._chk_auto)
+
+        # Distance input (ruler stage only).
+        self._dist_row = QWidget()
+        _dr = QHBoxLayout(self._dist_row)
+        _dr.setContentsMargins(0, 0, 0, 0)
+        _dr.addWidget(QLabel(self.tr("Distance (mm):")))
+        self._dist_edit = QLineEdit()
+        self._dist_edit.setValidator(QDoubleValidator(0.1, 100000.0, 2, self))
+        self._dist_edit.setPlaceholderText(self.tr("e.g. 85.6"))
+        self._dist_edit.setMaximumWidth(120)
+        self._dist_edit.textChanged.connect(self._on_ruler_dist_changed)
+        _dr.addWidget(self._dist_edit)
+        _dr.addStretch(1)
+        v.addWidget(self._dist_row)
 
         # Button row — different sets depending on stage.
         self._btn_capture_refine = QPushButton(self.tr("Capture now"))
@@ -227,6 +329,17 @@ class DpiCalibrationDialog(QDialog):
         self._btn_recapture = QPushButton(self.tr("Recapture"))
         self._btn_recapture.clicked.connect(self._on_recapture)
 
+        # Ruler-measure buttons.
+        self._btn_ruler_calibrate = QPushButton(self.tr("Calibrate DPI"))
+        self._btn_ruler_calibrate.setEnabled(False)
+        self._btn_ruler_calibrate.setStyleSheet(_PRIMARY_QSS)
+        self._btn_ruler_calibrate.clicked.connect(self._on_calibrate_ruler)
+        self._btn_ruler_reset = QPushButton(self.tr("Reset line"))
+        self._btn_ruler_reset.clicked.connect(self._ruler.clear_points)
+        # Return to the method picker from any method.
+        self._btn_to_picker = QPushButton(self.tr("Back"))
+        self._btn_to_picker.clicked.connect(self._on_back_to_picker)
+
         self._btn_cancel = QPushButton(self.tr("Cancel"))
         self._btn_cancel.clicked.connect(self.reject)
 
@@ -237,7 +350,9 @@ class DpiCalibrationDialog(QDialog):
         row.setSpacing(8)
         for b in (self._btn_capture_refine, self._btn_trace_manual,
                   self._btn_back, self._btn_reset, self._btn_calibrate,
-                  self._btn_confirm, self._btn_recapture):
+                  self._btn_confirm, self._btn_recapture,
+                  self._btn_ruler_calibrate, self._btn_ruler_reset,
+                  self._btn_to_picker):
             row.addWidget(b)
         row.addStretch(1)
         sep = QFrame()
@@ -247,53 +362,184 @@ class DpiCalibrationDialog(QDialog):
         row.addWidget(self._btn_cancel)
         v.addLayout(row)
 
-        self._show_live_buttons()
+        self._show_picker()
 
-        # Live preview timer + slower card-detect timer.
+        # Live preview timer runs throughout (both methods need camera frames
+        # — the card method to detect, the ruler method to grab a frame to
+        # freeze). The card-detect timer is started only on the card method.
         self._preview_timer = QTimer(self)
         self._preview_timer.timeout.connect(self._tick_preview)
         self._preview_timer.start(self.REFRESH_MS)
 
         self._detect_timer = QTimer(self)
         self._detect_timer.timeout.connect(self._tick_detect)
-        self._detect_timer.start(self.DETECT_MS)
 
     # ── view state ──────────────────────────────────────────────────
+    _PAGE_PICKER, _PAGE_LIVE, _PAGE_MANUAL, _PAGE_RULER = 0, 1, 2, 3
+
+    def _hide_all_actions(self) -> None:
+        for w in (self._chk_auto, self._dist_row, self._btn_capture_refine,
+                  self._btn_trace_manual, self._btn_calibrate, self._btn_reset,
+                  self._btn_back, self._btn_confirm, self._btn_recapture,
+                  self._btn_ruler_calibrate, self._btn_ruler_reset,
+                  self._btn_to_picker):
+            w.hide()
+
+    def _show_picker(self) -> None:
+        self._stack.setCurrentIndex(self._PAGE_PICKER)
+        self._hide_all_actions()
+        self._caption.setText(self.tr("Choose how to calibrate the scan DPI."))
+        self._set_status(self.tr(
+            "Both measure DPI at the current camera distance."), COLOR_FONT_MUTED)
+
     def _show_live_buttons(self) -> None:
-        self._stack.setCurrentIndex(0)
+        self._stack.setCurrentIndex(self._PAGE_LIVE)
         self._steady_ticks = 0
         self._auto_fired = False
+        self._hide_all_actions()
+        self._caption.setText(self.tr(
+            "Hold an ISO ID-1 credit-card-sized object flat in the frame. "
+            "The green outline is the auto-detected card."))
         self._chk_auto.show()
         self._btn_capture_refine.show()
         self._btn_trace_manual.show()
-        self._btn_calibrate.hide()
-        self._btn_reset.hide()
-        self._btn_back.hide()
-        self._btn_confirm.hide()
-        self._btn_recapture.hide()
+        self._btn_to_picker.show()
 
     def _show_manual_buttons(self) -> None:
-        self._stack.setCurrentIndex(1)
-        self._chk_auto.hide()
-        self._btn_capture_refine.hide()
-        self._btn_trace_manual.hide()
+        self._stack.setCurrentIndex(self._PAGE_MANUAL)
+        self._hide_all_actions()
         self._btn_calibrate.show()
         self._btn_reset.show()
         self._btn_back.show()
-        self._btn_confirm.hide()
-        self._btn_recapture.hide()
 
     def _show_review_buttons(self) -> None:
-        # Frozen captured frame + refined quad on the live stack page.
-        self._stack.setCurrentIndex(0)
-        self._chk_auto.hide()
-        self._btn_capture_refine.hide()
-        self._btn_trace_manual.hide()
-        self._btn_calibrate.hide()
-        self._btn_reset.hide()
-        self._btn_back.hide()
+        # Frozen captured frame on the live stack page.
+        self._stack.setCurrentIndex(self._PAGE_LIVE)
+        self._hide_all_actions()
         self._btn_confirm.show()
         self._btn_recapture.show()
+
+    def _show_ruler(self) -> None:
+        self._stack.setCurrentIndex(self._PAGE_RULER)
+        self._hide_all_actions()
+        self._caption.setText(self.tr(
+            "Click two points a known distance apart (e.g. a ruler held in the "
+            "scan plane), enter that distance, then Calibrate."))
+        self._dist_row.show()
+        self._btn_ruler_calibrate.show()
+        self._btn_ruler_reset.show()
+        self._btn_to_picker.show()
+
+    # ── method picker ────────────────────────────────────────────────
+    def _build_picker_page(self) -> QWidget:
+        from lib.gui.theme import lucide
+        self._method = "card"
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
+        lay.addStretch(1)
+
+        def _method_btn(icon: str, title: str, subtitle: str) -> QPushButton:
+            b = QPushButton(f"{title}\n{subtitle}")
+            b.setIcon(lucide(icon, size=30))
+            b.setIconSize(QSize(30, 30))
+            b.setMinimumHeight(66)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet("QPushButton { text-align: left; padding: 10px 18px; }")
+            return b
+
+        self._btn_method_card = _method_btn(
+            "credit-card", self.tr("Use a credit / ID-sized card"),
+            self.tr("Hold an ISO ID-1 card in the scan plane — auto-detected."))
+        self._btn_method_card.clicked.connect(self._on_method_card)
+        self._btn_method_ruler = _method_btn(
+            "ruler", self.tr("Measure a known distance on screen"),
+            self.tr("Freeze a frame, click two points, enter the distance."))
+        self._btn_method_ruler.clicked.connect(self._on_method_ruler)
+        lay.addWidget(self._btn_method_card)
+        lay.addWidget(self._btn_method_ruler)
+        lay.addStretch(1)
+        return page
+
+    def _on_method_card(self) -> None:
+        self._method = "card"
+        self._captured_frame = None
+        self._live_dpi_samples.clear()
+        if not self._preview_timer.isActive():
+            self._preview_timer.start(self.REFRESH_MS)
+        self._detect_timer.start(self.DETECT_MS)
+        self._show_live_buttons()
+
+    def _on_method_ruler(self) -> None:
+        frame = self._live_frame
+        if frame is None:
+            self._set_status(
+                self.tr("No camera frame yet — wait a moment, then retry."),
+                _COLOR_HINT_WARN)
+            return
+        self._method = "ruler"
+        self._detect_timer.stop()
+        self._preview_timer.stop()      # freeze the frame to measure on
+        self._captured_frame = frame.copy()
+        self._ruler.set_frame(self._captured_frame)
+        self._dist_edit.clear()
+        self._show_ruler()
+        self._set_status(
+            self.tr("Click the two endpoints of a known length."),
+            COLOR_FONT_MUTED)
+
+    def _on_back_to_picker(self) -> None:
+        self._detect_timer.stop()
+        self._captured_frame = None
+        self._live_quad = None
+        self._live_dpi_samples.clear()
+        self._ruler.clear_points()
+        if not self._preview_timer.isActive():
+            self._preview_timer.start(self.REFRESH_MS)
+        self._show_picker()
+
+    # ── ruler measure ────────────────────────────────────────────────
+    def _ruler_distance_mm(self) -> Optional[float]:
+        try:
+            v = float(self._dist_edit.text().replace(",", "."))
+        except ValueError:
+            return None
+        return v if v > 0 else None
+
+    def _update_ruler_calibrate_enabled(self) -> None:
+        ok = len(self._ruler.points()) == 2 and self._ruler_distance_mm() is not None
+        self._btn_ruler_calibrate.setEnabled(ok)
+
+    def _on_ruler_points_changed(self, _points) -> None:
+        self._update_ruler_calibrate_enabled()
+
+    def _on_ruler_dist_changed(self, _text) -> None:
+        self._update_ruler_calibrate_enabled()
+
+    def _on_calibrate_ruler(self) -> None:
+        pts = self._ruler.points()
+        mm = self._ruler_distance_mm()
+        if len(pts) != 2 or mm is None or self._captured_frame is None:
+            return
+        (x0, y0), (x1, y1) = pts
+        pixel_dist = float(np.hypot(x1 - x0, y1 - y0))
+        if pixel_dist < 1.0:
+            self._set_status(
+                self.tr("Line too short — pick two points farther apart."),
+                _COLOR_HINT_WARN)
+            return
+        dpi = pixel_dist * 25.4 / mm
+        self._pending_dpi = float(dpi)
+        self._pending_quad = None
+        # Review on the frozen frame: confirm the value or redo.
+        self._live_preview.set_frame(self._captured_frame)
+        self._live_preview.set_quad(None)
+        self._set_status(self.tr(
+            "Measured ≈ <b>{dpi:.0f} dpi</b> ({mm:.1f} mm / {px:.0f} px). "
+            "Click <b>Use this DPI</b> to apply, or <b>Recapture</b>.").format(
+            dpi=dpi, mm=mm, px=pixel_dist), COLOR_BG_TOGGLE_ON)
+        self._show_review_buttons()
 
     # ── live ticks ──────────────────────────────────────────────────
     def _tick_preview(self) -> None:
@@ -535,8 +781,14 @@ class DpiCalibrationDialog(QDialog):
         self._pending_quad = None
         self._captured_frame = None
         self._live_dpi_samples.clear()
-        self._pick.clear_clicks()
         self._live_preview.set_quad(None)
+        # Ruler review → back to the method picker (a fresh frame is grabbed
+        # when the user re-enters a method). Card review → back to card live.
+        if getattr(self, "_method", "card") == "ruler":
+            self._ruler.clear_points()
+            self._on_back_to_picker()
+            return
+        self._pick.clear_clicks()
         self._show_live_buttons()
         self._preview_timer.start(self.REFRESH_MS)
         self._detect_timer.start(self.DETECT_MS)
