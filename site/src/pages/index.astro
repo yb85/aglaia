@@ -369,6 +369,40 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
             p.classList.toggle('is-active', p.dataset.panel === k));
         });
       });
+      // Tiny shell syntax highlighter — wraps comments / leading command /
+      // flags / quoted strings in spans. Span text concatenates back to the
+      // original, so Copy (textContent) is unaffected.
+      const hlEsc = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      function hlLine(line: string): string {
+        let code = line, comment = '';
+        const m = line.match(/(?:^|\s)#/);
+        if (m) {
+          const i = line.indexOf('#', m.index);
+          code = line.slice(0, i);
+          comment = line.slice(i);
+        }
+        let out = '', first = true;
+        const re = /(\s+)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\S+)/g;
+        let t: RegExpExecArray | null;
+        while ((t = re.exec(code))) {
+          if (t[1]) { out += t[1]; continue; }
+          if (t[2]) { out += `<span class="tok-str">${hlEsc(t[2])}</span>`; continue; }
+          const w = t[3];
+          if (first && /^[a-z]/i.test(w)) {
+            out += `<span class="tok-cmd">${hlEsc(w)}</span>`; first = false; continue;
+          }
+          first = false;
+          if (/^--?\w/.test(w)) { out += `<span class="tok-flag">${hlEsc(w)}</span>`; continue; }
+          out += hlEsc(w);
+        }
+        if (comment) out += `<span class="tok-comment">${hlEsc(comment)}</span>`;
+        return out;
+      }
+      document.querySelectorAll<HTMLElement>('.code__panel code').forEach((c) => {
+        c.innerHTML = (c.textContent || '').split('\n').map(hlLine).join('\n');
+      });
+
       const copyBtn = document.querySelector<HTMLButtonElement>('.code__copy');
       copyBtn?.addEventListener('click', async () => {
         const panel = document.querySelector('.code__panel.is-active code');
@@ -564,6 +598,10 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
       .code__panel { display: none; margin: 0; padding: 20px 22px; overflow-x: auto;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86rem; line-height: 1.7; color: #cdd9e7; }
       .code__panel.is-active { display: block; }
+      .code__panel .tok-comment { color: #5d6f82; font-style: italic; }
+      .code__panel .tok-cmd { color: #7ee0b8; }
+      .code__panel .tok-flag { color: #e3b341; }
+      .code__panel .tok-str { color: #9ecbff; }
 
       .final { padding: clamp(90px,16vh,200px) 20px; display: grid; place-items: center; text-align: center; }
       .final__inner { max-width: 680px; }
