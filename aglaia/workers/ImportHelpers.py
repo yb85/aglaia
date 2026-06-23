@@ -72,7 +72,7 @@ def _embedded_dpi(path: Path) -> Optional[float]:
 
 def enqueue_image_files(*, db_path: str, pipeline_version_id: int,
                         slug: str, chain, image_paths: Iterable[Path],
-                        default_dpi: float = 300.0, force_dpi: bool = False,
+                        default_dpi: float = 120.0, force_dpi: bool = False,
                         progress_cb: Optional[Callable[[int, int], None]] = None,
                         log_queue=None):
     # Sort by filename so "001_..." precedes "002_..." regardless of OS
@@ -279,7 +279,7 @@ def reprocess_active_scans(*, db_path: str, pipeline_version_id: int,
                 if arr is None:
                     continue
                 rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-                dpi = float(img_row["dpi"] or 300.0)
+                dpi = float(img_row["dpi"] or 120.0)
                 buf = ImageBuffer(
                     rgb, ImageType.COLOR, dpi=dpi,
                     filestem=root["filestem"], scan_id=scan_row["id"],
@@ -502,7 +502,7 @@ def catchup_active_scans(*, db_path: str, pipeline_version_id: int,
                 if arr is None:
                     continue
                 rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-                dpi = float(img_row["dpi"] or 300.0)
+                dpi = float(img_row["dpi"] or 120.0)
                 buf = ImageBuffer(
                     rgb, ImageType.COLOR, dpi=dpi,
                     filestem=root["filestem"], scan_id=sid,

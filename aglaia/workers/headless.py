@@ -452,7 +452,7 @@ def run(cfg: CliConfig) -> int:
             enqueue_image_files(
                 db_path=str(project_file), pipeline_version_id=pipeline_version_id,
                 slug=slug, chain=chain, image_paths=cfg.inputs,
-                default_dpi=float(cfg.input_dpi) if cfg.input_dpi else 300.0,
+                default_dpi=float(cfg.input_dpi) if cfg.input_dpi else 120.0,
                 force_dpi=cfg.input_dpi_force,
                 log_queue=log_queue,
             )

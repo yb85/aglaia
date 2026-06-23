@@ -104,7 +104,7 @@ def _load_source(db_path: str, scan_id: int) -> tuple[np.ndarray, float]:
             np.frombuffer(bytes(img_row["blob"]), np.uint8),
             cv2.IMREAD_UNCHANGED,
         )
-        dpi = float(img_row["dpi"] or row["capture_dpi"] or 300.0)
+        dpi = float(img_row["dpi"] or row["capture_dpi"] or 120.0)
     return buf, dpi
 
 
@@ -377,7 +377,7 @@ class PipelinePreviewPanel(QWidget):
         self._db_path = db_path
         self._snap_id: Optional[int] = None
         self._src: Optional[np.ndarray] = None
-        self._src_dpi: float = 300.0
+        self._src_dpi: float = 120.0
         self._doc: dict = {}
         # Every intermediate output from the last forward run, keyed by
         # `NN_processor [· branch_path] [★]`. Drives the layout dropdown.

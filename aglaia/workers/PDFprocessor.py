@@ -215,7 +215,7 @@ def create_pdf_from_images(image_dir, output_path) -> bool:
                     "GRAY" if pil.mode == "L" else "COLOR"),
                 "width": pil.width,
                 "height": pil.height,
-                "dpi": float(pil.info.get("dpi", (300.0, 300.0))[0]),
+                "dpi": float(pil.info.get("dpi", (120.0, 120.0))[0]),
                 "blob": blob,
             })
         except Exception:

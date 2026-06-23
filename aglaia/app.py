@@ -694,7 +694,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
                         render_dpi=render_dpi, log_queue=log_queue),
             daemon=True, name="ImportPDF").start()
     elif choice.mode == StartupWindow.MODE_IMAGES and choice.input_files:
-        import_dpi = float(args.input_dpi) if args.input_dpi else 300.0
+        import_dpi = float(args.input_dpi) if args.input_dpi else 120.0
         _threading.Thread(
             target=enqueue_image_files,
             kwargs=dict(db_path=str(db_path), pipeline_version_id=pipeline_version_id,
