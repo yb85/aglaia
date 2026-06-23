@@ -120,7 +120,8 @@ def submit(api_key: str, img_rows: list[dict], run_ids: list[int],
 # ── poll / fetch / cancel ────────────────────────────────────────────────
 def poll(api_key: str, job_id: str) -> tuple[str, Optional[str]]:
     """Return ``(status, error_text|None)`` for a job."""
-    job = _client(api_key).batch.jobs.get(job_id=job_id)
+    client = _client(api_key)   # keep a ref — an inline temporary's httpx
+    job = client.batch.jobs.get(job_id=job_id)  # client gets torn down mid-call
     status = _norm_status(getattr(job, "status", ""))
     err = getattr(job, "errors", None)
     return status, (str(err) if err else None)
@@ -164,8 +165,9 @@ def fetch_markdown(api_key: str, job_id: str) -> list[str]:
 
 
 def cancel(api_key: str, job_id: str) -> str:
-    job = _client(api_key).batch.jobs.cancel(job_id=job_id)
-    return str(getattr(job, "status", "") or "CANCELLATION_REQUESTED")
+    client = _client(api_key)   # keep a ref (see poll)
+    job = client.batch.jobs.cancel(job_id=job_id)
+    return _norm_status(getattr(job, "status", "")) or "CANCELLATION_REQUESTED"
 
 
 def _job_created_iso(job: Any) -> str:

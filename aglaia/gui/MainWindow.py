@@ -2999,6 +2999,17 @@ class MainWindow(QMainWindow):
         of "switching engines invalidates the prior output"."""
         if not new_engine:
             return
+        # Remember the pick so it's the default selection next launch
+        # ("last used"). Stored in the config DB's OCR defaults.
+        try:
+            from aglaia.app_data import db as _cfg
+            with _cfg.session() as _conn:
+                _d = _cfg.get(_conn, _cfg.KEY_OCR_DEFAULTS, {}) or {}
+                _d["engine"] = new_engine
+                _cfg.set(_conn, _cfg.KEY_OCR_DEFAULTS, _d)
+                _conn.commit()
+        except Exception:
+            pass
         try:
             with db_session(str(self.db_path)) as conn:
                 n = OcrRepo(conn).mark_stale_for_engine_switch(new_engine)
