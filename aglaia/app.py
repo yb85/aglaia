@@ -165,6 +165,12 @@ def _install_flash_debug(app) -> None:
 def _qt_app() -> "QApplication":
     from PySide6.QtWidgets import QApplication
     app = QApplication(sys.argv[:1])  # do not pass user argv to Qt
+    # App identity — window grouping, About box, and (with the macOS block
+    # below) the Dock tile name when launched as the bare `aglaia` script.
+    app.setApplicationName("Aglaïa")
+    app.setApplicationDisplayName("Aglaïa")
+    app.setOrganizationName("Aglaïa")
+    app.setDesktopFileName("aglaia")  # Linux: ties the window to aglaia.desktop
     if os.environ.get("AGLAIA_FLASH_DEBUG"):
         _install_flash_debug(app)
     # Install i18n translator BEFORE any widget is built so the first
@@ -203,6 +209,30 @@ def _qt_app() -> "QApplication":
             ns = NSApplication.sharedApplication()
             ns.setActivationPolicy_(NSApplicationActivationPolicyRegular)
             ns.activateIgnoringOtherApps_(True)
+            # Dock identity for non-bundled launches (the bare `aglaia`
+            # script from pip / brew / uv): macOS otherwise shows the
+            # generic Python rocket + "Python". Set the real icon + name at
+            # runtime. The .app bundle already carries these via Info.plist,
+            # so this is a harmless no-op there.
+            try:
+                from AppKit import NSImage
+                from aglaia.assets import asset_path
+                icon = NSImage.alloc().initByReferencingFile_(
+                    str(asset_path("app", "Aglaia.icns")))
+                if icon is not None and icon.isValid():
+                    ns.setApplicationIconImage_(icon)
+            except Exception:
+                pass
+            try:
+                from Foundation import NSBundle
+                bundle = NSBundle.mainBundle()
+                info = (bundle.localizedInfoDictionary()
+                        or bundle.infoDictionary())
+                if info is not None:
+                    info["CFBundleName"] = "Aglaïa"
+                    info["CFBundleDisplayName"] = "Aglaïa"
+            except Exception:
+                pass
         except Exception:
             pass
     # First-run welcome / permissions screen — set expectations before macOS
