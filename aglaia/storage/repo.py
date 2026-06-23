@@ -43,6 +43,86 @@ class ProjectRepo:
         return self.get()
 
 
+# Mistral batch statuses that are terminal failures (no result will arrive).
+_BATCH_FAILED = ("FAILED", "TIMEOUT_EXCEEDED", "CANCELLED")
+
+
+class MistralBatchRepo:
+    """Submitted Mistral batch OCR jobs for this project (table
+    ``mistral_batch_jobs``). Drives the OCR card's pending state and the
+    Mistral Jobs tab."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def add(self, job_id: str, *, input_file_id: Optional[str] = None,
+            chunk: int = 0, chunks_total: int = 1,
+            page_count: Optional[int] = None, status: Optional[str] = None,
+            submitted_at: Optional[str] = None,
+            run_ids: Optional[Iterable[int]] = None) -> None:
+        runs_json = json.dumps(list(run_ids)) if run_ids is not None else None
+        self.conn.execute(
+            "INSERT OR REPLACE INTO mistral_batch_jobs "
+            "(job_id, input_file_id, chunk, chunks_total, page_count, "
+            " status, submitted_at, run_ids, imported_at, error_text) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
+            "  (SELECT imported_at FROM mistral_batch_jobs WHERE job_id = ?), "
+            "  (SELECT error_text  FROM mistral_batch_jobs WHERE job_id = ?))",
+            (job_id, input_file_id, int(chunk), int(chunks_total), page_count,
+             status, submitted_at or _now(), runs_json, job_id, job_id),
+        )
+
+    @staticmethod
+    def run_ids_of(row: sqlite3.Row) -> list[int]:
+        try:
+            return [int(x) for x in json.loads(row["run_ids"] or "[]")]
+        except Exception:
+            return []
+
+    def list_all(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM mistral_batch_jobs ORDER BY submitted_at DESC, "
+            "rowid DESC"
+        ).fetchall()
+
+    def get(self, job_id: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM mistral_batch_jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+
+    def set_status(self, job_id: str, status: str,
+                   error_text: Optional[str] = None) -> None:
+        self.conn.execute(
+            "UPDATE mistral_batch_jobs SET status = ?, "
+            "error_text = COALESCE(?, error_text) WHERE job_id = ?",
+            (status, error_text, job_id),
+        )
+
+    def mark_imported(self, job_id: str) -> None:
+        self.conn.execute(
+            "UPDATE mistral_batch_jobs SET imported_at = ? WHERE job_id = ?",
+            (_now(), job_id),
+        )
+
+    def delete(self, job_id: str) -> None:
+        self.conn.execute(
+            "DELETE FROM mistral_batch_jobs WHERE job_id = ?", (job_id,))
+
+    def pending(self) -> list[sqlite3.Row]:
+        """Jobs not yet applied to the project and not terminally failed —
+        includes QUEUED/RUNNING and SUCCESS-awaiting-import."""
+        placeholders = ",".join("?" * len(_BATCH_FAILED))
+        return self.conn.execute(
+            "SELECT * FROM mistral_batch_jobs "
+            "WHERE imported_at IS NULL "
+            f"  AND (status IS NULL OR status NOT IN ({placeholders})) "
+            "ORDER BY submitted_at DESC", _BATCH_FAILED,
+        ).fetchall()
+
+    def has_pending(self) -> bool:
+        return bool(self.pending())
+
+
 class PipelineRepo:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
