@@ -91,7 +91,10 @@ const powers = [
                 <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
               </div>
             </div>
-            <a class="btn btn--ghost btn--lg" href="#install" data-cli>CLI installation</a>
+            <a class="btn btn--ghost btn--lg btn--stack" href="#install" data-cli>
+              <span class="dl__label">CLI installation</span>
+              <span class="dl__sub">uv · pip · brew</span>
+            </a>
           </div>
           <p class="fineprint reveal">macOS · Windows · Linux — free &amp; source-available.</p>
           <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
@@ -575,14 +578,31 @@ aglaia ~/scans/my-book              # launch</code></pre>
       .btn--ghost:hover { border-color: #4f8fd0; background: #121a26; }
 
       /* ── split download button + platform menu ──────────────────── */
-      .dl { position: relative; display: inline-flex; }
-      .dl__main { display: inline-flex; flex-direction: column; align-items: flex-start;
-        line-height: 1.15; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+      /* The two halves share ONE lift + shadow on the wrapper so the button
+         reads as a single unit; their individual .btn:hover fx are cancelled
+         (otherwise only the hovered half raises and you get two shadows). */
+      .dl { position: relative; display: inline-flex; align-items: stretch;
+        border-radius: 12px; box-shadow: 0 8px 30px -10px #3d7fc4;
+        transition: transform .2s, box-shadow .2s; }
+      .dl:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -12px #3d7fc4; }
+      .dl__main, .dl__toggle { box-shadow: none; transition: background .2s; }
+      .dl__main:hover, .dl__toggle:hover { transform: none; box-shadow: none; }
+      .dl__main { display: inline-flex; flex-direction: column;
+        align-items: flex-start; justify-content: center; line-height: 1.15;
+        border-top-right-radius: 0; border-bottom-right-radius: 0; }
       .dl__sub { font-size: .72rem; font-weight: 500; opacity: .82; }
-      .dl__toggle { display: inline-flex; align-items: center; cursor: pointer;
-        padding-left: 15px; padding-right: 15px; font-size: 1.1rem;
-        border-left: 1px solid rgba(255,255,255,.22);
+      /* It's a <button> — strip the native chrome (the dark border was the
+         user-agent button border) and re-add only the left divider so it
+         matches the gradient main half seamlessly. */
+      .dl__toggle { appearance: none; -webkit-appearance: none; border: 0;
+        color: #fff; display: inline-flex; align-items: center; cursor: pointer;
+        padding-top: 0; padding-bottom: 0; padding-left: 15px; padding-right: 15px;
+        font-size: 1.1rem; border-left: 1px solid rgba(255,255,255,.28);
         border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+      /* Two-line ghost button (CLI installation) — mirrors .dl__main height. */
+      .btn--stack { display: inline-flex; flex-direction: column;
+        align-items: center; justify-content: center; line-height: 1.15; }
       .dl__menu { position: absolute; top: calc(100% + 8px); left: 0; min-width: 100%;
         z-index: 20; display: flex; flex-direction: column; gap: 2px; padding: 6px;
         background: #0f1722; border: 1px solid #233247; border-radius: 12px;
