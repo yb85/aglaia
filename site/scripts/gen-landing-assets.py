@@ -195,16 +195,40 @@ def step_img(conn, sid: int, branch: str, step: str) -> Image.Image:
     return _img(r[0])
 
 
+# The .ba card on the landing page is locked to this aspect ratio (13/10) and
+# uses object-fit:cover, so any before/after whose ratio differs gets cropped
+# (e.g. augustin's taller spread lost its page tops/bottoms). Emit both images
+# AT this ratio — pad the rectified pages (never crop), crop the raw spread —
+# so the card shows everything without enlarging.
+TARGET_ASP = 13 / 10
+
+
+def _pad_to_aspect(im: Image.Image, asp: float = TARGET_ASP,
+                   bg=(255, 255, 255)) -> Image.Image:
+    """Pad (never crop) `im` with `bg` until its aspect ratio is `asp`."""
+    w, h = im.size
+    cur = w / h
+    if abs(cur - asp) < 1e-3:
+        return im
+    if cur < asp:                          # too tall → widen
+        nw, nh, ox, oy = round(h * asp), h, None, 0
+    else:                                  # too wide → heighten
+        nw, nh, ox, oy = w, round(w / asp), 0, None
+    out = Image.new("RGB", (nw, nh), bg)
+    out.paste(im, ((nw - w) // 2 if ox is None else ox,
+                   (nh - h) // 2 if oy is None else oy))
+    return out
+
+
 def before_after(conn, sid: int, w: int = 760, nudge: int = 0):
-    """Before (raw spread, spine-centred) ↔ after (rectified A|B), same dims."""
+    """Before (raw spread) ↔ after (rectified A|B), both at TARGET_ASP and the
+    same dims so the fixed-ratio card never clips a page."""
     A, B = final_img(conn, sid, "A"), final_img(conn, sid, "B")
-    after = hstack(A, B)
-    asp = after.width / after.height
-    frac = A.width / after.width
+    after = _pad_to_aspect(hstack(A, B))
     raw = raw_img(conn, sid)
     rw, rh = raw.size
-    bw = round(rh * asp)
-    x0 = max(0, min(round(book_center(raw) - frac * bw) + nudge, rw - bw))
+    bw = min(rw, round(rh * TARGET_ASP))
+    x0 = max(0, min(round(book_center(raw) - bw / 2) + nudge, rw - bw))
     before = raw.crop((x0, 0, x0 + bw, rh))
     a2 = fitw(after, w)
     b2 = fitw(before, w).resize(a2.size, Image.LANCZOS)
