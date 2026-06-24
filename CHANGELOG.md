@@ -4,10 +4,34 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0a1] — unreleased
+## [0.1.0a2] — unreleased
 
-First public **alpha**. Dated on the `v0.1.0a1` tag. Well tested on macOS;
-Linux and Windows are unverified — expect crashes.
+Second alpha. Bug-fix pass over a1 from macOS release testing.
+
+### Fixed
+
+- **DPI estimation** (card + measure-a-distance) is applied as a per-session
+  value again; it was silently lost in the frozen app (`camera_params.json`
+  wrote to a read-only relative path). `camera_params.json` now stores only the
+  camera matrix, under APP_DATA. Full chessboard calibration disabled for now (#16).
+- **Quit crash** (SIGABRT) when closing mid-model-download — worker threads are
+  now stopped on close.
+- **Version** shown in About / Diagnostics / Bug report (was `0.0.0` / hardcoded
+  `0.1.0`); added `aglaia --version`.
+- **`roi_margin_mm`** now takes effect at any value (crop follows the extended
+  ROI) — fixes DBnet clipping page margins.
+- **Combo dropdowns** were see-through (transparent popup background).
+
+### Performance
+
+- A large project reprocess no longer balloons GUI memory (~3.9 GB → ~0.5 GB)
+  or freezes the UI: stage thumbnails are deferred (spinner until the branch
+  finishes, then render the final), and status-bar log updates are coalesced.
+  Off-screen pixmap release for very large projects tracked in #17.
+
+## [0.1.0a1] — 2026-06-24
+
+First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
 
 ### Added
 
