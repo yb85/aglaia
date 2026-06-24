@@ -89,7 +89,7 @@ The slider section on the project website demonstrates this purpose :
 
 ### What the default pipeline will do to a standard book ?
 
-In a few word Aglaïa will produce precisely cut binarized text pages with perspective and page curvature correction. On a modern laptop it can process rougly 2 scans per second.
+In a few word Aglaïa will produce precisely cut binarized text pages with perspective and page curvature correction. On a modern laptop it can process roughly 1 page / sec.
 
 To achieve it, it relies on :
 
