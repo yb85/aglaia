@@ -38,12 +38,27 @@ from PySide6.QtWidgets import (
 
 from aglaia.assets import asset_path
 from aglaia.gui.colors import (
-    COLOR_BG_BUTTON, COLOR_FONT_DIM, COLOR_FONT_MUTED, COLOR_FONT_PRIMARY,
-    COLOR_PRIMARY, active_palette_name,
+    COLOR_BG_BUTTON, COLOR_ERROR, COLOR_FONT_DIM, COLOR_FONT_MUTED,
+    COLOR_FONT_PRIMARY, COLOR_PRIMARY, COLOR_SUCCESS, COLOR_WARNING,
+    active_palette_name,
 )
 from aglaia.i18n import SUPPORTED_LOCALES
 
 _IS_MAC = sys.platform == "darwin"
+
+
+def _vision_caps() -> tuple[bool, bool]:
+    """``(has_text_ocr, has_document_ocr)`` from pyobjc Vision on macOS. Text
+    detection/OCR ships on any mac; structured Document OCR
+    (``VNRecognizeDocumentsRequest``) needs macOS 26+. Off-macOS → (False, False)."""
+    if not _IS_MAC:
+        return (False, False)
+    try:
+        import Vision  # pyobjc-framework-vision (the `macos` extra)
+    except Exception:
+        return (False, False)
+    return (hasattr(Vision, "VNRecognizeTextRequest"),
+            hasattr(Vision, "VNRecognizeDocumentsRequest"))
 
 
 def _qcolor(spec: str) -> QColor:
@@ -90,6 +105,13 @@ _MODEL_COPY = {
               "Higher-quality OCR for difficult scans (large download)."),
 }
 _MODEL_ORDER = ["east", "vosk_en", "surya"]
+
+# Models with a built-in macOS equivalent → (availability-kind, product, role).
+# Shown as a green ✓ ("you already have it") or red ✗ caption on macOS.
+_MODEL_ALT = {
+    "east": ("vision", "Apple Vision", "page detection"),
+    "surya": ("docs", "Apple Documents", "local OCR"),
+}
 
 
 class _StepDots(QWidget):
@@ -328,9 +350,17 @@ class OnboardingWizard(QDialog):
                 caption_bits.append(self.tr("required on this platform"))
             else:
                 caption_bits.append(self.tr("optional"))
-            v.addWidget(self._model_row(chk, self.tr(head), self.tr(desc),
-                                        " · ".join(caption_bits)))
 
+            v.addWidget(self._model_row(chk, self.tr(head), self.tr(desc),
+                                        " · ".join(caption_bits),
+                                        self._apple_alt_caption(key)))
+
+        note = QLabel(self.tr(
+            "You can add or remove models at any time from the Aglaïa "
+            "Downloader (View → Show Downloader)."))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+        v.addWidget(note)
         v.addStretch(1)
         self._dl_bar = QProgressBar()
         self._dl_bar.setRange(0, 1000)
@@ -360,8 +390,38 @@ class OnboardingWizard(QDialog):
         h.addWidget(txt, 1)
         return w
 
+    def _apple_alt_caption(self, key: str) -> str:
+        """HTML caption for a model's macOS built-in equivalent (or '').
+        page detection → Apple Vision (green ✓ / red ✗). local OCR → Apple
+        Documents (green ✓) · or, on macOS <26, a yellow ✓ noting only
+        unstructured Apple Vision OCR is available · or red ✗."""
+        alt = _MODEL_ALT.get(key)
+        if not _IS_MAC or alt is None:
+            return ""
+        kind, prod, role = alt
+        has_text, has_docs = _vision_caps()
+
+        def span(color: str, symbol: str, text: str) -> str:
+            return f"<span style='color:{color}'>{symbol} {text}</span>"
+
+        have = self.tr("You already have {prod} for {role}").format(
+            prod=prod, role=role)
+        if kind == "vision":
+            return (span(COLOR_SUCCESS, "✓", have) if has_text
+                    else span(COLOR_ERROR, "✗",
+                              self.tr("No {prod} equivalent installed").format(prod=prod)))
+        # kind == "docs" (OCR): three states.
+        if has_docs:
+            return span(COLOR_SUCCESS, "✓", have)
+        if has_text:
+            return span(COLOR_WARNING, "✓", self.tr(
+                "You only have Apple Vision (unstructured OCR) — update to "
+                "macOS 26+ for full Document OCR"))
+        return span(COLOR_ERROR, "✗",
+                    self.tr("No {prod} equivalent installed").format(prod=prod))
+
     def _model_row(self, chk: QCheckBox, head: str, desc: str,
-                   caption: str) -> QWidget:
+                   caption: str, alt_html: str = "") -> QWidget:
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 2, 0, 2)
@@ -378,6 +438,11 @@ class OnboardingWizard(QDialog):
         cap = QLabel(caption)
         cap.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
         col.addWidget(cap)
+        if alt_html:
+            alt = QLabel(alt_html)
+            alt.setTextFormat(Qt.TextFormat.RichText)
+            alt.setStyleSheet("font-size: 11px;")
+            col.addWidget(alt)
         h.addLayout(col, 1)
         return w
 
