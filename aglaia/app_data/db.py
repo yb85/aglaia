@@ -105,6 +105,9 @@ KEY_MISTRAL_BATCH = "mistral_batch"  # bool — Cloud OCR (Mistral) submits a
                                    # batch job (cheaper, async) instead of a
                                    # synchronous OCR run. Remembered across
                                    # sessions; the OCR card's batch toggle.
+KEY_MODELS_PROMPT_DISMISSED = "models_prompt_dismissed"  # bool — user ticked
+                                   # "don't show again" on the first-run model
+                                   # install invite (EAST+Vosk / Vosk on mac).
 
 BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_THEME: "system",
@@ -133,6 +136,7 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_WELCOME_SEEN: False,
     KEY_FILETYPE_ASSOC_DONE: False,
     KEY_MISTRAL_BATCH: False,
+    KEY_MODELS_PROMPT_DISMISSED: False,
 }
 
 

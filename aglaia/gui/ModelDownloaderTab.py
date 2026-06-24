@@ -38,7 +38,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QCoreApplication, QObject, QThread, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
@@ -153,6 +153,24 @@ def _load_model_specs() -> list[ModelSpec]:
 
 
 MODEL_SPECS: list[ModelSpec] = _load_model_specs()
+
+
+def is_model_installed(key: str) -> bool:
+    """Lightweight on-disk presence check for a model `key`, usable
+    without building a Qt card (the first-run prompt gates on this).
+    Existence-only — the card's `_is_installed` does the full hash
+    verify; here we only need "is it already there?"."""
+    spec = next((s for s in (_load_model_specs() or MODEL_SPECS)
+                 if s.key == key), None)
+    if spec is None:
+        return False
+    d = models_dir() / spec.filename
+    if spec.kind == "hf-snapshot":
+        return d.is_dir() and any(d.iterdir())
+    try:
+        return d.exists() and d.stat().st_size > 1024
+    except OSError:
+        return False
 
 
 # ── download worker ──────────────────────────────────────────────────
@@ -1051,11 +1069,14 @@ class ModelDownloaderDialog(QDialog):
     interacting with the main UI underneath while a 1.3 GB Surya pull
     streams in the background."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None,
+                 autostart_keys: list[str] | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(self.tr("Model Downloader"))
         self.setModal(False)
         self.setMinimumSize(760, 460)
+        # spec.key -> _ModelCard, so callers can autostart a specific model.
+        self._cards: dict[str, _ModelCard] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1096,11 +1117,15 @@ class ModelDownloaderDialog(QDialog):
         if rec:
             v.addWidget(_section_header(self.tr("Recommended")))
             for spec in rec:
-                v.addWidget(_ModelCard(spec))
+                card = _ModelCard(spec)
+                self._cards[spec.key] = card
+                v.addWidget(card)
         if oth:
             v.addWidget(_section_header(self.tr("Other")))
             for spec in oth:
-                v.addWidget(_ModelCard(spec))
+                card = _ModelCard(spec)
+                self._cards[spec.key] = card
+                v.addWidget(card)
         v.addStretch(1)
 
         scroll = QScrollArea()
@@ -1110,14 +1135,76 @@ class ModelDownloaderDialog(QDialog):
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
 
-        # Footer — Close.
+        # Footer — secondary Close + primary Restart. Freshly fetched
+        # models load only at startup, so Restart is the prominent action;
+        # Close stays available but warns if a download landed this session.
         footer = QHBoxLayout()
         footer.setContentsMargins(20, 10, 20, 14)
         footer.addStretch(1)
         close = QPushButton(self.tr("Close"))
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
         close.clicked.connect(self.close)
         footer.addWidget(close)
+        restart = QPushButton(self.tr("Restart now"))
+        restart.setDefault(True)
+        restart.setCursor(Qt.CursorShape.PointingHandCursor)
+        restart.setStyleSheet(
+            f"QPushButton {{ background: {COLOR_PRIMARY}; color: {COLOR_FONT_INVERSE};"
+            f" border: none; border-radius: 6px; padding: 6px 16px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {COLOR_PRIMARY_BG_STRONG}; }}"
+        )
+        restart.clicked.connect(self._restart_app)
+        footer.addWidget(restart)
         outer.addLayout(footer)
+
+        if autostart_keys:
+            # Defer so the dialog paints before downloads kick off.
+            QTimer.singleShot(0, lambda: self.autostart(autostart_keys))
+
+    def autostart(self, keys: list[str]) -> None:
+        """Begin downloads for the given model keys (skipping any already
+        installed or already in flight). Used by the first-run install
+        invite to one-click-fetch EAST + Vosk."""
+        for key in keys:
+            card = self._cards.get(key)
+            if card is None or card._thread is not None or card._is_installed():
+                continue
+            card._start()
+
+    def _downloaded_this_session(self) -> bool:
+        return any(getattr(c, "_needs_restart", False)
+                   for c in self._cards.values())
+
+    def _restart_app(self) -> None:
+        """Relaunch so freshly downloaded models load. Reopens the host
+        project via the launcher loop's "reopen" hand-off (same mechanism
+        the in-place Slim-down round-trip uses); falls back to the landing
+        screen if the host has no project path."""
+        from PySide6.QtWidgets import QApplication
+        parent = self.parent()
+        appi = QApplication.instance()
+        db_path = getattr(parent, "db_path", None)
+        self.close()
+        if appi is not None:
+            if db_path:
+                appi.setProperty("aglaia_restart", "reopen")
+                appi.setProperty("aglaia_reopen_path", str(db_path))
+            else:
+                appi.setProperty("aglaia_restart", "landing")
+        if parent is not None:
+            parent.close()
+
+    def closeEvent(self, ev):  # noqa: N802 — Qt API
+        # Warn (once) that a model fetched this session needs a relaunch
+        # before it's usable. Doesn't block the close — just informs.
+        if self._downloaded_this_session():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, self.tr("Restart needed"),
+                self.tr("New models were downloaded. Restart Aglaïa for them "
+                        "to be picked up by the engines."),
+            )
+        super().closeEvent(ev)
 
 
 # Backwards-compat alias: previous code (MainWindow tab opener,
