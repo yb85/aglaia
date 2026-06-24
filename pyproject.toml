@@ -38,6 +38,11 @@ dependencies = [
 # resolve — pick one. `pip install "aglaia[surya]"`.
 surya = [
     "surya-ocr>=0.20.0",
+    # Declared directly (not just transitively via surya-ocr) so the
+    # [tool.uv.sources] pytorch-cpu pin actually applies — uv ignores sources
+    # for purely-transitive deps. Keeps the CUDA nvidia-cu12-* libs (~2-3 GB)
+    # out of the Linux bundle; Surya OCR runs through llama-server, not torch.
+    "torch>=2.7.0,<3",
 ]
 # OCR engine: PaddleOCR-VL — the paddleocr orchestrator + CPU paddlepaddle +
 # the MLX vision-language model. Needs huggingface-hub>=1.5 (via mlx-vlm),
@@ -156,8 +161,19 @@ dev = [
 # block uv can't resolve it (PyPI has nothing under that name) and the
 # whole sync errors out even when the jbig2 extra isn't requested,
 # because uv walks every platform split.
+# CPU-only torch on Linux. PyPI's default linux `torch` wheel is the CUDA
+# build, dragging in ~2-3 GB of nvidia-cu12-* libs (cuDNN, cuBLAS, NCCL…) that
+# blow past GitHub's 2 GiB release-asset cap and are dead weight here anyway:
+# Surya OCR runs through the `llama-server` binary, not torch-GPU. macOS/Windows
+# keep the default wheel (already CPU/MPS — no CUDA pull there).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.uv.sources]
 aglaia_jbig2 = { path = "./aglaia_jbig2", editable = true }
+torch = { index = "pytorch-cpu" }
 
 # Resolver overrides — used to break unsolvable cross-package version
 # conflicts when the install must satisfy multiple "tested with"
