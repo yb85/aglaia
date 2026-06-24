@@ -177,9 +177,9 @@ This is the terminal equivalent of the GUI's first-run wizard. A headless batch
 run refuses to start until the install is configured (`--setup` or the GUI).
 The GUI installs run the wizard automatically on first launch.
 
-#[!WARNING] Build with the right options
-# The `--extra` options are mandatory to interface models and backends with python. If you download the models or install cuda drivers on your computer but forget to include teh relevant extra options, they won't be used
-#
+>[!WARNING] Build with the right options
+> The `--extra` options are mandatory to interface models and backends with python. If you download the models or install cuda drivers on your computer but forget to include teh relevant extra options, they won't be used
+>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -242,10 +242,10 @@ reference it (`feat/123-slug`); PRs close via `Closes #N`.
 Source-available under the **[PolyForm Shield License 1.0.0](https://polyformproject.org/licenses/shield/1.0.0/)**
 — see [`LICENSE`](LICENSE).
 
-#[!WARNING] This is not strictly-speaking "open-source" !
-#
-# the reason is not to make it one day a commercial product, but to avoid trivial SaaS repackaging which hurts the developpment of free Apps.
-#
+>[!WARNING] This is not strictly-speaking "open-source" !
+>
+> the reason is not to make it one day a commercial product, but to avoid trivial SaaS repackaging which hurts the developpment of free Apps.
+>
 
 You may use, modify, and redistribute the software for **any purpose
 except building a product that competes with it**. Otherwise free.
