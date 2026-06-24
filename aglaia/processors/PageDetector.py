@@ -20,13 +20,11 @@ from aglaia.processors.layout_backends import get_backend
 @dataclass
 class PageOption(AbstractProcessorOption):
     margin_mm: float = 2.0
-    # Padding (mm) around the (tightened) text bbox for the child ROI used
-    # downstream by the Binarizer, which HARD-ERASES everything outside the ROI.
-    # The ROI is clamped to the crop rect (page bbox + margin_mm), so a value
-    # ≥ margin_mm makes the ROI fill the crop and disables the outside-ROI mask
-    # entirely — the cure for tight detectors (DBnet) clipping page margins from
-    # the binarized output. Default 4 mm covers DBnet's glyph-hugging boxes
-    # within the 2 mm crop. Exposed in the pipeline editor.
+    # Page margin (mm) KEPT around the detected text by the child ROI, which the
+    # Binarizer preserves (it hard-erases everything OUTSIDE the ROI). The crop
+    # is computed as ROI + margin_mm (a masked halo around it), so roi_margin_mm
+    # works at ANY value, independent of margin_mm — raise it when a tight
+    # detector (DBnet) would otherwise clip the page margins. In the editor.
     roi_margin_mm: float = 4.0
     max_pages: int = 2
     # When more pages than max_pages are found: "merge" them into one
@@ -239,10 +237,10 @@ class PageDetector(AbstractImageProcessor):
         "margin_mm": _f(2.0, 0.0, 50.0, 0.5,
                         "Padding around each detected text bbox before cropping."),
         "roi_margin_mm": _f(4.0, 0.0, 50.0, 0.5,
-                            "Padding (mm) around the text bbox for the ROI passed "
-                            "downstream. The Binarizer hard-erases outside the ROI, "
-                            "so raise this if a tight detector (DBnet) is clipping "
-                            "page margins. Keep ≤ the crop padding above."),
+                            "Page margin (mm) KEPT around the text — the Binarizer "
+                            "hard-erases outside this ROI. Raise it to keep wider "
+                            "margins; works at any value (the crop adds margin_mm "
+                            "of masked halo on top)."),
         "max_pages": _i(2, 0, 8,
                           "Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap)."),
         "over_cap": _e("merge", ["merge", "discard"],
@@ -494,30 +492,19 @@ class PageDetector(AbstractImageProcessor):
 
         # Create children buffers
         for idx, (lx1, ly1, lx2, ly2) in enumerate(pages):
-            fx1 = max(0, lx1 - margin_px)
-            fy1 = max(0, ly1 - margin_px)
-            fx2 = min(w_orig, lx2 + margin_px)
-            fy2 = min(h_orig, ly2 + margin_px)
-
-            sub_img = img_cv[fy1:fy2, fx1:fx2]
             suffix = next(suffixes)
             filestem = f"{base}_{suffix}"
 
-            # Tighten the ROI horizontally: drop outlier detector boxes
-            # (cables, hands, cup edges intruding on the X axis) by
-            # clamping left/right to the 5th-95th percentile of X edges of
-            # detector boxes whose centre falls in the merged page rect.
-            # Keep top/bottom at the full page extent — cropping Y kills
-            # the first/last text lines and they rarely have intruders.
+            # Tighten the page horizontally: drop outlier detector boxes
+            # (cables, hands, cup edges intruding on the X axis) via a gap test
+            # — NOT a blanket 5/95 percentile, which trimmed the rightmost ~5%
+            # of legitimate justified text on clean scans. An intruder sits a
+            # large gap past the dense text cluster; walk in from each extreme
+            # and stop at the first sub-gap step.
             inner = [b for b in boxes
                      if lx1 <= (b[0] + b[2]) / 2 <= lx2
                      and ly1 <= (b[1] + b[3]) / 2 <= ly2]
             if len(inner) >= 4:
-                # Drop only FAR outliers (hands / cables / cup edges) via a gap
-                # test — NOT a blanket 5/95 percentile, which trimmed the
-                # rightmost ~5% of legitimate justified text on clean scans. An
-                # intruder sits a large gap past the dense text cluster; walk in
-                # from each extreme and stop at the first sub-gap step.
                 page_w = max(1, lx2 - lx1)
                 gap = 0.10 * page_w
                 xr = np.sort(np.array([b[2] for b in inner]))
@@ -534,21 +521,39 @@ class PageDetector(AbstractImageProcessor):
                 tight_lx1, tight_lx2 = lx1, lx2
             # Extend the vertical extent to include a running head above / a
             # page number below the merged body rect: boxes inside the page's
-            # text column (X span) but just outside its Y span. Clustering to
-            # the dense body otherwise drops these isolated lines.
+            # text column (X span) but just outside its Y span. Search a band
+            # ± margin_px around the page bbox.
             tight_ly1, tight_ly2 = ly1, ly2
+            band_y1 = max(0, ly1 - margin_px)
+            band_y2 = min(h_orig, ly2 + margin_px)
             xcol = [b for b in boxes
                     if lx1 <= (b[0] + b[2]) / 2 <= lx2
-                    and fy1 <= (b[1] + b[3]) / 2 <= fy2]
+                    and band_y1 <= (b[1] + b[3]) / 2 <= band_y2]
             if xcol:
                 tight_ly1 = min(tight_ly1, min(b[1] for b in xcol))
                 tight_ly2 = max(tight_ly2, max(b[3] for b in xcol))
 
+            # ROI = tight text bbox + roi_margin_mm — the region the Binarizer
+            # KEEPS. The crop is the ROI + margin_mm (the masked halo), computed
+            # on the EXTENDED ROI, so the ROI is never clamped by the crop:
+            # roi_margin_mm directly sets the kept page margin at ANY value,
+            # independent of margin_mm.
             roi_pad = int((self.roi_margin_mm / 25.4) * dpi)
-            roi_x1 = max(0, tight_lx1 - fx1 - roi_pad)
-            roi_y1 = max(0, tight_ly1 - fy1 - roi_pad)
-            roi_x2 = min(fx2 - fx1, tight_lx2 - fx1 + roi_pad)
-            roi_y2 = min(fy2 - fy1, tight_ly2 - fy1 + roi_pad)
+            roi_lx1 = max(0, tight_lx1 - roi_pad)
+            roi_ly1 = max(0, tight_ly1 - roi_pad)
+            roi_lx2 = min(w_orig, tight_lx2 + roi_pad)
+            roi_ly2 = min(h_orig, tight_ly2 + roi_pad)
+
+            fx1 = max(0, roi_lx1 - margin_px)
+            fy1 = max(0, roi_ly1 - margin_px)
+            fx2 = min(w_orig, roi_lx2 + margin_px)
+            fy2 = min(h_orig, roi_ly2 + margin_px)
+            sub_img = img_cv[fy1:fy2, fx1:fx2]
+
+            roi_x1 = max(0, roi_lx1 - fx1)
+            roi_y1 = max(0, roi_ly1 - fy1)
+            roi_x2 = min(fx2 - fx1, roi_lx2 - fx1)
+            roi_y2 = min(fy2 - fy1, roi_ly2 - fy1)
             child_roi = [
                 [float(roi_x1), float(roi_y1)],
                 [float(roi_x2), float(roi_y1)],
