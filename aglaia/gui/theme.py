@@ -181,8 +181,8 @@ QLineEdit:read-only {{
    black slab on light theme. Pin bg / fg / selection to palette tokens
    so the list tracks the active scheme. */
 QComboBox QAbstractItemView {{
-    background-color: {COLOR_BG_INPUT};
-    color: palette(text);
+    background-color: {COLOR_BG_HINT};
+    color: {COLOR_FONT_PRIMARY};
     border: 1px solid {COLOR_OUTLINE};
     border-radius: 0px;
     padding: 4px;
