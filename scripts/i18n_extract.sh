@@ -17,13 +17,13 @@ LUPDATE="${LUPDATE:-uv run --no-sync pyside6-lupdate}"
 # (toast messages, error dialogs surfaced via log_queue, ProcessMonitor
 # emissions consumed by MainWindow).
 SOURCES=()
-while IFS= read -r f; do SOURCES+=("$f"); done < <(find lib/gui -name "*.py" -not -path "*/__pycache__/*")
-while IFS= read -r f; do SOURCES+=("$f"); done < <(find lib/workers -name "*.py" -not -path "*/__pycache__/*")
+while IFS= read -r f; do SOURCES+=("$f"); done < <(find aglaia/gui -name "*.py" -not -path "*/__pycache__/*")
+while IFS= read -r f; do SOURCES+=("$f"); done < <(find aglaia/workers -name "*.py" -not -path "*/__pycache__/*")
 
 # Output catalogues — one per supported locale.
 TS_FILES=(
-    lib/i18n/aglaia_en_US.ts
-    lib/i18n/aglaia_fr_FR.ts
+    aglaia/i18n/aglaia_en_US.ts
+    aglaia/i18n/aglaia_fr_FR.ts
 )
 
 echo "lupdate: scanning ${#SOURCES[@]} files → ${TS_FILES[*]}"
