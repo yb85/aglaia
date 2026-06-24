@@ -622,6 +622,24 @@ class LogStrip(QLabel):
         f = QFont()
         f.setPixelSize(11)
         self.setFont(f)
+        # Coalesce log updates: a full reprocess fires push() thousands of
+        # times. Doing setText + repaint per call floods the event loop and
+        # starves user input (unresponsive UI). Store the latest line and flush
+        # to the label at ~12 Hz; push() itself stays trivial so the queued
+        # log-signal backlog drains fast.
+        self._pending_log: Optional[str] = None
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(80)
+        self._log_flush_timer.timeout.connect(self._flush_log)
+
+    def _flush_log(self) -> None:
+        if self._pending_log is None:
+            self._log_flush_timer.stop()
+            return
+        text = self._pending_log
+        self._pending_log = None
+        self.setText(text)
+        self.setToolTip(text)
 
     def sizeHint(self) -> QSize:  # noqa: N802 — Qt API
         return QSize(0, QFontMetrics(self.font()).height() + 4)
@@ -679,8 +697,10 @@ class LogStrip(QLabel):
     def push(self, level: str, text: str):
         compact = " ".join(text.strip().splitlines())
         prefix = {"warn": "⚠ ", "error": "✕ ", "info": ""}.get(level, "")
-        self.setText(prefix + compact)
-        self.setToolTip(compact)
+        # Trivial: just record the latest; the timer flushes to the label.
+        self._pending_log = prefix + compact
+        if not self._log_flush_timer.isActive():
+            self._log_flush_timer.start()
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.MouseButton.LeftButton:
