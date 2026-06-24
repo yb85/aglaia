@@ -5,9 +5,9 @@ const GITHUB = 'https://github.com/yb85/aglaia';
 // macOS (the most mature build) first; client JS swaps in the visitor's OS.
 const REL = `${GITHUB}/releases/latest/download`;
 const DOWNLOADS = {
-  mac:     { url: `${REL}/Aglaia-macos-arm64.dmg`,       name: 'macOS',   sub: 'Apple Silicon · .dmg' },
-  windows: { url: `${REL}/Aglaia-windows-x64-setup.exe`, name: 'Windows', sub: 'x64 · installer' },
-  linux:   { url: `${REL}/Aglaia-x86_64.AppImage`,       name: 'Linux',   sub: 'x86_64 · AppImage' },
+  mac:     { url: `${REL}/Aglaia-macos-arm64.dmg`,       name: 'macOS',   sub: 'Apple Silicon · .dmg · Metal GPU' },
+  windows: { url: `${REL}/Aglaia-windows-x64-setup.exe`, name: 'Windows', sub: 'x64 · installer · CPU' },
+  linux:   { url: `${REL}/Aglaia-x86_64.AppImage`,       name: 'Linux',   sub: 'x86_64 · AppImage · CPU' },
 };
 const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
@@ -96,6 +96,7 @@ const powers = [
               <span class="dl__sub">uv · pip · brew</span>
             </a>
           </div>
+          <p class="cta__note reveal">CUDA GPU acceleration available via <a href="#install">CLI install</a> on Linux / WSL2.</p>
           <p class="fineprint reveal">macOS · Windows · Linux — free &amp; source-available.</p>
           <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
             <span class="tip__heart" aria-hidden="true">
@@ -336,6 +337,7 @@ aglaia ~/scans/my-book              # launch</code></pre>
             </div>
             <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
           </div>
+          <p class="cta__note">CUDA GPU acceleration available via <a href="#install">CLI install</a> on Linux / WSL2.</p>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
         </div>
       </section>
@@ -657,6 +659,8 @@ aglaia ~/scans/my-book              # launch</code></pre>
       .lede__l1, .lede__l3 { color: #cfddec; }
       .lede__l2 { color: #8ea2b7; }
       .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+      .cta__note { margin-top: 14px; text-align: center; font-size: .82rem; color: #6c7c90; }
+      .cta__note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
       .fineprint { margin-top: 18px; color: #6c7c90; font-size: .9rem; }
 
       .tip {
