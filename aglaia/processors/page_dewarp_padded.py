@@ -28,12 +28,33 @@ import numpy as np
 from scipy.optimize import minimize
 
 
-# Reasonable upper bounds for the project's pipeline. A typical book
-# page at 150 dpi produces ~20 spans and ~300 keypoints. These caps
-# leave large headroom while keeping the padded L-BFGS-B state small
-# enough that per-iteration cost is close to native.
-MAX_NSPANS = 80
-MAX_NPTS = 2000
+# Padding to ONE fixed shape would force every page — even a sparse one — to
+# pay the worst-case point count (measured ~1.7x slower per dewarp at the big
+# shape). Instead we pad to the SMALLEST bucket that fits, so a typical page
+# stays cheap and only a dense / double-page ("both" baseline) problem traces
+# the large shape. jax.jit compiles + caches one program per shape, so the
+# program count is bounded by len(_BUCKETS), not by the per-page span count
+# (which is what the original single-shape padding existed to bound).
+#
+# Sizing (per the pipeline's real geometry): real pages top out around 120
+# text lines, so three line buckets 50 / 80 / 120 cover the range and anything
+# denser gets pruned down to 120. npts is sized generously (~70 pts/line) so a
+# wide, densely-sampled page never trips the point cap before the line cap.
+# Buckets are (max_nspans, max_npts), ascending.
+_BUCKETS = [(50, 3500), (80, 5500), (120, 8500)]
+# The largest bucket is the hard cap: above it, _prune_to_caps thins the lines
+# down to fit (then the result uses the largest bucket).
+MAX_NSPANS = _BUCKETS[-1][0]
+MAX_NPTS = _BUCKETS[-1][1]
+
+
+def _pick_bucket(real_nspans: int, real_npts: int):
+    """Smallest (max_nspans, max_npts) bucket that fits, or None if the
+    problem exceeds even the largest (→ caller prunes first)."""
+    for mns, mnp in _BUCKETS:
+        if real_nspans <= mns and real_npts <= mnp:
+            return mns, mnp
+    return None
 
 
 def _build_padded_optimiser():
@@ -279,8 +300,9 @@ def _get_compiled():
 
 
 def _pad(dstpoints: np.ndarray, keypoint_index: np.ndarray,
-         params: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
-    """Pad inputs to fixed (MAX_NSPANS, MAX_NPTS) shape.
+         params: np.ndarray, max_nspans: int, max_npts: int
+         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
+    """Pad inputs to the chosen fixed (max_nspans, max_npts) bucket shape.
 
     page_dewarp parameter vector layout (see make_keypoint_index +
     project_keypoints in page_dewarp.keypoints):
@@ -323,17 +345,17 @@ def _pad(dstpoints: np.ndarray, keypoint_index: np.ndarray,
         f"npts={real_npts}, extras={ne})"
     )
 
-    max_pvec = 8 + MAX_NSPANS + MAX_NPTS + ne
+    max_pvec = 8 + max_nspans + max_npts + ne
     padded_pvec = np.zeros(max_pvec, dtype=np.float64)
     padded_pvec[:8] = params[:8]
     padded_pvec[8:8 + real_nspans] = params[8:8 + real_nspans]
-    padded_pvec[8 + MAX_NSPANS:8 + MAX_NSPANS + real_npts] = (
+    padded_pvec[8 + max_nspans:8 + max_nspans + real_npts] = (
         params[8 + real_nspans:8 + real_nspans + real_npts]
     )
     if ne:
         padded_pvec[-ne:] = params[-ne:]
 
-    padded_dst = np.zeros((MAX_NPTS + 1, 2), dtype=np.float32)
+    padded_dst = np.zeros((max_npts + 1, 2), dtype=np.float32)
     # Row-aligned with keypoint_index: row 0 = corner target for the
     # origin pin, rows 1..npts = span points.
     padded_dst[:n_rows] = dstpoints.reshape(-1, 2)
@@ -345,39 +367,113 @@ def _pad(dstpoints: np.ndarray, keypoint_index: np.ndarray,
     # zeroes it out. Defaulting to slot 0 (rvec[0]) instead caused
     # division-by-near-zero in the perspective divide → NaN gradients →
     # L-BFGS-B diverged → cv2.remap downstream blew SHRT_MAX.
-    padded_ki = np.zeros((MAX_NPTS + 1, 2), dtype=np.int32)
-    padded_ki[:, 0] = 8 + MAX_NSPANS
+    padded_ki = np.zeros((max_npts + 1, 2), dtype=np.int32)
+    padded_ki[:, 0] = 8 + max_nspans
     padded_ki[:, 1] = 8
-    real_rows = min(keypoint_index.shape[0], MAX_NPTS + 1)
+    real_rows = min(keypoint_index.shape[0], max_npts + 1)
     ki = keypoint_index[:real_rows].astype(np.int32).copy()
     # Point-slot indices (>= 8 + real_nspans) must shift by the
-    # difference between MAX_NSPANS and real_nspans so they hit the
+    # difference between max_nspans and real_nspans so they hit the
     # padded point region rather than the padded span region.
     point_mask = ki[:, 0] >= 8 + real_nspans
-    ki[point_mask, 0] = ki[point_mask, 0] + (MAX_NSPANS - real_nspans)
+    ki[point_mask, 0] = ki[point_mask, 0] + (max_nspans - real_nspans)
     point_mask = ki[:, 1] >= 8 + real_nspans
-    ki[point_mask, 1] = ki[point_mask, 1] + (MAX_NSPANS - real_nspans)
+    ki[point_mask, 1] = ki[point_mask, 1] + (max_nspans - real_nspans)
     padded_ki[:real_rows] = ki
 
-    mask = np.zeros(MAX_NPTS + 1, dtype=np.float32)
+    mask = np.zeros(max_npts + 1, dtype=np.float32)
     # Rows 0..npts are real residuals (row 0 = origin pin vs corner
     # target, exactly as in the stock objective); padded rows stay 0.
     mask[:n_rows] = 1.0
     return padded_pvec, padded_dst, padded_ki, mask, real_nspans, real_npts
 
 
-def _unpad(result_x: np.ndarray, real_nspans: int, real_npts: int) -> np.ndarray:
-    """Reverse the layout shift in _pad."""
+def _unpad(result_x: np.ndarray, real_nspans: int, real_npts: int,
+           max_nspans: int) -> np.ndarray:
+    """Reverse the layout shift in _pad (for the bucket it was padded to)."""
     ne = _n_extras()
     out = np.zeros(8 + real_nspans + real_npts + ne, dtype=result_x.dtype)
     out[:8] = result_x[:8]
     out[8:8 + real_nspans] = result_x[8:8 + real_nspans]
     out[8 + real_nspans:8 + real_nspans + real_npts] = (
-        result_x[8 + MAX_NSPANS:8 + MAX_NSPANS + real_npts]
+        result_x[8 + max_nspans:8 + max_nspans + real_npts]
     )
     if ne:
         out[-ne:] = result_x[-ne:]
     return out
+
+
+def _prune_to_caps(dstpoints: np.ndarray, keypoint_index: np.ndarray,
+                   params: np.ndarray, ne: int):
+    """Down-sample spans (text lines) so the problem fits the padded caps.
+
+    The sheet model is low-dimensional — fitting it to a well-distributed
+    subset of lines gives essentially the same dewarp as fitting all of
+    them, far cheaper than the per-shape stock fallback (and it keeps the
+    twist tail the stock path drops).
+
+    Heuristic: always keep the two extremity spans (top + bottom line),
+    then greedily drop the least-valuable interior span until both caps
+    hold. Value score = ``line_length * gap_opened_if_removed`` (smaller is
+    dropped first):
+      * short lines (few keypoints) are cheaper to lose — low length factor;
+      * dropping a line in a SPARSE region opens a big vertical hole — large
+        gap factor protects it; dense clusters score low and thin out first.
+    Recomputed each step, so a removal lifts its neighbours' protection (you
+    never carve two adjacent lines out of the same spot). Drops every
+    keypoint of a dropped span and reindexes pvec / keypoint_index /
+    dstpoints accordingly.
+
+    Returns (dst', ki', params', ok). ok=False when it can't get under the
+    caps without dropping an extremity (degenerate — a single line denser
+    than the point cap), so the caller can fall back to the stock optimiser.
+    """
+    dst = np.asarray(dstpoints).reshape(-1, 2)
+    npts = dst.shape[0] - 1
+    nspans = int(params.shape[0]) - 8 - npts - ne
+    if nspans < 2:
+        return dstpoints, keypoint_index, params, False
+
+    span_of = keypoint_index[1:, 1].astype(np.int64) - 8   # (npts,)
+    line_len = np.bincount(span_of, minlength=nspans).astype(float)  # pts/line
+    line_y = np.asarray(params[8:8 + nspans], dtype=float)           # line Y
+
+    kept = list(range(nspans))
+    extremities = {0, nspans - 1}
+    cur_pts = npts
+    while len(kept) > MAX_NSPANS or cur_pts > MAX_NPTS:
+        cand = [i for i, s in enumerate(kept) if s not in extremities]
+        if not cand:
+            return dstpoints, keypoint_index, params, False
+        best_i, best_score = None, None
+        for i in cand:
+            s = kept[i]
+            y_prev = line_y[kept[i - 1]] if i > 0 else line_y[s]
+            y_next = line_y[kept[i + 1]] if i < len(kept) - 1 else line_y[s]
+            score = line_len[s] * abs(y_next - y_prev)   # hole opened if cut
+            if best_score is None or score < best_score:
+                best_i, best_score = i, score
+        cur_pts -= int(line_len[kept[best_i]])
+        del kept[best_i]
+    kept = np.array(sorted(kept), dtype=int)
+    span_remap = {int(o): i for i, o in enumerate(kept)}
+    keep_mask = np.isin(span_of, kept)
+    kept_pts = np.nonzero(keep_mask)[0]                     # old point idx
+    new_nspans, new_npts = len(kept), len(kept_pts)
+
+    head = params[:8]
+    span_y = params[8:8 + nspans][kept]
+    point_x = params[8 + nspans:8 + nspans + npts][kept_pts]
+    tail = params[-ne:] if ne else np.empty(0, dtype=params.dtype)
+    new_params = np.concatenate([head, span_y, point_x, tail])
+
+    new_dst = np.vstack([dst[0:1], dst[1:][keep_mask]])
+
+    new_ki = np.zeros((new_npts + 1, 2), dtype=keypoint_index.dtype)
+    new_ki[0] = (8 + new_nspans, 8)
+    new_ki[1:, 0] = 8 + new_nspans + np.arange(new_npts)
+    new_ki[1:, 1] = 8 + np.array([span_remap[int(span_of[j])] for j in kept_pts])
+    return new_dst, new_ki, new_params, True
 
 
 def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
@@ -385,35 +481,46 @@ def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
                            params: np.ndarray):
     """Drop-in replacement for page_dewarp.optimise._jax._run_jax_lbfgsb.
 
-    Falls back to the original implementation when the input exceeds the
-    padded caps — correctness over performance.
+    Over-cap inputs are pruned down to the padded caps by dropping interior
+    spans (see _prune_to_caps), keeping the fast cached-JIT path. Only a
+    degenerate single-line-over-the-point-cap problem falls back to the
+    stock optimiser.
     """
     import jax
     import jax.numpy as jnp
     from page_dewarp.options import cfg
 
+    ne = _n_extras()
     # dstpoints rows = npts + 1 (corner row included).
     real_npts = int(dstpoints.reshape(-1, 2).shape[0]) - 1
-    real_nspans = int(params.shape[0]) - 8 - real_npts - _n_extras()
+    real_nspans = int(params.shape[0]) - 8 - real_npts - ne
 
-    if real_npts > MAX_NPTS or real_nspans > MAX_NSPANS:
-        # NOTE: stock optimiser is cubic-only; twist-model inputs above
-        # the padding caps would silently lose the model tail. Caps are
-        # sized so this never triggers on real pages.
-        #
-        # Use the ORIGINAL captured at install time — NOT a re-import of
-        # `_jax._run_jax_lbfgsb`, which install() overwrote with THIS very
-        # function. Re-importing it made the fallback call itself → infinite
-        # recursion → "maximum recursion depth exceeded", killing the dewarp
-        # branch (no dewarp produced) for any over-cap crop.
-        if _ORIG_RUN_JAX_LBFGSB is None:
-            raise RuntimeError(
-                "padded JAX over-cap fallback unavailable: original "
-                "_run_jax_lbfgsb was not captured at install time")
-        return _ORIG_RUN_JAX_LBFGSB(dstpoints, keypoint_index, params)
+    orig_params = params
+    pruned = False
+    bucket = _pick_bucket(real_nspans, real_npts)
+    if bucket is None:
+        # Above the largest bucket → thin the lines down to fit it.
+        dstpoints, keypoint_index, params, ok = _prune_to_caps(
+            dstpoints, keypoint_index, params, ne)
+        if ok:
+            pruned = True
+            real_npts = int(dstpoints.reshape(-1, 2).shape[0]) - 1
+            real_nspans = int(params.shape[0]) - 8 - real_npts - ne
+            bucket = _pick_bucket(real_nspans, real_npts)
+        else:
+            # Degenerate (a single line denser than the point cap): fall back
+            # to the stock optimiser. Use the ORIGINAL captured at install
+            # time — re-importing `_jax._run_jax_lbfgsb` returns THIS function
+            # (install overwrote it) → infinite recursion.
+            if _ORIG_RUN_JAX_LBFGSB is None:
+                raise RuntimeError(
+                    "padded JAX over-cap fallback unavailable: original "
+                    "_run_jax_lbfgsb was not captured at install time")
+            return _ORIG_RUN_JAX_LBFGSB(dstpoints, keypoint_index, params)
+    max_nspans, max_npts = bucket
 
     padded_pvec, padded_dst, padded_ki, mask, _, _ = _pad(
-        dstpoints, keypoint_index, params
+        dstpoints, keypoint_index, params, max_nspans, max_npts
     )
     dst_j = jnp.array(padded_dst)
     ki_j = jnp.array(padded_ki, dtype=jnp.int32)
@@ -446,7 +553,19 @@ def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
         jac=True,
         options={"maxiter": cfg.OPT_MAX_ITER, "maxcor": cfg.MAX_CORR},
     )
-    result.x = _unpad(result.x, real_nspans, real_npts)
+    result.x = _unpad(result.x, real_nspans, real_npts, max_nspans)
+    if pruned:
+        # The optimiser ran on the pruned (fewer-spans) problem, so result.x
+        # is pruned-length. Only the GLOBAL sheet params drive the dewarp map
+        # — transform pvec[:6], cubic pvec[6:8], spline tail pvec[-ne:]
+        # (project_xy_model reads nothing from the per-span-Y / per-point-X
+        # block). Graft those into a full-size copy of the original pvec so
+        # the caller gets the shape it expects with the right geometry.
+        grafted = np.array(orig_params, dtype=result.x.dtype, copy=True)
+        grafted[:8] = result.x[:8]
+        if ne:
+            grafted[-ne:] = result.x[-ne:]
+        result.x = grafted
     return result
 
 
