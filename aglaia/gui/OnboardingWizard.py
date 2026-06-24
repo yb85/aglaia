@@ -129,6 +129,10 @@ class _StepDots(QWidget):
         self._current = idx
         self.update()
 
+    def set_labels(self, labels: list[str]) -> None:
+        self._labels = labels
+        self.update()
+
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt API)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -266,6 +270,9 @@ class OnboardingWizard(QDialog):
         for code, label in SUPPORTED_LOCALES:
             self._lang_combo.addItem(label, userData=code)
         self._preselect_language()
+        # Connect AFTER preselect so the initial setCurrentIndex doesn't fire
+        # the live-switch handler.
+        self._lang_combo.currentIndexChanged.connect(self._on_language_changed)
         self._lang_combo.setMinimumWidth(200)
         # Force an OPAQUE styled popup — the native/default popup renders with a
         # transparent background here, so items overlap the text behind it.
@@ -279,7 +286,7 @@ class OnboardingWizard(QDialog):
         lang_row.addStretch(1)
         v.addLayout(lang_row)
 
-        hint = QLabel(self.tr("A language change applies from the next launch."))
+        hint = QLabel(self.tr("Applied immediately."))
         hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         hint.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
         v.addWidget(hint)
@@ -456,6 +463,52 @@ class OnboardingWizard(QDialog):
         idx = self._lang_combo.findData(cur)
         if idx >= 0:
             self._lang_combo.setCurrentIndex(idx)
+
+    # ── live language switch ─────────────────────────────────────────────
+    def _on_language_changed(self) -> None:
+        """Apply the picked language immediately: install the translator,
+        persist it, and rebuild the (few, simple) pages in the new language."""
+        if self._downloading:
+            return
+        code = self._lang_combo.currentData() or ""
+        app = QApplication.instance()
+        if app is not None:
+            from aglaia.i18n import install_translator
+            install_translator(app, code)
+        try:
+            from aglaia.app_data import db
+            with db.session() as conn:
+                db.set(conn, db.KEY_LANGUAGE, code)
+                conn.commit()
+        except Exception:
+            pass
+        self._rebuild_pages()
+        self._retranslate_chrome()
+
+    def _rebuild_pages(self) -> None:
+        """Recreate the stack pages in the current language, preserving the
+        current step and any user-toggled (enabled) model checkboxes."""
+        idx = self._stack.currentIndex()
+        saved = {k: c.isChecked() for k, (c, _s) in self._model_checks.items()}
+        while self._stack.count():
+            wdg = self._stack.widget(0)
+            self._stack.removeWidget(wdg)
+            wdg.deleteLater()
+        self._stack.addWidget(self._build_welcome_page())      # re-wires combo
+        self._stack.addWidget(self._build_permissions_page())
+        self._stack.addWidget(self._build_models_page())
+        for k, (c, _s) in self._model_checks.items():
+            if c.isEnabled() and k in saved:
+                c.setChecked(saved[k])
+        self._stack.setCurrentIndex(idx)
+
+    def _retranslate_chrome(self) -> None:
+        """Footer + window strings live outside the rebuilt stack."""
+        self.setWindowTitle(self.tr("Set up Aglaïa"))
+        self._btn_back.setText(self.tr("← Back"))
+        self._dots.set_labels([self.tr("Welcome"), self.tr("Permissions"),
+                               self.tr("Models")])
+        self._update_nav()
 
     # ── navigation ───────────────────────────────────────────────────────
     def _go(self, delta: int) -> None:
