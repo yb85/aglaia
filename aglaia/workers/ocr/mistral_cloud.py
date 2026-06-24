@@ -80,6 +80,39 @@ def _mistralai_available() -> bool:
         return False
 
 
+def _aglaia_user_agent() -> str:
+    """``Aglaia/<version> (+url)`` for the Mistral API User-Agent."""
+    ver = "0"
+    try:
+        from importlib.metadata import version
+        ver = version("aglaia")
+    except Exception:
+        import os
+        ver = (os.environ.get("AGLAIA_VERSION") or "0").lstrip("v") or "0"
+    return f"Aglaia/{ver} (+https://aglaia.bibli.cc)"
+
+
+def make_mistral_client(api_key: str):
+    """Mistral SDK client whose HTTP requests carry an Aglaïa identifier.
+
+    The SDK sets its own ``User-Agent``; an httpx ``request`` event-hook
+    *appends* the Aglaïa token (rather than replacing it), so Mistral can
+    attribute traffic to the integration without losing the SDK version. The
+    caller must keep a reference to the returned client — the bundled httpx
+    client closes with it."""
+    import httpx
+    from mistralai import Mistral
+
+    ua = _aglaia_user_agent()
+
+    def _tag_ua(request: "httpx.Request") -> None:
+        existing = request.headers.get("user-agent", "")
+        request.headers["user-agent"] = f"{existing} {ua}".strip()
+
+    return Mistral(api_key=api_key,
+                   client=httpx.Client(event_hooks={"request": [_tag_ua]}))
+
+
 def _is_bitonal(arr: np.ndarray) -> bool:
     """True when the RGB page is pure black/white (Aglaïa binarizer output)
     — so it can ride the lossless CCITT G4 path. Cheap unique-value probe."""
@@ -345,9 +378,7 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
     # ── Mistral round-trip ────────────────────────────────────────────
     def _ocr_pdf(self, api_key: str, pdf_bytes: bytes) -> list[str]:
         """Upload the PDF, OCR it, return per-page markdown (page order)."""
-        from mistralai import Mistral
-
-        client = Mistral(api_key=api_key)
+        client = make_mistral_client(api_key)
         uploaded = client.files.upload(
             file={"file_name": "aglaia-ocr.pdf", "content": pdf_bytes},
             purpose="ocr",

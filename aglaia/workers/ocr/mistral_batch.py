@@ -37,8 +37,8 @@ FAILED_STATUSES = ("FAILED", "TIMEOUT_EXCEEDED", "CANCELLED")
 
 
 def _client(api_key: str):
-    from mistralai import Mistral
-    return Mistral(api_key=api_key)
+    from .mistral_cloud import make_mistral_client
+    return make_mistral_client(api_key)
 
 
 def _norm_status(s) -> str:
