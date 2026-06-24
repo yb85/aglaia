@@ -312,6 +312,11 @@ class MainWindow(QMainWindow):
         # overrides the uncalibrated input_dpi default; a real calibration
         # takes precedence over it.
         self._manual_dpi: Optional[float] = None
+        # Session DPI, decoupled from the camera matrix: the calibrated value
+        # normalised to zoom=1.0 plus the zoom it was measured at, so the live
+        # readout auto-scales with the camera zoom and warns when extrapolated.
+        self._dpi_base: Optional[float] = None     # DPI at zoom = 1.0
+        self._dpi_cal_zoom: float = 1.0            # camera zoom when calibrated
         cal_cfg = self.args.config.get("calibration", {})
         self.cal_target_count = cal_cfg.get("calnum", 10)
         # Defaults match the generated board (scripts/gen_calibration_board.py):
@@ -1489,21 +1494,27 @@ class MainWindow(QMainWindow):
         ct.format_combo.currentIndexChanged.connect(self._on_capture_format_changed)
         # Seed the DPI readout (uncalibrated default until calibration runs).
         try:
-            ct.set_dpi(self.effective_dpi(), calibrated=self._manual_dpi is not None,
-                       manual=False)
+            ct.set_dpi(self.effective_dpi(),
+                       calibrated=self._dpi_base is not None, manual=False)
         except Exception:
             pass
         return ct
 
     def _refresh_dpi_readout(self) -> None:
-        """Push the current effective DPI into the capture tab's readout."""
+        """Push the current effective DPI into the capture tab's readout. Flags
+        zoom_scaled when the live zoom differs from the calibration zoom, so the
+        readout warns that the DPI is extrapolated (recalibrate for accuracy)."""
         ct = getattr(self, "_capture_tab", None)
-        if ct is not None and hasattr(ct, "set_dpi"):
-            try:
-                ct.set_dpi(self.effective_dpi(), calibrated=bool(self.calibration),
-                           manual=bool(self._manual_dpi is not None and not self.calibration))
-            except Exception:
-                pass
+        if ct is None or not hasattr(ct, "set_dpi"):
+            return
+        zoom_scaled = (self._dpi_base is not None
+                       and abs(self._current_zoom() - self._dpi_cal_zoom) > 0.01)
+        try:
+            ct.set_dpi(self.effective_dpi(),
+                       calibrated=self._dpi_base is not None,
+                       manual=False, zoom_scaled=zoom_scaled)
+        except Exception:
+            pass
 
     def _prompt_manual_dpi(self) -> None:
         """Let the user type the scan DPI directly (the readout is clickable).
@@ -1523,15 +1534,25 @@ class MainWindow(QMainWindow):
         self._apply_dpi(float(val))
         self.toast(self.tr("DPI set manually — {dpi:.0f} dpi.").format(dpi=float(val)))
 
-    def _apply_dpi(self, dpi: float) -> None:
-        """Apply a per-session scan DPI (from manual entry, the card, or the
-        measure-a-distance dialog). DPI is distance-dependent — NOT a camera
-        intrinsic — so it is kept as a session override and fed to the workers
-        via ``input_dpi``; captured scans then persist their own DPI in the
-        project DB. Never written to camera_params.json."""
+    def _current_zoom(self) -> float:
+        if self.webcam_thread is not None:
+            return max(float(getattr(self.webcam_thread, "current_zoom", 1.0)), 1e-6)
+        return 1.0
+
+    def _apply_dpi(self, dpi: float, at_zoom: Optional[float] = None) -> None:
+        """Apply a per-session scan DPI (manual entry / card / measure-distance).
+        DPI is distance-dependent — NOT a camera intrinsic. ``at_zoom`` is the
+        camera zoom the value was measured at; it's stored normalised to zoom=1.0
+        so :meth:`effective_dpi` auto-scales as the camera zooms. Fed to workers
+        via ``input_dpi``; captured scans persist their own DPI. Never written to
+        camera_params.json."""
+        z = float(at_zoom) if at_zoom is not None else self._current_zoom()
+        z = max(z, 1e-6)
+        self._dpi_base = float(dpi) / z
+        self._dpi_cal_zoom = z
         self._manual_dpi = float(dpi)
         try:
-            self.args.options["general"]["input_dpi"] = float(dpi)
+            self.args.options["general"]["input_dpi"] = self.effective_dpi()
         except Exception:
             pass
         if self.processing_queue:
@@ -2642,17 +2663,16 @@ class MainWindow(QMainWindow):
         # camera matrix. (The previous code routed this through save_calibration
         # to a read-only relative path in the frozen app, which threw and left
         # the readout stuck at the uncalibrated 100 dpi.)
-        self._apply_dpi(float(dpi))
+        self._apply_dpi(float(dpi), at_zoom=zoom)
         self.toast(self.tr("DPI calibrated — {dpi:.0f} dpi.").format(dpi=float(dpi)))
         # The dialog auto-closes on `accept()`; nothing more to do here.
 
 
     def effective_dpi(self) -> float:
-        """Current scan DPI. A per-session/project value set manually or by the
-        DPI-estimation dialog — decoupled from the camera matrix (which carries
-        no DPI, since DPI depends on camera-to-page distance)."""
-        if self._manual_dpi is not None:
-            return float(self._manual_dpi)
+        """Current scan DPI = the calibrated base (at zoom 1.0) scaled by the
+        live camera zoom. Per-session, decoupled from the camera matrix."""
+        if self._dpi_base is not None:
+            return float(self._dpi_base) * self._current_zoom()
         return float(self.args.options["general"].get("input_dpi", 100.0))
 
     # ── Pipeline editor ────────────────────────────────────────────────

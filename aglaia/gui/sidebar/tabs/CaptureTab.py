@@ -463,11 +463,12 @@ class CaptureTab(QWidget):
         self.preview_label.clear()
         self.preview_label.setText(self.tr("No camera"))
 
-    def set_dpi(self, dpi: float, calibrated: bool, manual: bool = False) -> None:
+    def set_dpi(self, dpi: float, calibrated: bool, manual: bool = False,
+                zoom_scaled: bool = False) -> None:
         """Update the DPI readout. ``calibrated`` distinguishes a measured
         value from the uncalibrated default (shown dimmer + flagged);
-        ``manual`` flags a user-typed value (shown bold like calibrated, but
-        tagged ``(manual)`` since no camera calibration backs it)."""
+        ``manual`` flags a user-typed value. ``zoom_scaled`` flags a value the
+        camera zoom has extrapolated since calibration → recalibrate warning."""
         if calibrated:
             self.dpi_label.setText(self.tr("DPI: {dpi:.0f}").format(dpi=dpi))
             self.dpi_label.setStyleSheet(f"color: {COLOR_FONT_PRIMARY}; font-weight: 600;")
@@ -480,12 +481,19 @@ class CaptureTab(QWidget):
                 self.tr("DPI: {dpi:.0f} (uncalibrated)").format(dpi=dpi))
             self.dpi_label.setStyleSheet(f"color: {COLOR_FONT_MUTED};")
 
-        # Resolution-quality warning, by DPI threshold.
+        # Warnings, in priority order: unreadable DPI (red) > zoom-extrapolated
+        # (yellow, recalibrate) > low-but-usable DPI (yellow).
         if dpi < 80:
             self.dpi_warning.setText(self.tr(
                 "below 80 DPI usual book text is barely readable"))
             self.dpi_warning.setStyleSheet(
                 f"color: {COLOR_ERROR}; font-size: 10px; font-weight: 600;")
+            self.dpi_warning.setVisible(True)
+        elif zoom_scaled:
+            self.dpi_warning.setText(self.tr(
+                "DPI auto-updated on zoom — recalibrate for accuracy"))
+            self.dpi_warning.setStyleSheet(
+                f"color: {COLOR_WARNING}; font-size: 10px; font-weight: 600;")
             self.dpi_warning.setVisible(True)
         elif dpi < 110:
             self.dpi_warning.setText(self.tr(
