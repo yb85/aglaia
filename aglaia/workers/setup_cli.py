@@ -8,24 +8,34 @@
 """``aglaia --setup`` — interactive first-run setup for CLI-only installs.
 
 The terminal counterpart of the GUI OnboardingWizard, so a ``--without-gui``
-install is viable on its own: language → permissions note → model picker →
+install is viable on its own: permissions note → model picker →
 download → bootstrap the config DB + seed pipelines → print where everything
-lives. Uses rich (output / progress) + questionary (arrow-key select +
-checkboxes). No Qt.
+lives. Uses rich (output / progress) + questionary (checkbox picker). No Qt.
 """
 
 from __future__ import annotations
 
 import sys
 
-# Models offered, in order: (key, label, role-caption).
-# dbnet is the default detector (required off-macOS). Vosk (voice control) is
-# deliberately absent — it only drives live capture, which a headless/CLI
-# install has no use for; offer it from the GUI Downloader instead.
-_MODELS = [
-    ("dbnet", "DBnet — page detection", "the default page detector"),
-    ("surya", "Surya — neural OCR", "optional, higher-quality OCR"),
-]
+# A headless/CLI install has no GUI Downloader, so --setup is the only place to
+# fetch models — offer everything the registry knows, EXCEPT voice control
+# (Vosk), which only drives live capture and is useless headless. dbnet is the
+# default detector (required off-macOS) and the only pre-ticked model.
+_EXCLUDE_KEYS = {"vosk_en"}        # capture-only, no headless use
+_MAC_ONLY_KEYS = {"paddle_vl"}     # MLX 4-bit — Apple Silicon only
+_DEFAULT_KEYS = {"dbnet"}          # pre-ticked recommendation
+_ORDER = ["dbnet", "east", "surya", "paddle_vl"]   # display order; rest appended
+
+
+def _offered_specs(is_mac: bool) -> list:
+    """Registry specs offered by --setup, in display order, minus excludes
+    (Vosk always; MLX-only models off macOS — they can't run there)."""
+    from aglaia.app_data.models import _load_model_specs
+    skip = _EXCLUDE_KEYS if is_mac else _EXCLUDE_KEYS | _MAC_ONLY_KEYS
+    specs = {s.key: s for s in _load_model_specs() if s.key not in skip}
+    ordered = [specs[k] for k in _ORDER if k in specs]
+    ordered += [s for k, s in specs.items() if k not in _ORDER]
+    return ordered
 
 
 def has_user_config() -> bool:
@@ -58,7 +68,6 @@ def run_setup() -> int:
         app_data_dir, db as cfg, log_dir, models_dir, seed_pipelines,
     )
     from aglaia.app_data.models import download_model, is_model_installed, spec_for
-    from aglaia.i18n import SUPPORTED_LOCALES
 
     console = Console()
     is_mac = sys.platform == "darwin"
@@ -67,24 +76,10 @@ def run_setup() -> int:
         "[bold]Set up Aglaïa[/bold]\nTake a minute to configure your install.",
         border_style="cyan"))
 
-    # 1 ─ Language
-    try:
-        with cfg.session() as conn:
-            cur_lang = cfg.get(conn, cfg.KEY_LANGUAGE, "") or ""
-    except Exception:
-        cur_lang = ""
-    lang_choices = [questionary.Choice(label, value=code)
-                    for code, label in SUPPORTED_LOCALES]
-    # questionary matches `default` against a Choice's *value*, not its label.
-    codes = {code for code, _ in SUPPORTED_LOCALES}
-    default_code = cur_lang if cur_lang in codes else lang_choices[0].value
-    language = questionary.select(
-        "Language", choices=lang_choices, default=default_code).ask()
-    if language is None:
-        console.print("[yellow]Setup cancelled.[/yellow]")
-        return 1
+    # (No language step — UI language only affects the Qt GUI; the CLI is
+    # English-only, and the GUI prompts for it on its own first run.)
 
-    # 2 ─ Permissions note
+    # 1 ─ Permissions note
     console.print(Panel(
         "Aglaïa runs offline by default — your pages stay on this machine.\n"
         "  • Camera / microphone — only for live capture or voice control.\n"
@@ -92,16 +87,16 @@ def run_setup() -> int:
         "  • Files — projects, settings and models live in your app-data folder.",
         title="Permissions", border_style="grey50"))
 
-    # 3 ─ Models
+    # 2 ─ Models
     choices = []
-    for key, label, role in _MODELS:
-        installed = is_model_installed(key)
-        spec = spec_for(key)
-        size = f"~{spec.approx_size_mb} MB" if spec else "?"
-        checked = (key == "dbnet")   # recommended default
-        suffix = "  [already installed]" if installed else f"  ({size} · {role})"
+    for spec in _offered_specs(is_mac):
+        installed = is_model_installed(spec.key)
+        checked = spec.key in _DEFAULT_KEYS
+        meta = f"~{spec.approx_size_mb} MB · {spec.purpose}"
+        suffix = "  [already installed]" if installed else f"  ({meta})"
         choices.append(questionary.Choice(
-            label + suffix, value=key, checked=checked and not installed,
+            spec.title + suffix, value=spec.key,
+            checked=checked and not installed,
             disabled="installed" if installed else None))
     if not is_mac:
         console.print("[grey50]DBnet is required off macOS (no Apple Vision "
@@ -119,7 +114,7 @@ def run_setup() -> int:
     to_fetch = [s for s in (spec_for(k) for k in picked)
                 if s is not None and not is_model_installed(s.key)]
 
-    # 4 ─ Download
+    # 3 ─ Download
     failures = []
     for spec in to_fetch:
         with Progress(TextColumn("[cyan]{task.description}"), BarColumn(),
@@ -138,11 +133,10 @@ def run_setup() -> int:
         console.print("[yellow]Some downloads failed — re-run "
                       "`aglaia --setup` to retry.[/yellow]")
 
-    # 5 ─ Persist + bootstrap config, seed pipelines
+    # 4 ─ Persist + bootstrap config, seed pipelines
     try:
         with cfg.session() as conn:
             cfg.bootstrap(conn)
-            cfg.set(conn, cfg.KEY_LANGUAGE, language or "")
             cfg.set(conn, cfg.KEY_WELCOME_SEEN, True)
             cfg.set(conn, cfg.KEY_MODELS_PROMPT_DISMISSED, True)
             conn.commit()
@@ -154,7 +148,7 @@ def run_setup() -> int:
     except Exception:
         pass
 
-    # 6 ─ Where things live
+    # 5 ─ Where things live
     console.print(Panel(
         f"Config DB : {app_data_dir() / 'aglaia-config.db'}\n"
         f"Pipelines : {app_data_dir() / 'pipelines'}  (edit the *.yaml by hand)\n"
