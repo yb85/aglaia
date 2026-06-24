@@ -4393,6 +4393,39 @@ class MainWindow(QMainWindow):
         if self.voice_thread is not None:
             try:
                 self.voice_thread.stop()
+                self.voice_thread.quit()
+                self.voice_thread.wait(2000)
+            except Exception:
+                pass
+        # Off-chain OCR worker is a QThread — stop it explicitly.
+        ocr = getattr(self, "_ocr_worker", None)
+        if ocr is not None:
+            try:
+                ocr.cancel()
+                ocr.wait(3000)
+            except Exception:
+                pass
+        # Model-downloader worker threads are unparented QThreads (so the
+        # sweep below can't see them) — stop them at the source. This was the
+        # reported quit-crash: closing the app mid-download.
+        dlg = getattr(self, "_downloader_dialog", None)
+        if dlg is not None:
+            try:
+                dlg.shutdown()
+            except Exception:
+                pass
+        # Defensive sweep: any QThread still running at this point (pipeline
+        # preview, debug overlay, model download, …) must be stopped before the
+        # interpreter tears QApplication down, or Qt aborts the process with
+        # "QThread: Destroyed while thread is still running" (SIGABRT on quit).
+        from PySide6.QtCore import QThread
+        for t in self.findChildren(QThread):
+            try:
+                if t.isRunning():
+                    t.quit()
+                    if not t.wait(3000):
+                        t.terminate()
+                        t.wait(1000)
             except Exception:
                 pass
         try:

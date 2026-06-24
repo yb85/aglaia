@@ -954,6 +954,23 @@ class _ModelCard(Card):
         if self._worker is worker:
             self._worker = None
 
+    def shutdown(self) -> None:
+        """Stop an in-flight download before the app exits. The worker's
+        blocking network read only breaks on its ``_stop`` flag, so signal
+        the worker first, THEN join the thread — otherwise quitting the app
+        mid-download destroys a running QThread → SIGABRT."""
+        worker, thread = self._worker, self._thread
+        if worker is not None:
+            try:
+                worker.stop()
+            except Exception:
+                pass
+        if thread is not None and thread.isRunning():
+            thread.quit()
+            if not thread.wait(3000):
+                thread.terminate()
+                thread.wait(1000)
+
 
 # ── dialog ──────────────────────────────────────────────────────────
 
@@ -1090,7 +1107,18 @@ class ModelDownloaderDialog(QDialog):
         if parent is not None:
             parent.close()
 
+    def shutdown(self) -> None:
+        """Stop every in-flight download. Safe to call repeatedly; invoked on
+        dialog close and from MainWindow.closeEvent so quitting mid-download
+        doesn't destroy a running QThread (SIGABRT on quit)."""
+        for card in self._cards.values():
+            try:
+                card.shutdown()
+            except Exception:
+                pass
+
     def closeEvent(self, ev):  # noqa: N802 — Qt API
+        self.shutdown()
         # Warn (once) that a model fetched this session needs a relaunch
         # before it's usable. Doesn't block the close — just informs.
         if self._downloaded_this_session():
