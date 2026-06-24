@@ -55,4 +55,6 @@ jobs:
           path: dist/
       - uses: astral-sh/setup-uv@v5
       - name: Publish to PyPI (trusted publishing)
-        run: uv publish
+        # --check-url skips files already on the index, so re-running a tag is
+        # idempotent (no "400 File already exists" once a publish succeeded).
+        run: uv publish --check-url https://pypi.org/simple/
