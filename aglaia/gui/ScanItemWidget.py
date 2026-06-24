@@ -425,6 +425,10 @@ class ScanItemWidget(QWidget):
         else:
             self._opacity_effect.setOpacity(1.0)
             self._spinner.stop()
+            # Render the now-complete result. During processing handle_event
+            # deferred all thumbnail builds (spinner-only), so this is the first
+            # render of the final stage.
+            self.schedule_refresh()
 
     def set_ocr_state(self, state: str) -> None:
         """Update the scan-level OCR badge state (`none` | `fresh` |
@@ -513,7 +517,13 @@ class ScanItemWidget(QWidget):
         self._register_node(filestem, step_name, node_id=node_id,
                             image_id=image_id, meta=meta)
         self._auto_advance(filestem, step_name)
-        self.schedule_refresh()
+        # While processing, show only the spinner/pending state and DEFER all
+        # thumbnail rendering — the final result is rendered once the branch
+        # finishes (set_processing(False) → schedule_refresh). This skips
+        # building a QPixmap for every intermediate stage of every scan, the
+        # dominant GUI-memory + churn cost of a large reprocess.
+        if not self._is_processing:
+            self.schedule_refresh()
         if not defer_header:
             self.update_header()
 
