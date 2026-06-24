@@ -54,6 +54,11 @@ def setup_jax():
     os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
     os.environ["ENABLE_PJRT_COMPATIBILITY"] = "1"
     jax.config.update("jax_enable_x64", False)
+    # NVIDIA GPUs run float32 matmuls as TF32 (19-bit mantissa) by default.
+    # That reduced precision makes the L-BFGS sheet optimiser converge to a
+    # different — and visibly worse — dewarp than the CPU backend, so output
+    # geometry mismatches across CPU/GPU. Pin highest precision for parity.
+    jax.config.update("jax_default_matmul_precision", "highest")
     # JAX Metal bindings incomplete on macOS; CUDA / CPU picked automatically.
 
 # Import page-dewarp library components
