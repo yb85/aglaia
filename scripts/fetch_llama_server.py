@@ -96,12 +96,24 @@ def _detect_host_key() -> str:
     raise SystemExit(f"unsupported host platform: {sys_name}/{machine}")
 
 
+def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Base headers plus an ``Authorization`` bearer when a GitHub token is in
+    the environment. The anonymous api.github.com limit (60 req/hr/IP) is
+    routinely exhausted on shared CI runners → HTTP 403; a token lifts it to
+    5000/hr. Pass ``GITHUB_TOKEN`` (Actions default) or ``GH_TOKEN``."""
+    headers = {"User-Agent": "aglaia-build"}
+    if extra:
+        headers.update(extra)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _fetch_release(tag: str | None) -> dict:
     url = API_LATEST if tag is None else API_TAG.format(tag=tag)
     req = urllib.request.Request(
-        url,
-        headers={"Accept": "application/vnd.github+json",
-                 "User-Agent": "aglaia-build"},
+        url, headers=_auth_headers({"Accept": "application/vnd.github+json"}),
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -121,9 +133,7 @@ def _pick_asset(release: dict, key: str) -> dict | None:
 
 
 def _download(url: str) -> bytes:
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "aglaia-build"}
-    )
+    req = urllib.request.Request(url, headers=_auth_headers())
     with urllib.request.urlopen(req, timeout=300) as resp:
         return resp.read()
 
