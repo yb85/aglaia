@@ -1,9 +1,15 @@
 ---
 const GITHUB = 'https://github.com/yb85/aglaia';
-// Direct download of the newest macOS (Apple Silicon) DMG — the release CI
-// publishes a stable-named copy so this URL never needs the version. Avoids
-// dumping new users on the GitHub releases page.
-const DOWNLOAD = `${GITHUB}/releases/latest/download/Aglaia-macos-arm64.dmg`;
+// Fixed-name "latest" artifacts published by the release CI — these URLs never
+// need a version, so they always point at the newest build. The page renders
+// macOS (the most mature build) first; client JS swaps in the visitor's OS.
+const REL = `${GITHUB}/releases/latest/download`;
+const DOWNLOADS = {
+  mac:     { url: `${REL}/Aglaia-macos-arm64.dmg`,       name: 'macOS',   sub: 'Apple Silicon · .dmg' },
+  windows: { url: `${REL}/Aglaia-windows-x64-setup.exe`, name: 'Windows', sub: 'x64 · installer' },
+  linux:   { url: `${REL}/Aglaia-x86_64.AppImage`,       name: 'Linux',   sub: 'x86_64 · AppImage' },
+};
+const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
 
 // Icons match the app sidebar tabs (lucide): camera, sliders-horizontal,
@@ -72,10 +78,25 @@ const powers = [
             <span class="lede__l3">No flatbed, no bulky rig: just you, your laptop and your phone.</span>
           </p>
           <div class="cta reveal">
-            <a class="btn" href={DOWNLOAD} data-download>Download for macOS</a>
-            <a class="btn btn--ghost" href="/docs">Read the docs →</a>
+            <div class="dl">
+              <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
+                <span class="dl__label">Download for {DOWNLOADS.mac.name}</span>
+                <span class="dl__sub">{DOWNLOADS.mac.sub}</span>
+              </a>
+              <button class="btn btn--lg dl__toggle" type="button"
+                      aria-haspopup="true" aria-expanded="false" aria-label="Choose another platform">▾</button>
+              <div class="dl__menu" role="menu" hidden>
+                <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
+                <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
+                <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
+              </div>
+            </div>
+            <a class="btn btn--ghost btn--lg btn--stack" href="#install" data-cli>
+              <span class="dl__label">CLI installation</span>
+              <span class="dl__sub">uv · pip · brew</span>
+            </a>
           </div>
-          <p class="fineprint reveal">Linux and Windows versions coming soon…</p>
+          <p class="fineprint reveal">macOS · Windows · Linux — free &amp; source-available.</p>
           <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
             <span class="tip__heart" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
@@ -247,9 +268,11 @@ const powers = [
           ))}
         </div>
 
+        <h3 class="code__title reveal" id="install">Install from the command line</h3>
+        <p class="code__lead reveal">GUI builds: <b>macOS</b> .dmg · <b>Windows</b> installer · <b>Linux</b> AppImage (above). For a CLI-only or scripted setup, use uv or pip on any platform.</p>
         <div class="code reveal">
           <div class="code__tabs">
-            <button class="code__tab is-active" data-tab="brew" type="button">Homebrew</button>
+            <button class="code__tab is-active" data-tab="brew" type="button">Homebrew (macOS)</button>
             <button class="code__tab" data-tab="uv" type="button">uv (source)</button>
             <button class="code__tab" data-tab="pip" type="button">pip</button>
             <button class="code__copy" type="button" aria-label="Copy">Copy</button>
@@ -268,24 +291,27 @@ aglaia ~/scans/my-book</code></pre>
 git clone https://github.com/yb85/aglaia.git &amp;&amp; cd aglaia
 
 uv sync --extra gui --extra macos   # macOS GUI: Vision, Speech, MLX dewarp
+uv sync --extra gui                 # Windows / Linux GUI (Qt only)
+uv sync                             # headless: CLI pipeline, no Qt
 # add any of:
 #   --extra surya --extra paddle    # OCR engines — uv installs BOTH
-#   --extra jbig2    # smallest searchable PDFs (JBIG2 encoder, needs Rust)
+#   --extra voice    # offline voice control (Vosk, cross-platform)
 #   --extra cloud    # Mistral cloud OCR
 #   --extra cuda     # NVIDIA GPU dewarp (Linux)
 
 uv run aglaia ~/scans/my-book</code></pre>
           <pre class="code__panel" data-panel="pip"><code># from PyPI — installs the `aglaia` command
 pip install aglaia                  # lean base: headless pipeline, no Qt
-pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
+pip install "aglaia[gui]"           # Windows / Linux GUI (Qt)
+pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
 
 # OCR engines: pip can't install both (conflicting huggingface-hub pins),
-# so pick one. This limit is pip-only — uv and the .app ship both.
+# so pick one. This limit is pip-only — uv and the .app/installer ship both.
 #   pip install "aglaia[surya]"     # Surya OCR (cross-platform)
-#   pip install "aglaia[paddle]"    # PaddleOCR-VL (MLX)
+#   pip install "aglaia[paddle]"    # PaddleOCR-VL
 # Apple Vision OCR needs no extra — it ships with [macos].
 
-aglaia ~/scans/my-book              # launch the GUI</code></pre>
+aglaia ~/scans/my-book              # launch</code></pre>
         </div>
       </section>
 
@@ -295,7 +321,19 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
           <h2>Digitize your shelf.</h2>
           <p>Free, source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, and yours to extend.</p>
           <div class="cta">
-            <a class="btn btn--lg" href={DOWNLOAD} data-download>Download for macOS</a>
+            <div class="dl">
+              <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
+                <span class="dl__label">Download for {DOWNLOADS.mac.name}</span>
+                <span class="dl__sub">{DOWNLOADS.mac.sub}</span>
+              </a>
+              <button class="btn btn--lg dl__toggle" type="button"
+                      aria-haspopup="true" aria-expanded="false" aria-label="Choose another platform">▾</button>
+              <div class="dl__menu" role="menu" hidden>
+                <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
+                <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
+                <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
+              </div>
+            </div>
             <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
           </div>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
@@ -326,6 +364,68 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
       // reveal everything shortly after load.
       addEventListener('load', () => setTimeout(
         () => revealEls.forEach((el) => el.classList.add('in')), 1000));
+
+      // ── platform-aware downloads ──────────────────────────────────────
+      // Detect the visitor's OS and point every download button at the right
+      // fixed-name artifact. URLs live on the split-menu links, so they're
+      // never duplicated here.
+      const detectOS = (): 'mac' | 'windows' | 'linux' => {
+        const nav = navigator as any;
+        const p = ((nav.userAgentData && nav.userAgentData.platform)
+          || navigator.platform || navigator.userAgent || '').toLowerCase();
+        if (p.includes('win')) return 'windows';
+        if (p.includes('mac') || p.includes('iphone') || p.includes('ipad')) return 'mac';
+        if (p.includes('linux') && !p.includes('android')) return 'linux';
+        return 'mac';   // default to the most mature build
+      };
+      const OS_NAME = { mac: 'macOS', windows: 'Windows', linux: 'Linux' };
+      const os = detectOS();
+      const menuLink = document.querySelector<HTMLAnchorElement>(`.dl__menu [data-os="${os}"]`);
+      if (menuLink) {
+        const url = menuLink.getAttribute('href') || '';
+        const subText = menuLink.querySelector('span')?.textContent || '';
+        document.querySelectorAll('[data-download]').forEach((a) => a.setAttribute('href', url));
+        document.querySelectorAll<HTMLElement>('[data-download-os]').forEach((a) => {
+          const label = a.querySelector<HTMLElement>('.dl__label') || a;
+          label.textContent = `Download for ${OS_NAME[os]}`;
+        });
+        document.querySelectorAll<HTMLElement>('.dl__main .dl__sub').forEach((s) => {
+          s.textContent = subText;
+        });
+      }
+
+      // Split-button platform menus — one per .dl, only one open at a time.
+      const closeAllDlMenus = () => {
+        document.querySelectorAll('.dl__menu').forEach((m) => m.setAttribute('hidden', ''));
+        document.querySelectorAll('.dl__toggle').forEach((t) => t.setAttribute('aria-expanded', 'false'));
+      };
+      document.querySelectorAll('.dl').forEach((dl) => {
+        const toggle = dl.querySelector('.dl__toggle');
+        const menu = dl.querySelector('.dl__menu');
+        toggle?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const willOpen = menu?.hasAttribute('hidden');
+          closeAllDlMenus();
+          if (willOpen) { menu?.removeAttribute('hidden'); toggle.setAttribute('aria-expanded', 'true'); }
+        });
+      });
+      document.addEventListener('click', (e) => {
+        if (!(e.target as Element).closest('.dl')) closeAllDlMenus();
+      });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllDlMenus(); });
+
+      // "CLI installation" → smooth-scroll to the install block (works with or
+      // without the Lenis layer that loads below).
+      document.querySelectorAll('a[href="#install"]').forEach((a) => {
+        a.addEventListener('click', (e) => {
+          const t = document.getElementById('install');
+          if (!t) return;
+          e.preventDefault();
+          const lenis = (window as any).__lenis;
+          if (lenis) lenis.scrollTo(t, { offset: -90 });
+          else t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
 
       // Tiny shell syntax highlighter for the install code tabs — runs FIRST,
       // synchronously, before the `await import('lenis')` below, so it can
@@ -387,6 +487,7 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
       try {
         const { default: Lenis } = await import('lenis');
         const lenis = new Lenis({ lerp: 0.1, wheelMultiplier: 1 });
+        (window as any).__lenis = lenis;   // used by the #install anchor scroll
         function raf(time: number) { lenis.raf(time); requestAnimationFrame(raf); }
         requestAnimationFrame(raf);
         const nav = document.getElementById('nav');
@@ -488,6 +589,53 @@ aglaia ~/scans/my-book              # launch the GUI</code></pre>
       .btn--lg { padding: 16px 30px; font-size: 1.05rem; }
       .btn--ghost { background: transparent; color: #cfe0f2; box-shadow: none; border: 1px solid #2a3850; }
       .btn--ghost:hover { border-color: #4f8fd0; background: #121a26; }
+
+      /* ── split download button + platform menu ──────────────────── */
+      /* The two halves share ONE lift + shadow on the wrapper so the button
+         reads as a single unit; their individual .btn:hover fx are cancelled
+         (otherwise only the hovered half raises and you get two shadows). */
+      .dl { position: relative; display: inline-flex; align-items: stretch;
+        /* Own stacking context above the hero's tip button / fineprint (but
+           below the fixed nav at z-index 50) so the open platform menu wins. */
+        z-index: 40;
+        border-radius: 12px; box-shadow: 0 8px 30px -10px #3d7fc4;
+        transition: transform .2s, box-shadow .2s; }
+      .dl:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -12px #3d7fc4; }
+      .dl__main, .dl__toggle { box-shadow: none; transition: background .2s; }
+      .dl__main:hover, .dl__toggle:hover { transform: none; box-shadow: none; }
+      .dl__main { display: inline-flex; flex-direction: column;
+        align-items: flex-start; justify-content: center; line-height: 1.15;
+        border-top-right-radius: 0; border-bottom-right-radius: 0; }
+      /* Force a clean two-line layout (label over sub) on BOTH the download
+         and CLI buttons, independent of OS-name length — never wrap a line. */
+      .dl__label, .dl__sub { white-space: nowrap; }
+      .dl__sub { font-size: .72rem; font-weight: 500; opacity: .82; }
+      /* It's a <button> — strip the native chrome (the dark border was the
+         user-agent button border) and re-add only the left divider so it
+         matches the gradient main half seamlessly. */
+      .dl__toggle { appearance: none; -webkit-appearance: none; border: 0;
+        color: #fff; display: inline-flex; align-items: center; cursor: pointer;
+        padding-top: 0; padding-bottom: 0; padding-left: 15px; padding-right: 15px;
+        font-size: 1.1rem; border-left: 1px solid rgba(255,255,255,.28);
+        border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+      /* Two-line ghost button (CLI installation) — mirrors .dl__main height. */
+      .btn--stack { display: inline-flex; flex-direction: column;
+        align-items: center; justify-content: center; line-height: 1.15; }
+      .dl__menu { position: absolute; top: calc(100% + 8px); left: 0; min-width: 100%;
+        z-index: 20; display: flex; flex-direction: column; gap: 2px; padding: 6px;
+        background: #0f1722; border: 1px solid #233247; border-radius: 12px;
+        box-shadow: 0 24px 50px -20px #000; text-align: left; }
+      .dl__menu[hidden] { display: none; }
+      .dl__menu a { display: flex; flex-direction: column; padding: 9px 14px;
+        border-radius: 8px; color: #cfe0f2; white-space: nowrap; }
+      .dl__menu a:hover { background: #16273a; }
+      .dl__menu a span { font-size: .76rem; color: #8ea2b7; }
+
+      .code__title { text-align: center; font-weight: 800; margin: 44px 0 6px;
+        font-size: clamp(1.4rem, 3vw, 1.9rem); scroll-margin-top: 92px; }
+      .code__lead { text-align: center; color: #94a6ba; margin: 0 0 10px; font-size: 1rem; }
+      .code__lead b { color: #cfe0f2; }
 
       .hero { position: relative; min-height: 100svh; display: grid; place-items: center; padding: 132px 20px 80px; overflow: hidden; }
       .hero__glow {

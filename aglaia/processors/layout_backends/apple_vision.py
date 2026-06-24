@@ -35,9 +35,13 @@ class AppleVisionBackend(LayoutBackend):
     # and the dGPU on Intel Macs. Always counts as accelerated for our purposes.
     uses_gpu = True
 
-    def __init__(self):
+    def __init__(self, min_text_height: float = 0.01):
         if not HAS_VISION:
             raise ImportError("Apple Vision unavailable. Install pyobjc-framework-vision (macOS only).")
+        # Fraction of image height below which Vision ignores text. The default
+        # (~1/32) drops running heads / page numbers; PageDetector overrides
+        # this from its `min_text_height` option. 0 = Vision's own default.
+        self.min_text_height = float(min_text_height)
 
     def _request(self, img_rgb: np.ndarray) -> List[Tuple[str, BBox]]:
         pil = Image.fromarray(img_rgb)
@@ -46,6 +50,14 @@ class AppleVisionBackend(LayoutBackend):
             req = Vision.VNRecognizeTextRequest.alloc().init()
             req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
             req.setUsesLanguageCorrection_(False)
+            # Catch small text — running heads / page numbers sit under
+            # Vision's default minimumTextHeight (~1/32 of the image), so the
+            # page bbox would otherwise clip them. See `min_text_height`.
+            if self.min_text_height > 0:
+                try:
+                    req.setMinimumTextHeight_(self.min_text_height)
+                except Exception:
+                    pass
             buf = io.BytesIO()
             pil.save(buf, format="JPEG", quality=95)
             data = NSData.dataWithBytes_length_(buf.getvalue(), len(buf.getvalue()))

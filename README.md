@@ -5,7 +5,8 @@
 [![CI][ci-shield]][ci-url]
 [![Issues][issues-shield]][issues-url]
 [![Python 3.12][python-shield]][python-url]
-[![macOS][macos-shield]][macos-url]
+[![Platforms][platforms-shield]][release-url]
+[![Made in France][france-shield]][france-url]
 [![License: PolyForm Shield][license-shield]][license-url]
 
 <!-- PROJECT HEADER -->
@@ -15,7 +16,7 @@
 
   <p align="center">
     Turn a webcam and a stack of pages into clean, deskewed, dewarped,
-    searchable PDFs — locally, on your Mac.
+    searchable PDFs — locally, on your machine.
     <br />
     <a href="https://aglaia.bibli.cc/docs"><strong>Explore the docs »</strong></a>
     <br />
@@ -41,8 +42,8 @@
     <li>
       <a href="#getting-started">Getting Started</a>
       <ul>
-        <li><a href="#prerequisites">Prerequisites</a></li>
-        <li><a href="#installation">Installation</a></li>
+        <li><a href="#download">Download</a></li>
+        <li><a href="#install-from-the-command-line">Install from the command line</a></li>
       </ul>
     </li>
     <li><a href="#usage">Usage</a></li>
@@ -66,28 +67,35 @@ proper book scanner — and does the cleanup for you.
 Point a camera at the page; Aglaïa captures, straightens, dewarps,
 binarizes and OCRs whole books in one pass, then exports a searchable PDF
 (invisible text layer over the image) or structured Markdown. It runs
-entirely on your Mac — your pages never have to leave the machine.
+entirely on your machine — your pages never have to leave it (unless you
+explicitly pick a cloud OCR engine).
 
 A single `IntegratedProcessingChain` powers both the PySide6 capture GUI and
 a headless CLI batch mode, driven by the same YAML-defined pipeline.
 
 > [!NOTE]
-> **macOS only.** Aglaïa hard-depends on Apple Vision (layout + OCR) and
-> Speech (voice control), plus Apple Silicon for the MLX-accelerated page
-> dewarper. There is no Windows/Linux build of the capture app.
+> **Cross-platform.** Native GUI builds ship for **macOS** (signed/notarized
+> DMG, Apple Silicon), **Windows** (installer) and **Linux** (AppImage), plus
+> `pip install aglaia` on any platform. On macOS, Apple Vision powers page
+> detection and on-device OCR; off macOS, Aglaïa falls back to EAST/DBnet for
+> layout and to Surya / PaddleOCR-VL / Mistral for OCR. Voice control (Vosk)
+> is offline and cross-platform.
+
+🇫🇷 **Made in France.**
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Built With
 
 * [![Python][python-shield]][python-url] managed with [uv](https://docs.astral.sh/uv/)
-* **PySide6** — desktop GUI
+* **PySide6** — cross-platform desktop GUI
 * **OpenCV · NumPy · SciPy · Pillow** — image processing
-* **page-dewarp + JAX/MLX** — cubic-sheet page dewarp
+* **page-dewarp + JAX / MLX** — cubic-sheet page dewarp (MLX on Apple Silicon)
 * **doxapy** — binarization (Wolf / Sauvola)
 * **pikepdf · pypdfium2** — PDF I/O
-* **Apple Vision · Speech** (pyobjc) — OCR, layout, voice
-* **Surya · PaddleOCR-VL · Mistral Document AI** — OCR engines
+* **Apple Vision · Speech** (pyobjc, macOS) — OCR, layout, with EAST/DBnet fallbacks
+* **Surya · PaddleOCR-VL · Mistral Document AI** — cross-platform OCR engines
+* **Vosk** — offline voice control (cross-platform)
 * **SQLite (FTS5)** — project + full-text store
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -95,28 +103,39 @@ a headless CLI batch mode, driven by the same YAML-defined pipeline.
 <!-- GETTING STARTED -->
 ## Getting Started
 
-### Prerequisites
+### Download
 
-* macOS on Apple Silicon
-* [uv](https://docs.astral.sh/uv/getting-started/installation/)
+Grab the latest build for your platform — the release CI publishes
+fixed-name "latest" artifacts, so these links never go stale:
 
-  ```sh
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
+| Platform | Download | Notes |
+|---|---|---|
+| **macOS** (Apple Silicon) | [`Aglaia-macos-arm64.dmg`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-macos-arm64.dmg) | Signed + notarized. Open and drag to Applications. |
+| **Windows** (x64) | [`Aglaia-windows-x64-setup.exe`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-windows-x64-setup.exe) | Installer; registers the `.agl` file type. |
+| **Linux** (x86_64) | [`Aglaia-x86_64.AppImage`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-x86_64.AppImage) | `chmod +x`, then run. Needs FUSE (`fuse2`). |
 
-### Installation
+### Install from the command line
 
-**Download the app** — grab the latest signed, notarized DMG from the
-[Releases page](https://github.com/yb85/aglaia/releases/latest), open it,
-and drag **Aglaïa** to Applications.
-
-**Or build from source:**
+CLI-only or scripted setups (any platform) install via **uv** or **pip**:
 
 ```sh
-git clone https://github.com/yb85/aglaia.git
-cd aglaia
-uv sync --extra gui --extra macos
+# from PyPI — installs the `aglaia` command
+pip install aglaia                  # lean base: headless pipeline, no Qt
+pip install "aglaia[gui]"           # Windows / Linux GUI (Qt)
+pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
 ```
+
+```sh
+# or build from source with the extras you want
+git clone https://github.com/yb85/aglaia.git && cd aglaia
+uv sync --extra gui --extra macos   # macOS GUI
+uv sync --extra gui                 # Windows / Linux GUI
+uv sync                             # headless: CLI pipeline, no Qt
+```
+
+Optional extras: `--extra surya` / `--extra paddle` (OCR engines),
+`--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra cuda` (NVIDIA
+GPU dewarp on Linux).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -125,18 +144,17 @@ uv sync --extra gui --extra macos
 
 ```sh
 # Capture GUI (webcam + processing chain + voice control)
-uv run python aglaia.py ~/scans/my-book
+uv run aglaia ~/scans/my-book        # or just `aglaia …` once installed
 
 # Headless CLI batch — same chain, no Qt
-uv run python aglaia.py ~/scans/my-book.agl --headless -p config/pipelines/book_curved_x2.yaml
+uv run aglaia ~/scans/my-book.agl --headless -p aglaia/config/pipelines/book_curved_x2.yaml
 ```
 
-Key flags: `-c/--config`, `-p/--pipeline`, `--workers`, `--make-pdf`,
-`--debug`, `--input-dpi`, `--headless`. Capture-only: `--camera-id`,
-`--voice-control`, `--transform "90|180|mirror|flip"`.
-
-The import panel accepts multiple images and PDFs (per-page extract or
-render). Drop EAST / PP-OCR models into `./model/` or `./models/`.
+Key flags: `-c/--config`, `-p/--pipeline`, `--workers`, `--export`,
+`--do-ocr`, `--input-dpi`, `--headless`, `--camera-id`. The import panel
+accepts multiple images and PDFs (per-page extract or render). Drop
+EAST / PP-OCR models into `./model/` or `./models/` (or fetch them from the
+in-app downloader).
 
 _For the full guide, see the [documentation](https://aglaia.bibli.cc/docs)._
 
@@ -146,11 +164,11 @@ _For the full guide, see the [documentation](https://aglaia.bibli.cc/docs)._
 ## How It Works
 
 ```
-capture → DPI fix → deskew → layout detect → dewarp → binarize → OCR → export
+capture → DPI fix → deskew → layout detect → keystone → dewarp → binarize → OCR → export
 ```
 
 Every step is a pluggable processor defined in a YAML pipeline. Add your
-own by dropping `lib/processors/<NewProc>.py` (the registry auto-discovers
+own by dropping `aglaia/processors/<NewProc>.py` (the registry auto-discovers
 it) — or, at runtime, drop a `.py` into `<APP_DATA>/plugins/` and approve
 it in the trust prompt. See
 [Architecture](https://aglaia.bibli.cc/docs/reference/architecture) and
@@ -161,10 +179,12 @@ it in the trust prompt. See
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Drop-in plugin trust gate (processors + OCR engines)
+- [x] Drop-in plugin trust gate (processors + OCR engines)
+- [x] Windows installer + Linux AppImage
+- [ ] Windows / Linux code-signing for fewer SmartScreen / Gatekeeper prompts
 - [ ] Sparkle in-app auto-update (appcast per release)
 - [ ] Homebrew cask (`brew install --cask aglaia`)
-- [ ] Intel / universal2 builds
+- [ ] Intel / universal2 macOS builds
 
 See [open issues](https://github.com/yb85/aglaia/issues) for the full list.
 
@@ -226,7 +246,8 @@ Website: [aglaia.bibli.cc](https://aglaia.bibli.cc)
 [issues-url]: https://github.com/yb85/aglaia/issues
 [python-shield]: https://img.shields.io/badge/python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white
 [python-url]: https://www.python.org/
-[macos-shield]: https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white
-[macos-url]: https://www.apple.com/macos/
+[platforms-shield]: https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-555?style=for-the-badge
+[france-shield]: https://img.shields.io/badge/Made%20in-France%20%F0%9F%87%AB%F0%9F%87%B7-777?style=for-the-badge
+[france-url]: https://github.com/yb85/aglaia
 [license-shield]: https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-orange?style=for-the-badge
 [license-url]: https://polyformproject.org/licenses/shield/1.0.0/

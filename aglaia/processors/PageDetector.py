@@ -35,6 +35,9 @@ class PageOption(AbstractProcessorOption):
     binarize_threshold: int = 127
     processing_dpi: Optional[float] = None
     backend: str = "auto"
+    # Apple Vision only: smallest detectable text as a fraction of image
+    # height. Lower = catches small running heads / page numbers. 0 = default.
+    min_text_height: float = 0.01
     # Reject pages whose pixel dynamic range is below this fraction of
     # the MAX range across all merged pages in the same scan.
     # Polarity-agnostic, robust to global contrast variation, and works
@@ -247,6 +250,11 @@ class PageDetector(AbstractImageProcessor):
         "backend": _e("auto",
                       ["auto", "east", "dbnet", "apple_vision", "heuristic"],
                       "Text detector backend. auto = apple_vision on macOS else EAST → DBnet → heuristic."),
+        "min_text_height": _f(0.01, 0.0, 0.1, 0.005,
+                              "Apple Vision only: smallest text to detect, as a fraction of "
+                              "image height. Lower = catches running heads / page numbers the "
+                              "page crop would otherwise clip. 0 = Vision's default (~0.03).",
+                              advanced=True),
         "min_contrast": _f(0.5, 0.0, 1.0, 0.05,
                            "Drop pages whose (p95−p5) pixel range is below this fraction "
                            "of the max across all merged pages in the scan. Well-lit pages "
@@ -290,6 +298,10 @@ class PageDetector(AbstractImageProcessor):
             # offers the downloader before processing; headless gates on
             # `aglaia --setup`. process() falls through via `if not detector`.
             self.detector = None
+        # Apple Vision sensitivity to small text (running heads); harmless on
+        # backends that don't expose the attribute.
+        if self.detector is not None and hasattr(self.detector, "min_text_height"):
+            self.detector.min_text_height = float(getattr(options, "min_text_height", 0.01))
         self.margin_mm = options.margin_mm
         self.roi_margin_mm = options.roi_margin_mm
         self.max_pages = options.max_pages
@@ -500,7 +512,17 @@ class PageDetector(AbstractImageProcessor):
                 tight_lx2 = int(np.percentile(xr, 95))
             else:
                 tight_lx1, tight_lx2 = lx1, lx2
+            # Extend the vertical extent to include a running head above / a
+            # page number below the merged body rect: boxes inside the page's
+            # text column (X span) but just outside its Y span. Clustering to
+            # the dense body otherwise drops these isolated lines.
             tight_ly1, tight_ly2 = ly1, ly2
+            xcol = [b for b in boxes
+                    if lx1 <= (b[0] + b[2]) / 2 <= lx2
+                    and fy1 <= (b[1] + b[3]) / 2 <= fy2]
+            if xcol:
+                tight_ly1 = min(tight_ly1, min(b[1] for b in xcol))
+                tight_ly2 = max(tight_ly2, max(b[3] for b in xcol))
 
             roi_pad = int((self.roi_margin_mm / 25.4) * dpi)
             roi_x1 = max(0, tight_lx1 - fx1 - roi_pad)
