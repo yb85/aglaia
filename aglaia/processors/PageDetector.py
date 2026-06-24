@@ -512,7 +512,17 @@ class PageDetector(AbstractImageProcessor):
                 tight_lx2 = int(np.percentile(xr, 95))
             else:
                 tight_lx1, tight_lx2 = lx1, lx2
+            # Extend the vertical extent to include a running head above / a
+            # page number below the merged body rect: boxes inside the page's
+            # text column (X span) but just outside its Y span. Clustering to
+            # the dense body otherwise drops these isolated lines.
             tight_ly1, tight_ly2 = ly1, ly2
+            xcol = [b for b in boxes
+                    if lx1 <= (b[0] + b[2]) / 2 <= lx2
+                    and fy1 <= (b[1] + b[3]) / 2 <= fy2]
+            if xcol:
+                tight_ly1 = min(tight_ly1, min(b[1] for b in xcol))
+                tight_ly2 = max(tight_ly2, max(b[3] for b in xcol))
 
             roi_pad = int((self.roi_margin_mm / 25.4) * dpi)
             roi_x1 = max(0, tight_lx1 - fx1 - roi_pad)
