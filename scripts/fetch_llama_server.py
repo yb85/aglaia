@@ -249,7 +249,9 @@ def fetch(keys: Iterable[str], tag: str | None) -> None:
         if dest.is_dir():
             shutil.rmtree(dest)
         written = _extract(payload, asset["name"], dest)
-        print(f"  [{key}] wrote {len(written)} file(s) → {dest.relative_to(REPO_ROOT)}")
+        # ASCII arrow: Windows consoles default to cp1252, which can't encode
+        # "→" (U+2192) → UnicodeEncodeError on print.
+        print(f"  [{key}] wrote {len(written)} file(s) -> {dest.relative_to(REPO_ROOT)}")
 
 
 def main(argv: list[str]) -> int:
