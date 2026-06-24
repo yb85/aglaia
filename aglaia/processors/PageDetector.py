@@ -506,10 +506,23 @@ class PageDetector(AbstractImageProcessor):
                      if lx1 <= (b[0] + b[2]) / 2 <= lx2
                      and ly1 <= (b[1] + b[3]) / 2 <= ly2]
             if len(inner) >= 4:
-                xl = np.array([b[0] for b in inner])
-                xr = np.array([b[2] for b in inner])
-                tight_lx1 = int(np.percentile(xl, 5))
-                tight_lx2 = int(np.percentile(xr, 95))
+                # Drop only FAR outliers (hands / cables / cup edges) via a gap
+                # test — NOT a blanket 5/95 percentile, which trimmed the
+                # rightmost ~5% of legitimate justified text on clean scans. An
+                # intruder sits a large gap past the dense text cluster; walk in
+                # from each extreme and stop at the first sub-gap step.
+                page_w = max(1, lx2 - lx1)
+                gap = 0.10 * page_w
+                xr = np.sort(np.array([b[2] for b in inner]))
+                xl = np.sort(np.array([b[0] for b in inner]))
+                i = len(xr) - 1
+                while i > 0 and xr[i] - xr[i - 1] > gap:
+                    i -= 1
+                tight_lx2 = int(xr[i])
+                j = 0
+                while j < len(xl) - 1 and xl[j + 1] - xl[j] > gap:
+                    j += 1
+                tight_lx1 = int(xl[j])
             else:
                 tight_lx1, tight_lx2 = lx1, lx2
             # Extend the vertical extent to include a running head above / a
