@@ -31,6 +31,12 @@
   </p>
 </div>
 
+> [!WARNING]
+> **Alpha software — it will crash.** Aglaïa is under active development and
+> still in testing. It is fairly well tested on **macOS**, but **not yet** on
+> **Linux** or **Windows** — expect bugs and rough edges there. Keep your
+> originals; don't rely on it for anything irreplaceable. Bug reports welcome.
+
 <!-- TABLE OF CONTENTS -->
 <details>
   <summary>Table of Contents</summary>
@@ -160,6 +166,17 @@ Optional extras: `--extra surya` / `--extra paddle` (OCR engines),
 `--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra cuda` (NVIDIA
 GPU dewarp on Linux).
 
+**First run (CLI-only installs):** run the one-time setup to pick and download
+the offline models, seed the default pipelines, and bootstrap the config:
+
+```sh
+aglaia --setup        # interactive: choose models (DBnet, EAST, Surya…), download, configure
+```
+
+This is the terminal equivalent of the GUI's first-run wizard. A headless batch
+run refuses to start until the install is configured (`--setup` or the GUI).
+The GUI installs run the wizard automatically on first launch.
+
 #[!WARNING] Build with the right options
 # The `--extra` options are mandatory to interface models and backends with python. If you download the models or install cuda drivers on your computer but forget to include teh relevant extra options, they won't be used
 #
@@ -177,11 +194,12 @@ uv run aglaia ~/scans/my-book        # or just `aglaia …` once installed
 uv run aglaia ~/scans/my-book.agl --headless -p aglaia/config/pipelines/book_curved_x2.yaml
 ```
 
-Key flags: `-c/--config`, `-p/--pipeline`, `--workers`, `--export`,
-`--do-ocr`, `--input-dpi`, `--headless`, `--camera-id`. The import panel
-accepts multiple images and PDFs (per-page extract or render). Drop
-EAST / PP-OCR models into `./model/` or `./models/` (or fetch them from the
-in-app downloader).
+Key flags: `--setup` (first-run config), `-c/--config`, `-p/--pipeline`,
+`--workers`, `--export`, `--ocr`, `--input-dpi`, `--headless`,
+`--camera-id`. The import panel accepts multiple images and PDFs (per-page
+extract or render). Page detection defaults to **DBnet** (`auto` resolves
+DBnet → Apple Vision on macOS → EAST); `aglaia --setup` and the in-app
+downloader fetch the models, or drop them into `./model/` / `./models/`.
 
 _For the full guide, see the [documentation](https://aglaia.bibli.cc/docs)._
 

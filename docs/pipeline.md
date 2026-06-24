@@ -89,7 +89,7 @@ pipeline:
       max_pages: 2                 # 2 pages per frame (book spread)
       processing_dpi: 150            # Downsample to 150dpi for detection only
       rescale_threshold: 0.01
-      backend: auto                  # apple_vision → east → dbnet → heuristic
+      backend: auto                  # dbnet → apple_vision (macOS) → east
       min_contrast: 0.5              # drop bleed-through ghosts (<0.5), keep dim real pages
 
   - name: "dpi_normalize_output"

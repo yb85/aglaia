@@ -15,7 +15,7 @@ PageDetector	merge_threshold	bounded_float	Column-merge score cutoff for combini
 PageDetector	merge_gap_weight	bounded_float	Weight of the inter-box gap term in the merge score.	true	0.4
 PageDetector	merge_width_weight	bounded_float	Weight of the width-similarity term in the merge score.	true	0.6
 PageDetector	merge_gap_norm_cap	bounded_float	Cap on the normalized inter-box gap used in the merge score.	true	0.15
-PageDetector	backend	enum	Text detector backend. auto = apple_vision on macOS else east → dbnet → heuristic.	false	auto
+PageDetector	backend	enum	Text detector backend. auto = dbnet → apple_vision (macOS) → east. No heuristic fallback.	false	auto
 PageDetector	min_contrast	bounded_float	Reject layouts whose (p95−p5) pixel range is below this fraction of the max across all merged layouts in the scan. Polarity-agnostic, robust to sparse text. Legitimate text > 0.7; bleed-through < 0.5. 0 = disabled.	false	0.7
 Binarizer	method	enum	Binarization algorithm (doxapy: wolf++/wolf/sauvola/niblack/nick/… plus otsu). gray keeps grayscale; none passes through.	false	wolf++
 Binarizer	window_mm_wolf	bounded_float	Wolf-family window in mm. Each doxa family has its own window_mm_<family> / window_px_<family> / k_<family> (e.g. window_mm_sauvola, k_sauvola).	false	3.2

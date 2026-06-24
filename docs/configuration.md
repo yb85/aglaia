@@ -114,7 +114,7 @@ After `initialize`, `aglaia` overwrites `args.options["calibration"]["camera_mat
 ```bash
 uv run aglaia ~/scans/book.agl --headless \
   -p full \
-  --do-ocr auto --ocr-lang fr-FR+en-US \
+  --ocr auto --ocr-lang fr-FR+en-US \
   --export pdf:g4+md
 ```
 

@@ -73,7 +73,7 @@ options:
 | `east` | `frozen_east_text_detection.pb` (~95 MB) in `./model/` or `./models/` | CUDA via `cv2.dnn` if OpenCV is CUDA-built |
 | `dbnet` | PP-OCR det ONNX (v3/v4/v5) in `./model/` or `./models/` | same as above |
 | `heuristic` | none | CPU only |
-| `auto` | macOS: apple_vision → east → dbnet → heuristic. Linux/Windows: east → dbnet → heuristic. | inherits |
+| `auto` | dbnet → apple_vision (macOS only) → east. Raises an error if no model is installed (no heuristic fallback). | inherits |
 
 Each backend reports `uses_gpu`. The chain stamps `meta['gpu'] = True` on every node produced by a GPU-backed processor; the web UI then renders a 🚀 next to the step in the per-scan timing bar.
 
@@ -104,7 +104,7 @@ options:
   merge_gap_norm_cap: 0.15 # cap on the normalized inter-box gap
 ```
 
-**Requires macOS + Apple Vision** (the `apple_vision` backend). If the Vision backend is unavailable, `auto` falls back to EAST → DBnet → heuristic.
+The default `auto` backend resolves **dbnet → apple_vision (macOS) → east**. The projection-profile `heuristic` is no longer an `auto` fallback — `auto` raises `LayoutModelUnavailable` if no ML model is installed (download one with `aglaia --setup` or the in-app downloader); pick `heuristic` explicitly to use it.
 
 ## Binarizer (`aglaia/processors/Binarizer.py`)
 

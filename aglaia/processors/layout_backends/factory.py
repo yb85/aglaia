@@ -69,14 +69,13 @@ def get_backend(name: str = "auto") -> LayoutBackend:
     Resolve a backend by name.
 
     - "dbnet" — PP-OCR mobile det (~5 MB ONNX). Modern, lightweight, accurate.
-                Default on non-Apple hardware.
-    - "apple_vision" — Apple Vision (macOS only). Default on Apple Silicon /
-                       Intel macOS.
+                The default detector on every platform.
+    - "apple_vision" — Apple Vision (macOS only). Native, but quirky (misses
+                       faint running heads).
     - "east"  — OpenCV dnn EAST text detector (~95 MB pb). Older, dated.
     - "heuristic" — projection-profile fallback. No ML deps. Cross-platform.
                     Only via an explicit pick — NOT part of the auto chain.
-    - "auto" — macOS: apple_vision → east → dbnet.
-               other: east → dbnet.
+    - "auto" — dbnet → apple_vision (macOS only) → east.
                Raises ``LayoutModelUnavailable`` if none load (the heuristic
                is deliberately excluded; see that exception).
     """

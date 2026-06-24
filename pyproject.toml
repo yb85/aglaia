@@ -1,6 +1,6 @@
 [project]
 name = "aglaia"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Webcam book scanner for macOS — capture, dewarp, binarize, OCR to searchable PDF/Markdown."
 readme = "README.md"
 license = { file = "LICENSE" }   # PolyForm Shield License 1.0.0 (source-available, no-compete)

@@ -91,7 +91,7 @@ Three layers let you inspect + drive the app without a screen, camera, or the
 startup dialog — useful for CI smoke shots and agent-driven UI debugging:
 
 1. **Logic / data corners — headless CLI.** `aglaia <img|pdf|.agl> --headless
-   -p <pipeline> --do-ocr <engine> --export pdf+md --md-refine apple_fm` creates
+   -p <pipeline> --ocr <engine> --export pdf+md --md-refine apple_fm` creates
    a project, imports, processes, OCRs and exports without Qt. Inspect the
    resulting `.agl` DB or output files. Covers import / process / pipeline swap /
    OCR engines / export.
@@ -121,7 +121,7 @@ startup dialog — useful for CI smoke shots and agent-driven UI debugging:
 **GUI vs headless split.** Use scenarios for *visual / interaction* corners
 (tabs, dialogs that `show()`, capture preview, editor render). Use the headless
 CLI for corners that hit a **blocking save-dialog** or need a **verifiable
-result** — export (`--export pdf+md`), OCR (`--do-ocr <engine>`), and changing a
+result** — export (`--export pdf+md`), OCR (`--ocr <engine>`), and changing a
 **pipeline element value** (edit the YAML, run headless, check the DB/output).
 The GUI pipeline editor is a deep custom-widget tree; drive value *changes* via
 YAML+headless, screenshot the editor only to check it renders.
