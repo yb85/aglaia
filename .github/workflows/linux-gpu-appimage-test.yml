@@ -1,0 +1,79 @@
+# Manual size probe for a CUDA/GPU Linux AppImage (jax[cuda12] for GPU dewarp).
+# GitHub *release assets* are capped at 2 GiB; the default Linux AppImage is
+# CPU-only to stay under it. This builds the GPU flavour, prints its size, and
+# uploads it as a workflow *artifact* (not a release asset — artifacts aren't
+# 2-GiB-capped), so we can learn whether a GPU AppImage is even shippable.
+# Run from the Actions tab → "Linux GPU AppImage (size probe)" → Run workflow.
+name: Linux GPU AppImage (size probe)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux-gpu:
+    runs-on: ubuntu-22.04
+    env:
+      AGLAIA_VERSION: 0.0.0-gpuprobe
+      ARCH: x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: System libs (AppImage tooling + Qt xcb runtime)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfuse2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+
+      - name: Vendor llama-server (Surya backend)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run --no-project python scripts/fetch_llama_server.py --platform linux-x64
+
+      - name: Sync deps + CUDA (jax[cuda12] for GPU dewarp)
+        run: >-
+          uv sync --extra gui --extra voice --extra dev --extra package
+          --extra cloud --extra surya --extra cuda
+
+      - name: Build onedir (PyInstaller)
+        run: uv run pyinstaller Aglaia.spec --clean --noconfirm
+
+      - name: Fetch appimagetool
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Build AppImage
+        run: ./packaging/build_appimage.sh
+
+      - name: Report size vs the 2 GiB release-asset limit
+        run: |
+          set -euo pipefail
+          f=dist/Aglaia-x86_64.AppImage
+          bytes=$(stat -c%s "$f")
+          limit=2147483648
+          printf 'AppImage: %s\n' "$f"
+          printf 'size: %s bytes (%.2f GiB)\n' "$bytes" "$(echo "scale=2; $bytes/1073741824" | bc)"
+          printf 'onedir (uncompressed): %s\n' "$(du -sh dist/Aglaia 2>/dev/null | cut -f1)"
+          echo '--- biggest bundled dirs ---'
+          du -sh dist/Aglaia/_internal/* 2>/dev/null | sort -rh | head -15 || true
+          if [ "$bytes" -lt "$limit" ]; then
+            echo "::notice::GPU AppImage FITS GitHub release limit ($bytes < $limit)"
+          else
+            echo "::warning::GPU AppImage EXCEEDS 2 GiB release-asset limit ($bytes >= $limit) — needs external hosting"
+          fi
+
+      - name: Upload AppImage as artifact (not a release asset)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aglaia-x86_64-cuda-AppImage
+          path: dist/Aglaia-x86_64.AppImage
+          if-no-files-found: error
