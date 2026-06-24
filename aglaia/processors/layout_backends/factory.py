@@ -11,6 +11,16 @@ from aglaia.processors.layout_backends.base import LayoutBackend
 from aglaia.processors.layout_backends.heuristic import HeuristicBackend
 
 
+class LayoutModelUnavailable(RuntimeError):
+    """Raised by ``get_backend("auto")`` when no ML page-detection model is
+    installed. The projection-profile heuristic is intentionally NOT an auto
+    fallback — its crops are poor enough that a first-time user would conclude
+    the app is broken. Callers surface a clear "download a model" path instead
+    (PageDetector passes the page through untouched; the GUI prompts to fetch a
+    detector before processing). The heuristic stays available only when picked
+    explicitly via ``backend: heuristic``."""
+
+
 def probe_active_backend(name: str = "auto") -> str:
     """Return the name of the backend `get_backend(name)` would actually
     pick — without instantiating heavy models if possible. For "auto",
@@ -22,7 +32,7 @@ def probe_active_backend(name: str = "auto") -> str:
         try:
             b = get_backend(name)
         except Exception:
-            return "heuristic"
+            return "none"
         return getattr(b, "name", name)
 
     # auto
@@ -51,7 +61,7 @@ def probe_active_backend(name: str = "auto") -> str:
         return "dbnet"
     except Exception:
         pass
-    return "heuristic"
+    return "none"
 
 
 def get_backend(name: str = "auto") -> LayoutBackend:
@@ -64,8 +74,11 @@ def get_backend(name: str = "auto") -> LayoutBackend:
                        Intel macOS.
     - "east"  — OpenCV dnn EAST text detector (~95 MB pb). Older, dated.
     - "heuristic" — projection-profile fallback. No ML deps. Cross-platform.
-    - "auto" — macOS: apple_vision → east → dbnet → heuristic.
-               other: east → dbnet → heuristic.
+                    Only via an explicit pick — NOT part of the auto chain.
+    - "auto" — macOS: apple_vision → east → dbnet.
+               other: east → dbnet.
+               Raises ``LayoutModelUnavailable`` if none load (the heuristic
+               is deliberately excluded; see that exception).
     """
     import sys
     name = (name or "auto").lower()
@@ -100,5 +113,7 @@ def get_backend(name: str = "auto") -> LayoutBackend:
                 return loader()
             except Exception:
                 continue
-        return HeuristicBackend()
+        raise LayoutModelUnavailable(
+            "No page-detection model is installed. Download EAST (or, on "
+            "macOS, rely on Apple Vision), or run `aglaia --setup`.")
     raise ValueError(f"Unknown layout backend: {name}")

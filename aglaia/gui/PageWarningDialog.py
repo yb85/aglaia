@@ -58,8 +58,10 @@ def maybe_show_heuristic_warning(
         from aglaia.processors.layout_backends.factory import probe_active_backend
         active = probe_active_backend("auto")
     except Exception:
-        active = "heuristic"
-    if active != "heuristic":
+        active = "none"
+    # "none" = no ML detector could load (heuristic is no longer an auto
+    # fallback). "heuristic" only appears if probing an explicit pick.
+    if active not in ("heuristic", "none"):
         return "ok"
 
     return _show_dialog(parent)
@@ -96,11 +98,11 @@ def _show_dialog(parent: Optional[QWidget]) -> str:
 
     body = QLabel(
         _tr(
-            "Aglaïa will fall back to a projection-profile heuristic that is "
-            "noticeably worse than EAST, DBNet or Apple Vision — page splits "
-            "may be sloppy, especially on dense layouts.\n\n"
-            "Open the Model Downloader to fetch a proper detector, or accept "
-            "the heuristic for now."
+            "No page-detection model (EAST, DBNet or Apple Vision) is "
+            "installed, so Aglaïa can't split or crop pages — spreads will "
+            "pass through whole.\n\n"
+            "Open the Model Downloader to fetch a detector, or continue "
+            "without page detection for now."
         )
     )
     body.setWordWrap(True)

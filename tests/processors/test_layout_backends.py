@@ -33,10 +33,15 @@ def _east_model_present() -> bool:
 
 @pytest.mark.skipif(_dbnet_model_present() or _east_model_present(),
                     reason="a neural backend model is installed; auto picks it")
-def test_factory_auto_returns_heuristic_without_models():
-    backend = get_backend("auto")
-    if backend.name != "apple_vision":
-        assert isinstance(backend, HeuristicBackend)
+def test_factory_auto_raises_without_models():
+    # With no EAST/DBNet model, auto either uses Apple Vision (macOS) or raises
+    # LayoutModelUnavailable — the heuristic is no longer an auto fallback.
+    from aglaia.processors.layout_backends.factory import LayoutModelUnavailable
+    try:
+        backend = get_backend("auto")
+    except LayoutModelUnavailable:
+        return  # expected off-macOS / without Apple Vision
+    assert backend.name == "apple_vision"
 
 
 def test_factory_explicit_heuristic():
