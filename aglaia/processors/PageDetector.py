@@ -20,12 +20,14 @@ from aglaia.processors.layout_backends import get_backend
 @dataclass
 class PageOption(AbstractProcessorOption):
     margin_mm: float = 2.0
-    # Extra padding (mm) around the text bbox for the child ROI. The crop
-    # rect remains page bbox + margin_mm; the ROI used downstream by
-    # Binarizer is page bbox + roi_margin_mm. Should be ≤ margin_mm so
-    # outside-ROI pixels still exist as a halo around the ROI rectangle
-    # (those get masked to white after binarisation).
-    roi_margin_mm: float = 1.0
+    # Padding (mm) around the (tightened) text bbox for the child ROI used
+    # downstream by the Binarizer, which HARD-ERASES everything outside the ROI.
+    # The ROI is clamped to the crop rect (page bbox + margin_mm), so a value
+    # ≥ margin_mm makes the ROI fill the crop and disables the outside-ROI mask
+    # entirely — the cure for tight detectors (DBnet) clipping page margins from
+    # the binarized output. Default 4 mm covers DBnet's glyph-hugging boxes
+    # within the 2 mm crop. Exposed in the pipeline editor.
+    roi_margin_mm: float = 4.0
     max_pages: int = 2
     # When more pages than max_pages are found: "merge" them into one
     # (default), or "discard" the extras (keep the largest) — single-page
@@ -236,6 +238,11 @@ class PageDetector(AbstractImageProcessor):
     OPTIONS = {
         "margin_mm": _f(2.0, 0.0, 50.0, 0.5,
                         "Padding around each detected text bbox before cropping."),
+        "roi_margin_mm": _f(4.0, 0.0, 50.0, 0.5,
+                            "Padding (mm) around the text bbox for the ROI passed "
+                            "downstream. The Binarizer hard-erases outside the ROI, "
+                            "so raise this if a tight detector (DBnet) is clipping "
+                            "page margins. Keep ≤ the crop padding above."),
         "max_pages": _i(2, 0, 8,
                           "Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap)."),
         "over_cap": _e("merge", ["merge", "discard"],

@@ -93,7 +93,7 @@ Apple Vision text detection → merge overlapping x-spans → optional reduce-to
 ```yaml
 options:
   margin_mm: 2.0           # crop margin around each page bbox
-  roi_margin_mm: 1.0       # tighter ROI margin propagated downstream (≤ margin_mm)
+  roi_margin_mm: 4.0       # ROI padding for the Binarizer; raise if margins clip
   max_pages: 2           # 0 = infinity
   over_cap: merge          # over-cap reduction: merge | discard (drop smallest)
   processing_dpi: 150.0    # null = no downscale
