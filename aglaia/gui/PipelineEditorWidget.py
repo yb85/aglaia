@@ -353,6 +353,10 @@ class PipelinePillBar(QWidget):
 class StepParamsForm(QWidget):
     """Edits a single pipeline step's options based on its processor's specs."""
 
+    # "Show advanced" is a session-wide preference, remembered across steps:
+    # flip it on one processor and it stays on when you select another.
+    _show_advanced_pref: bool = False
+
     changed = Signal()
     processor_changed = Signal(str)  # processor class name, for an external badge
 
@@ -373,6 +377,9 @@ class StepParamsForm(QWidget):
         opts_head.addStretch(1)
         opts_head.addWidget(_field_label(self.tr("Show advanced")))
         self._adv_switch = Switch()
+        # Restore the remembered preference BEFORE connecting so this doesn't
+        # fire a spurious toggle (set_step runs the visibility pass anyway).
+        self._adv_switch.setChecked(StepParamsForm._show_advanced_pref)
         self._adv_switch.toggled.connect(self._on_advanced_toggled)
         opts_head.addWidget(self._adv_switch)
         v.addLayout(opts_head)
@@ -466,10 +473,11 @@ class StepParamsForm(QWidget):
             else:
                 cell.setVisible(True)
 
-    def _on_advanced_toggled(self, _on: bool):
+    def _on_advanced_toggled(self, on: bool):
         """Show / hide advanced cells without rebuilding. Re-runs the
         full visibility pass so `visible_when` predicates still apply
-        on top of the advanced filter."""
+        on top of the advanced filter. Remembered session-wide."""
+        StepParamsForm._show_advanced_pref = bool(on)
         self._apply_visibility()
 
     # ── editors ────────────────────────────────────────────────────
