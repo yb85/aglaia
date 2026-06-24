@@ -306,13 +306,20 @@ def _qt_app() -> "QApplication":
                     conn.commit()
     except Exception as e:
         print(f"filetype auto-register: skipped ({e})", file=sys.stderr)
-    # First-run welcome / permissions screen — set expectations before macOS
-    # pops its own camera / keychain prompts. Shown once (welcome_seen flag).
+    # First-run onboarding wizard: welcome + language + permissions + model
+    # downloads in ONE window. Runs before the StartupWindow and before any
+    # OCR/voice/layout engine is imported, so freshly downloaded models are
+    # seen with no restart (the old flow deferred the download into a
+    # MainWindow and then needed a restart that didn't work).
     try:
-        from aglaia.gui.WelcomeDialog import WelcomeDialog
-        WelcomeDialog.show_if_first_run(None)
+        from aglaia.gui.OnboardingWizard import OnboardingWizard
+        if not OnboardingWizard.run_if_first_run(None):
+            # User closed first-run setup before finishing → don't launch.
+            # welcome_seen stays unset, so the wizard runs again next time.
+            app.setProperty("aglaia_abort_launch", True)
+            return app
     except Exception as e:
-        print(f"welcome: skipped ({e})", file=sys.stderr)
+        print(f"onboarding: skipped ({e})", file=sys.stderr)
     # Trust gate for drop-in plugins — must run before any widget reads
     # the processor / OCR registries (which import accepted plugins).
     try:
@@ -320,16 +327,6 @@ def _qt_app() -> "QApplication":
         prompt_pending_plugins(None)
     except Exception as e:
         print(f"plugin-trust: skipped ({e})", file=sys.stderr)
-    # First-run invite to fetch the recommended offline models (EAST + Vosk;
-    # Vosk only on macOS). Stash the chosen keys — the downloader needs a
-    # MainWindow to host it, so _bootstrap_with_choice opens it once one's up.
-    try:
-        from aglaia.gui.ModelInstallPrompt import ModelInstallPrompt
-        _install_keys = ModelInstallPrompt.maybe_prompt(None)
-        if _install_keys:
-            app.setProperty("aglaia_install_models", _install_keys)
-    except Exception as e:
-        print(f"model-invite: skipped ({e})", file=sys.stderr)
     return app
 
 
@@ -695,13 +692,8 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     if _heuristic_choice == "open_downloader":
         QTimer.singleShot(0, window._open_model_downloader)
 
-    # First-run model invite (recorded in _qt_app, before any window existed):
-    # open the downloader now and autostart the chosen downloads.
-    _install_keys = app.property("aglaia_install_models")
-    if _install_keys:
-        app.setProperty("aglaia_install_models", None)
-        QTimer.singleShot(
-            0, lambda: window._open_model_downloader(autostart_keys=list(_install_keys)))
+    # (First-run model downloads now happen in the OnboardingWizard, before
+    # the StartupWindow — no MainWindow-hosted deferral needed.)
 
     # ── ingest ────────────────────────────────────────────────────
     if _heuristic_choice == "open_downloader":
@@ -908,6 +900,8 @@ def main(argv: list[str] | None = None) -> int:
     # GUI path.
     _trace("main: building QApplication")
     app = _qt_app()
+    if app.property("aglaia_abort_launch"):
+        return 0  # first-run setup was closed before completion — exit.
     _trace("main: QApplication built")
 
     # Optional tracemalloc loop for GUI debugging.

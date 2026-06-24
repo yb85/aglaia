@@ -557,7 +557,8 @@ class StepParamsForm(QWidget):
         no usable model on disk)."""
         try:
             from aglaia.processors.layout_backends.factory import probe_active_backend
-            return probe_active_backend(name) == "heuristic" and name != "heuristic"
+            return (probe_active_backend(name) in ("heuristic", "none")
+                    and name != "heuristic")
         except Exception:
             return False
 

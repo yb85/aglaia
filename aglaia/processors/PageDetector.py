@@ -281,7 +281,15 @@ class PageDetector(AbstractImageProcessor):
 
     def __init__(self, options: PageOption):
         super().__init__(options)
-        self.detector = get_backend(getattr(options, "backend", "auto"))
+        from aglaia.processors.layout_backends.factory import LayoutModelUnavailable
+        try:
+            self.detector = get_backend(getattr(options, "backend", "auto"))
+        except LayoutModelUnavailable:
+            # No model + auto: pass pages through untouched rather than crop
+            # them with the (removed-from-auto) heuristic. The GUI warns and
+            # offers the downloader before processing; headless gates on
+            # `aglaia --setup`. process() falls through via `if not detector`.
+            self.detector = None
         self.margin_mm = options.margin_mm
         self.roi_margin_mm = options.roi_margin_mm
         self.max_pages = options.max_pages
