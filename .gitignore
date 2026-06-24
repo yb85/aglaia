@@ -64,3 +64,6 @@ aglaia-dev/
 # OCR exports dropped into test_data during manual QA.
 test_data/**/*_apple_docsOCR_*.md
 test_data/**/*_apple_docsOCR_*.pdf
+
+# Baked at PyInstaller build time by Aglaia.spec
+aglaia/_version.py

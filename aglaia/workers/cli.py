@@ -191,6 +191,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--setup", action="store_true",
                    help="Interactive first-run setup (language, models, config) "
                         "for CLI-only installs; then exit.")
+    from aglaia.version import get_version
+    p.add_argument("--version", action="version",
+                   version=f"Aglaïa {get_version()}",
+                   help="Print the version and exit.")
     return p
 
 

@@ -25,6 +25,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from aglaia.version import get_version
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
@@ -34,7 +36,7 @@ from PySide6.QtWidgets import (
 GIT_REPO = "https://github.com/yb85/aglaia"
 ISSUES_NEW_URL = GIT_REPO + "/issues/new"
 ISSUES_SEARCH_URL = GIT_REPO + "/issues"
-APP_VERSION = "0.1.0"
+APP_VERSION = get_version()
 
 # Config keys whose values we never write to the report.
 _SECRET_HINT = ("key", "token", "secret", "password", "api")

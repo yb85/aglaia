@@ -77,6 +77,12 @@ CODESIGN_IDENTITY = os.environ.get("AGLAIA_SIGN_IDENTITY") or None
 # Local/dev builds with the var unset fall back to ``0.0.0-dev`` so a
 # stray hardcoded number never ships as a "release".
 _VERSION = (os.environ.get("AGLAIA_VERSION") or "").lstrip("v").strip() or "0.0.0-dev"
+# Bake the version into the package so the FROZEN app can read it at runtime
+# (the AGLAIA_VERSION env var is set at build time, not runtime). aglaia.version
+# imports aglaia._version; writing it here, before Analysis, gets it bundled.
+# Gitignored — a build artefact, never committed.
+(REPO / "aglaia" / "_version.py").write_text(
+    f'__version__ = "{_VERSION}"\n', encoding="utf-8")
 ENTITLEMENTS_FILE = str(REPO / "packaging" / "entitlements.plist")
 if CODESIGN_IDENTITY is None:
     ENTITLEMENTS_FILE = None   # PyInstaller errors if entitlements set without identity
@@ -180,6 +186,9 @@ hiddenimports = (
     # frozen app silently falls back to G4. Built when the build env was
     # synced with `--extra jbig2`.
     + ["aglaia_jbig2", "aglaia_jbig2._native"]
+    # Baked version module (written above). aglaia.version imports it inside a
+    # try/except, which static analysis can miss — name it so it's bundled.
+    + ["aglaia._version"]
 )
 
 # Pull the compiled JBIG2 extension (.so) into the bundle.

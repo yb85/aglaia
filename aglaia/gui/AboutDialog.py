@@ -35,21 +35,9 @@ LICENSE_URL = "https://polyformproject.org/licenses/shield/1.0.0"
 
 
 def app_version() -> str:
-    """Best-effort app version: installed package metadata → pyproject →
-    a hard fallback. Works both frozen and from source."""
-    try:
-        from importlib.metadata import version
-        return version("aglaia")
-    except Exception:
-        pass
-    try:
-        import tomllib
-        from pathlib import Path
-        root = Path(__file__).resolve().parents[2]
-        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-        return str(data["project"]["version"])
-    except Exception:
-        return "0.0.0"
+    """App version via the canonical resolver (frozen + from source)."""
+    from aglaia.version import get_version
+    return get_version()
 
 
 def _logo_data_uri(target_h: int = 44) -> str | None:
@@ -61,7 +49,6 @@ def _logo_data_uri(target_h: int = 44) -> str | None:
     so the caller falls back to a text `<h1>`."""
     try:
         import base64
-        from pathlib import Path
         from PySide6.QtGui import QImage, QPalette
         from PySide6.QtWidgets import QApplication
 

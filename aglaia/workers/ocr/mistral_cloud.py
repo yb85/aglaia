@@ -82,13 +82,8 @@ def _mistralai_available() -> bool:
 
 def _aglaia_user_agent() -> str:
     """``Aglaia/<version> (+url)`` for the Mistral API User-Agent."""
-    ver = "0"
-    try:
-        from importlib.metadata import version
-        ver = version("aglaia")
-    except Exception:
-        import os
-        ver = (os.environ.get("AGLAIA_VERSION") or "0").lstrip("v") or "0"
+    from aglaia.version import get_version
+    ver = get_version()
     return f"Aglaia/{ver} (+https://aglaia.bibli.cc)"
 
 
