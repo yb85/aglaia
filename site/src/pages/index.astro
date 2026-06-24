@@ -78,14 +78,14 @@ const powers = [
             <span class="lede__l3">No flatbed, no bulky rig: just you, your laptop and your phone.</span>
           </p>
           <div class="cta reveal">
-            <div class="dl" id="dl">
-              <a class="btn btn--lg dl__main" id="dl-main" href={DOWNLOADS.mac.url} data-download data-download-os>
+            <div class="dl">
+              <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
                 <span class="dl__label">Download for {DOWNLOADS.mac.name}</span>
                 <span class="dl__sub">{DOWNLOADS.mac.sub}</span>
               </a>
-              <button class="btn btn--lg dl__toggle" id="dl-toggle" type="button"
+              <button class="btn btn--lg dl__toggle" type="button"
                       aria-haspopup="true" aria-expanded="false" aria-label="Choose another platform">▾</button>
-              <div class="dl__menu" id="dl-menu" role="menu" hidden>
+              <div class="dl__menu" role="menu" hidden>
                 <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
                 <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
                 <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
@@ -321,7 +321,19 @@ aglaia ~/scans/my-book              # launch</code></pre>
           <h2>Digitize your shelf.</h2>
           <p>Free, source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, and yours to extend.</p>
           <div class="cta">
-            <a class="btn btn--lg" href={DOWNLOADS.mac.url} data-download data-download-os>Download for macOS</a>
+            <div class="dl">
+              <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
+                <span class="dl__label">Download for {DOWNLOADS.mac.name}</span>
+                <span class="dl__sub">{DOWNLOADS.mac.sub}</span>
+              </a>
+              <button class="btn btn--lg dl__toggle" type="button"
+                      aria-haspopup="true" aria-expanded="false" aria-label="Choose another platform">▾</button>
+              <div class="dl__menu" role="menu" hidden>
+                <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
+                <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
+                <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
+              </div>
+            </div>
             <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
           </div>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
@@ -368,38 +380,39 @@ aglaia ~/scans/my-book              # launch</code></pre>
       };
       const OS_NAME = { mac: 'macOS', windows: 'Windows', linux: 'Linux' };
       const os = detectOS();
-      const menuLink = document.querySelector<HTMLAnchorElement>(`#dl-menu [data-os="${os}"]`);
+      const menuLink = document.querySelector<HTMLAnchorElement>(`.dl__menu [data-os="${os}"]`);
       if (menuLink) {
         const url = menuLink.getAttribute('href') || '';
+        const subText = menuLink.querySelector('span')?.textContent || '';
         document.querySelectorAll('[data-download]').forEach((a) => a.setAttribute('href', url));
         document.querySelectorAll<HTMLElement>('[data-download-os]').forEach((a) => {
           const label = a.querySelector<HTMLElement>('.dl__label') || a;
           label.textContent = `Download for ${OS_NAME[os]}`;
         });
-        const sub = document.querySelector<HTMLElement>('#dl-main .dl__sub');
-        const menuSub = menuLink.querySelector('span');
-        if (sub && menuSub) sub.textContent = menuSub.textContent || '';
+        document.querySelectorAll<HTMLElement>('.dl__main .dl__sub').forEach((s) => {
+          s.textContent = subText;
+        });
       }
 
-      // Split-button platform menu.
-      const dlToggle = document.getElementById('dl-toggle');
-      const dlMenu = document.getElementById('dl-menu');
-      const closeDlMenu = () => {
-        dlMenu?.setAttribute('hidden', '');
-        dlToggle?.setAttribute('aria-expanded', 'false');
+      // Split-button platform menus — one per .dl, only one open at a time.
+      const closeAllDlMenus = () => {
+        document.querySelectorAll('.dl__menu').forEach((m) => m.setAttribute('hidden', ''));
+        document.querySelectorAll('.dl__toggle').forEach((t) => t.setAttribute('aria-expanded', 'false'));
       };
-      dlToggle?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (dlMenu?.hasAttribute('hidden')) {
-          dlMenu.removeAttribute('hidden');
-          dlToggle.setAttribute('aria-expanded', 'true');
-        } else { closeDlMenu(); }
+      document.querySelectorAll('.dl').forEach((dl) => {
+        const toggle = dl.querySelector('.dl__toggle');
+        const menu = dl.querySelector('.dl__menu');
+        toggle?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const willOpen = menu?.hasAttribute('hidden');
+          closeAllDlMenus();
+          if (willOpen) { menu?.removeAttribute('hidden'); toggle.setAttribute('aria-expanded', 'true'); }
+        });
       });
       document.addEventListener('click', (e) => {
-        if (dlMenu && !dlMenu.hasAttribute('hidden')
-            && !(e.target as Element).closest('#dl')) closeDlMenu();
+        if (!(e.target as Element).closest('.dl')) closeAllDlMenus();
       });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDlMenu(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllDlMenus(); });
 
       // "CLI installation" → smooth-scroll to the install block (works with or
       // without the Lenis layer that loads below).
