@@ -12,7 +12,10 @@
 <!-- PROJECT HEADER -->
 <br />
 <div align="center">
-  <h1 align="center">Aglaïa</h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./aglaia/assets/brand/aglaia-dark.png" />
+    <img alt="Aglaïa" src="./aglaia/assets/brand/aglaia-light.png" width="380" />
+  </picture>
 
   <p align="center">
     Turn a webcam and a stack of pages into clean, deskewed, dewarped,
