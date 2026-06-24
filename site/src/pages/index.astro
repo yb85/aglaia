@@ -582,6 +582,9 @@ aglaia ~/scans/my-book              # launch</code></pre>
          reads as a single unit; their individual .btn:hover fx are cancelled
          (otherwise only the hovered half raises and you get two shadows). */
       .dl { position: relative; display: inline-flex; align-items: stretch;
+        /* Own stacking context above the hero's tip button / fineprint (but
+           below the fixed nav at z-index 50) so the open platform menu wins. */
+        z-index: 40;
         border-radius: 12px; box-shadow: 0 8px 30px -10px #3d7fc4;
         transition: transform .2s, box-shadow .2s; }
       .dl:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -12px #3d7fc4; }
@@ -590,6 +593,9 @@ aglaia ~/scans/my-book              # launch</code></pre>
       .dl__main { display: inline-flex; flex-direction: column;
         align-items: flex-start; justify-content: center; line-height: 1.15;
         border-top-right-radius: 0; border-bottom-right-radius: 0; }
+      /* Force a clean two-line layout (label over sub) on BOTH the download
+         and CLI buttons, independent of OS-name length — never wrap a line. */
+      .dl__label, .dl__sub { white-space: nowrap; }
       .dl__sub { font-size: .72rem; font-weight: 500; opacity: .82; }
       /* It's a <button> — strip the native chrome (the dark border was the
          user-agent button border) and re-add only the left divider so it
