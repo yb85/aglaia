@@ -413,6 +413,27 @@ class OcrTab(QWidget):
         names = [n for n in self._ENGINE_ORDER if n in ENGINE_REGISTRY]
         names += [n for n in ENGINE_REGISTRY if n not in names]
 
+        # Drop engines the platform can't run at all — no point showing an
+        # Install button for an unreachable backend. Apple engines need
+        # macOS; paddle_vl is mlx-only → Apple Silicon. Removed outright
+        # (the macOS-26 sub-gating for apple_docs still happens in
+        # _apply_engine_gating for the cards that survive here).
+        import sys
+        import platform as _plat
+        from aglaia.workers.ocr.apple_caps import probe_apple_caps
+        _is_macos = probe_apple_caps().is_macos
+        _is_apple_silicon = (sys.platform == "darwin"
+                             and _plat.machine() in ("arm64", "aarch64"))
+
+        def _platform_ok(name: str) -> bool:
+            if name in ("apple_docs", "apple_vision"):
+                return _is_macos
+            if name == "paddle_vl":
+                return _is_apple_silicon
+            return True
+
+        names = [n for n in names if _platform_ok(n)]
+
         self._complement_combo = None  # rebuilt below if apple_docs present
         for name in names:
             cls = ENGINE_REGISTRY[name]
