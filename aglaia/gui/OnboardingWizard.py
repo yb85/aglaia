@@ -97,19 +97,20 @@ _PERM_ROWS = [
 # Per-model display copy keyed by ModelSpec.key. Size is pulled live from the
 # spec; the caption is the small grey line under the description.
 _MODEL_COPY = {
-    "east": ("EAST — page detection",
-             "Finds the text region on each photo so pages crop cleanly."),
+    "dbnet": ("DBnet — page detection",
+              "Finds the text region on each photo so pages crop cleanly. "
+              "Small (~5 MB), fast, and the default detector."),
     "vosk_en": ("Vosk — voice control",
                 "Hands-free page capture by voice, fully offline."),
     "surya": ("Surya — neural OCR",
               "Higher-quality OCR for difficult scans (large download)."),
 }
-_MODEL_ORDER = ["east", "vosk_en", "surya"]
+_MODEL_ORDER = ["dbnet", "vosk_en", "surya"]
 
 # Models with a built-in macOS equivalent → (availability-kind, product, role).
-# Shown as a green ✓ ("you already have it") or red ✗ caption on macOS.
+# Shown as a green ✓ / amber / red ✗ caption on macOS.
 _MODEL_ALT = {
-    "east": ("vision", "Apple Vision", "page detection"),
+    "dbnet": ("vision", "Apple Vision", "page detection"),
     "surya": ("docs", "Apple Documents", "local OCR"),
 }
 
@@ -337,10 +338,11 @@ class OnboardingWizard(QDialog):
             installed = is_model_installed(key)
             chk = QCheckBox()
             # Default state per platform.
-            if key == "east":
-                # Required off-Apple (Apple Vision covers detection on macOS).
-                chk.setChecked(not _IS_MAC)
-                chk.setEnabled(_IS_MAC)         # off-mac: checked + locked
+            if key == "dbnet":
+                # The default detector — recommended everywhere (Apple Vision is
+                # available on macOS but quirky on faint running heads).
+                chk.setChecked(True)
+                chk.setEnabled(_IS_MAC)         # off-mac: required + locked
             elif key == "vosk_en":
                 chk.setChecked(True)            # recommended everywhere, optional
             else:  # surya
@@ -353,8 +355,9 @@ class OnboardingWizard(QDialog):
             caption_bits = [f"~{spec.approx_size_mb} MB"]
             if installed:
                 caption_bits.append(self.tr("already installed"))
-            elif key == "east" and not _IS_MAC:
-                caption_bits.append(self.tr("required on this platform"))
+            elif key == "dbnet":
+                caption_bits.append(self.tr("recommended") if _IS_MAC
+                                    else self.tr("required on this platform"))
             else:
                 caption_bits.append(self.tr("optional"))
 
@@ -414,7 +417,10 @@ class OnboardingWizard(QDialog):
         have = self.tr("You already have {prod} for {role}").format(
             prod=prod, role=role)
         if kind == "vision":
-            return (span(COLOR_SUCCESS, "✓", have) if has_text
+            # Apple Vision exists on macOS but is quirky (misses faint running
+            # heads), so flag it amber rather than green — DBnet is preferred.
+            return (span(COLOR_WARNING, "✓", self.tr("Apple Vision available but quirky"))
+                    if has_text
                     else span(COLOR_ERROR, "✗",
                               self.tr("No {prod} equivalent installed").format(prod=prod)))
         # kind == "docs" (OCR): three states.

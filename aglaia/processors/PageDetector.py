@@ -249,7 +249,7 @@ class PageDetector(AbstractImageProcessor):
                              "Downsample to this DPI for detection; full-res used for cropping."),
         "backend": _e("auto",
                       ["auto", "east", "dbnet", "apple_vision", "heuristic"],
-                      "Text detector backend. auto = apple_vision on macOS else EAST → DBnet → heuristic."),
+                      "Text detector backend. auto = dbnet → apple_vision (macOS) → east."),
         "min_text_height": _f(0.01, 0.0, 0.1, 0.005,
                               "Apple Vision only: smallest text to detect, as a fraction of "
                               "image height. Lower = catches running heads / page numbers the "

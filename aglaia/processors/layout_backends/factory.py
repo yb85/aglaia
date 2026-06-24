@@ -35,7 +35,13 @@ def probe_active_backend(name: str = "auto") -> str:
             return "none"
         return getattr(b, "name", name)
 
-    # auto
+    # auto: dbnet → Apple Vision (macOS) → EAST
+    try:
+        from aglaia.processors.layout_backends.dbnet import _resolve_model_path as _db_path
+        _db_path()
+        return "dbnet"
+    except Exception:
+        pass
     is_mac = sys.platform == "darwin"
     if is_mac:
         try:
@@ -53,12 +59,6 @@ def probe_active_backend(name: str = "auto") -> str:
         from aglaia.processors.layout_backends.east import _resolve_model_path as _east_path
         _east_path()
         return "east"
-    except Exception:
-        pass
-    try:
-        from aglaia.processors.layout_backends.dbnet import _resolve_model_path as _db_path
-        _db_path()
-        return "dbnet"
     except Exception:
         pass
     return "none"
@@ -95,19 +95,19 @@ def get_backend(name: str = "auto") -> LayoutBackend:
         return HeuristicBackend()
     if name == "auto":
         is_mac = sys.platform == "darwin"
-        loaders = []
+        # dbnet first: small (~5 MB), fast, and robust. Then Apple Vision on
+        # macOS (native but quirky — misses faint running heads). EAST last as
+        # a heavier fallback.
+        loaders = [lambda: __import__(
+            "aglaia.processors.layout_backends.dbnet",
+            fromlist=["DbnetBackend"]).DbnetBackend()]
         if is_mac:
             loaders.append(lambda: __import__(
                 "aglaia.processors.layout_backends.apple_vision",
                 fromlist=["AppleVisionBackend"]).AppleVisionBackend())
-        # EAST first (proven on existing scans) then dbnet (smaller/newer
-        # but trips on dense gutter blobs).
         loaders.append(lambda: __import__(
             "aglaia.processors.layout_backends.east",
             fromlist=["EastBackend"]).EastBackend())
-        loaders.append(lambda: __import__(
-            "aglaia.processors.layout_backends.dbnet",
-            fromlist=["DbnetBackend"]).DbnetBackend())
         for loader in loaders:
             try:
                 return loader()
