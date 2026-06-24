@@ -51,6 +51,15 @@ def _sigterm(_sig, _frame):
 # ── headless path ─────────────────────────────────────────────────────
 
 def _run_headless(cfg: CliConfig) -> int:
+    # CLI-only first-run gate: processing assumes a configured install (a
+    # detection model, seeded pipelines, defaults). If nothing's set up yet,
+    # point the user at `aglaia --setup` instead of failing deep in the chain.
+    if cfg.has_inputs():
+        from aglaia.workers.setup_cli import has_user_config
+        if not has_user_config():
+            print("Aglaïa isn't set up yet. Run `aglaia --setup` (interactive) "
+                  "or configure it via the GUI, then re-run.", file=sys.stderr)
+            return 2
     from aglaia.workers.headless import run
     return run(cfg)
 
@@ -874,6 +883,10 @@ def main(argv: list[str] | None = None) -> int:
     from aglaia.workers.cli import run_list_commands
     if run_list_commands(cfg):
         return 0
+
+    if cfg.setup:
+        from aglaia.workers.setup_cli import run_setup
+        return run_setup()
 
     if cfg.headless:
         if not cfg.has_inputs():

@@ -113,6 +113,9 @@ class CliConfig:
     list_ocr: bool = False
     list_exports: bool = False
 
+    # Interactive first-run setup (CLI-only installs).
+    setup: bool = False
+
     def has_inputs(self) -> bool:
         return self.source != "none"
 
@@ -185,6 +188,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="List available OCR engines and exit.")
     p.add_argument("--export-list", action="store_true",
                    help="List available export formats and exit.")
+    p.add_argument("--setup", action="store_true",
+                   help="Interactive first-run setup (language, models, config) "
+                        "for CLI-only installs; then exit.")
     return p
 
 
@@ -223,6 +229,7 @@ def parse_argv(argv: list[str]) -> CliConfig:
         list_pipelines=bool(ns.pipeline_list),
         list_ocr=bool(ns.ocr_list),
         list_exports=bool(ns.export_list),
+        setup=bool(getattr(ns, "setup", False)),
     )
     classify_inputs(cfg)
     return cfg

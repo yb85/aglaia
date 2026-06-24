@@ -45,6 +45,8 @@ from PySide6.QtWidgets import (
 )
 
 from aglaia.app_data import models_dir
+from aglaia.app_data.models import (  # noqa: F401  registry, re-exported for GUI
+    MODEL_SPECS, ModelSpec, _load_model_specs, is_model_installed)
 from aglaia.gui.colors import (
     COLOR_BG_OVERLAY_HOVER,
     COLOR_BG_OVERLAY_SOFT,
@@ -65,112 +67,6 @@ from aglaia.gui.colors import (
     COLOR_TERTIARY,
 )
 from aglaia.gui.widgets import Card
-
-
-# ── model registry ────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class ModelSpec:
-    key: str            # internal id
-    title: str          # short card title
-    filename: str       # on-disk filename inside models_dir (or subdir)
-    url: str            # download URL (file kind) or HF repo id (hf-snapshot)
-    approx_size_mb: int
-    # Discriminates the worker that drives the download:
-    #   "file"        — single HTTPS file pulled via `DownloadWorker`.
-    #   "hf-snapshot" — recursive HuggingFace repo snapshot via the
-    #                   `SuryaWorker` engine (despite the name, it works
-    #                   for any HF model id, not just Surya).
-    # Transport is HTTPS in both cases; plain http:// URLs are
-    # rejected at start time.
-    kind: str
-    section: str        # "recommended" or "other"
-    purpose: str        # e.g. "Layout detection" / "OCR"
-    project: str        # human-readable upstream project name
-    source: str         # short host badge: "github.com" / "huggingface.co"
-    # SHA-1 of the canonical file. `kind="file"` only — directory
-    # snapshots skip the per-file hash check.
-    sha1: str = ""
-    # For hf-snapshot kinds: list of ``{"path": "...", "size": N}``
-    # entries the download MUST land on disk before the card is
-    # considered "Installed". Without this, a partial snapshot with
-    # only README + config would still be flagged as installed because
-    # the directory is non-empty. Tuple of frozen dicts because
-    # ``frozen=True`` dataclasses can't hold mutable defaults.
-    required_files: tuple = ()
-
-
-def _load_model_specs() -> list[ModelSpec]:
-    """Load the model registry from `aglaia/app_data/model-list.json`.
-
-    Lookup order — first hit wins:
-      1. `<APP_DATA>/model-list.json` (per-user override; future remote
-         refresh writes here).
-      2. Bundled `aglaia/app_data/model-list.json` (ships with the app).
-
-    Top-level keys (EAST / SURYA / DBNET …) are friendly labels — the
-    actual `key` field inside each entry is what code branches on.
-    Unknown JSON fields are tolerated so newer files stay
-    backwards-compatible with older builds.
-    """
-    import json
-    from aglaia.app_data import app_data_dir
-    candidates = [
-        app_data_dir() / "model-list.json",
-        Path(__file__).resolve().parents[1] / "app_data" / "model-list.json",
-    ]
-    raw: dict | None = None
-    for p in candidates:
-        try:
-            if p.is_file():
-                raw = json.loads(p.read_text(encoding="utf-8"))
-                break
-        except Exception:
-            continue
-    if not raw:
-        return []
-    allowed = {f.name for f in fields(ModelSpec)}
-    out: list[ModelSpec] = []
-    for entry in raw.values():
-        if not isinstance(entry, dict):
-            continue
-        clean = {k: v for k, v in entry.items() if k in allowed}
-        # ``required_files`` is JSON-shaped as a list[dict]; ModelSpec is
-        # ``frozen=True`` so the value has to be hashable → tuple of
-        # tuples (path, size). Older entries without the field default to
-        # the empty tuple (existence-only fallback).
-        rf = clean.get("required_files") or ()
-        if rf:
-            clean["required_files"] = tuple(
-                (str(e.get("path", "")), int(e.get("size", 0)))
-                for e in rf if isinstance(e, dict) and e.get("path")
-            )
-        try:
-            out.append(ModelSpec(**clean))
-        except TypeError:
-            continue  # missing required field — skip silently
-    return out
-
-
-MODEL_SPECS: list[ModelSpec] = _load_model_specs()
-
-
-def is_model_installed(key: str) -> bool:
-    """Lightweight on-disk presence check for a model `key`, usable
-    without building a Qt card (the first-run prompt gates on this).
-    Existence-only — the card's `_is_installed` does the full hash
-    verify; here we only need "is it already there?"."""
-    spec = next((s for s in (_load_model_specs() or MODEL_SPECS)
-                 if s.key == key), None)
-    if spec is None:
-        return False
-    d = models_dir() / spec.filename
-    if spec.kind == "hf-snapshot":
-        return d.is_dir() and any(d.iterdir())
-    try:
-        return d.exists() and d.stat().st_size > 1024
-    except OSError:
-        return False
 
 
 # ── download worker ──────────────────────────────────────────────────
