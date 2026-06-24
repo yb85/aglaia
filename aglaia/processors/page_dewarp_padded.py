@@ -400,8 +400,17 @@ def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
         # NOTE: stock optimiser is cubic-only; twist-model inputs above
         # the padding caps would silently lose the model tail. Caps are
         # sized so this never triggers on real pages.
-        from page_dewarp.optimise._jax import _run_jax_lbfgsb as _orig
-        return _orig(dstpoints, keypoint_index, params)
+        #
+        # Use the ORIGINAL captured at install time — NOT a re-import of
+        # `_jax._run_jax_lbfgsb`, which install() overwrote with THIS very
+        # function. Re-importing it made the fallback call itself → infinite
+        # recursion → "maximum recursion depth exceeded", killing the dewarp
+        # branch (no dewarp produced) for any over-cap crop.
+        if _ORIG_RUN_JAX_LBFGSB is None:
+            raise RuntimeError(
+                "padded JAX over-cap fallback unavailable: original "
+                "_run_jax_lbfgsb was not captured at install time")
+        return _ORIG_RUN_JAX_LBFGSB(dstpoints, keypoint_index, params)
 
     padded_pvec, padded_dst, padded_ki, mask, _, _ = _pad(
         dstpoints, keypoint_index, params
@@ -442,16 +451,24 @@ def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
 
 
 _INSTALLED = False
+# The stock optimiser, captured BEFORE we overwrite the module attribute, so
+# the over-cap fallback can reach it (re-importing the attribute would hand
+# back our own padded function → infinite recursion).
+_ORIG_RUN_JAX_LBFGSB = None
 
 
 def install() -> bool:
     """Replace page_dewarp.optimise._jax._run_jax_lbfgsb with the padded
     variant. Idempotent. Returns True on success."""
-    global _INSTALLED
+    global _INSTALLED, _ORIG_RUN_JAX_LBFGSB
     if _INSTALLED:
         return True
     try:
         from page_dewarp.optimise import _jax as _pd_jax_mod
+        # Capture the original first — overwriting it below would otherwise
+        # make the over-cap fallback recurse into itself.
+        if _ORIG_RUN_JAX_LBFGSB is None:
+            _ORIG_RUN_JAX_LBFGSB = _pd_jax_mod._run_jax_lbfgsb
         _pd_jax_mod._run_jax_lbfgsb = _run_jax_lbfgsb_padded
         _INSTALLED = True
         return True
