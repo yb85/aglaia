@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import sys
 
-# Models offered, in order: (key, label, default-checked, role-caption).
-# dbnet is the default detector (required off-macOS).
+# Models offered, in order: (key, label, role-caption).
+# dbnet is the default detector (required off-macOS). Vosk (voice control) is
+# deliberately absent — it only drives live capture, which a headless/CLI
+# install has no use for; offer it from the GUI Downloader instead.
 _MODELS = [
     ("dbnet", "DBnet — page detection", "the default page detector"),
-    ("vosk_en", "Vosk — offline voice control", "optional, hands-free capture"),
     ("surya", "Surya — neural OCR", "optional, higher-quality OCR"),
 ]
 
@@ -97,7 +98,7 @@ def run_setup() -> int:
         installed = is_model_installed(key)
         spec = spec_for(key)
         size = f"~{spec.approx_size_mb} MB" if spec else "?"
-        checked = (key in ("dbnet", "vosk_en"))   # recommended defaults
+        checked = (key == "dbnet")   # recommended default
         suffix = "  [already installed]" if installed else f"  ({size} · {role})"
         choices.append(questionary.Choice(
             label + suffix, value=key, checked=checked and not installed,
