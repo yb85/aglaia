@@ -296,7 +296,8 @@ class OnboardingWizard(QDialog):
 
     def _build_permissions_page(self) -> QWidget:
         w, v = self._page_host()
-        title = QLabel(self.tr("Permissions"))
+        title = QLabel(self.tr("You will be asked for permissions… why?"))
+        title.setWordWrap(True)
         title.setStyleSheet("font-size: 20px; font-weight: 700;")
         v.addWidget(title)
         intro = QLabel(self.tr(_PERM_INTRO))
