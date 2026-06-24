@@ -40,6 +40,11 @@ jobs:
   publish-pypi:
     needs: build
     runs-on: ubuntu-latest
+    # Non-blocking: until a PyPI Trusted Publisher is configured (see header),
+    # `uv publish` has no OIDC credentials and fails — that must NOT red-X the
+    # release. Once the trusted publisher exists, this just works (and can be
+    # re-run on an existing tag without re-tagging).
+    continue-on-error: true
     environment: pypi               # gate + binds the trusted publisher
     permissions:
       id-token: write               # OIDC token for Trusted Publishing
