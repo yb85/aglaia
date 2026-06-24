@@ -535,6 +535,20 @@ class IntegratedProcessingChain:
         # the vmmap-based check, which can't always read its own spawned process.
         _scans_processed = 0
         _recycle_scans = int(_os.environ.get("AGLAIA_WORKER_RECYCLE_SNAPS", "0"))
+        # Set after each scan, cleared when the worker next goes idle — gates
+        # the one-shot idle memory release so it runs once per work burst.
+        _dirty_since_idle = False
+        # Deferred idle recycle: malloc_trim can't free the JAX/CUDA resident
+        # stack (loaded native libs + CUDA context, ~1.5 GB on Linux GPU).
+        # After a work burst we've been idle this many seconds, exit so the
+        # watchdog respawns a fresh light worker — releasing it fully (verified
+        # 1.6 GB → 0.75 GB per worker). OPT-IN (default 0/off): the recycle's
+        # respawn-during-shutdown traffic currently stalls the headless
+        # grace-drain / clean exit, so it's behind an env flag until the
+        # shutdown path is made recycle-aware. Next job pays a cold JAX import.
+        _idle_recycle_s = float(_os.environ.get("AGLAIA_WORKER_IDLE_RECYCLE_S", "0"))
+        _recycle_armed = False
+        _idle_at = 0.0
 
         # Log RSS at +50 MB delta or every 30s. Catches leaks on long sessions.
         try:
@@ -551,6 +565,26 @@ class IntegratedProcessingChain:
 
         def _phys_footprint_mb() -> float:
             return _phys_footprint_for_pid(_os.getpid())
+
+        def _release_idle_memory() -> None:
+            """Return freed C-heap memory to the OS when the worker goes idle.
+
+            glibc on Linux keeps freed heap in the malloc arena (RSS stays
+            high) until ``malloc_trim``; macOS frees eagerly, which is why
+            idle workers only looked leaky on Linux. (We deliberately do NOT
+            call ``jax.clear_caches()`` here — it leaves the XLA/CUDA runtime
+            unable to exit cleanly, hanging chain shutdown, and freed little.
+            The big resident JAX/CUDA stack is reclaimed by the idle recycle
+            below, not by trimming.)"""
+            import gc as _gc
+            _gc.collect()
+            import sys as _sys
+            if _sys.platform.startswith("linux"):
+                try:
+                    import ctypes
+                    ctypes.CDLL("libc.so.6").malloc_trim(0)
+                except Exception:
+                    pass
 
         def maybe_log_mem(tag: str = ""):
             """No-op stub. Memory reporting lives in `_rss_sampler_loop` /
@@ -915,6 +949,24 @@ class IntegratedProcessingChain:
                     try:
                         item = input_queue.get(timeout=0.5)
                     except queue.Empty:
+                        if _dirty_since_idle:
+                            # First idle tick after a work burst: cheap release
+                            # now, then arm the deferred full recycle. Stay
+                            # silent — extra log traffic perturbs the headless
+                            # grace-drain's queue-silence exit detection.
+                            _dirty_since_idle = False
+                            _release_idle_memory()
+                            _idle_at = time.time()
+                            _recycle_armed = True
+                        elif (_recycle_armed and _idle_recycle_s > 0
+                                and (time.time() - _idle_at) > _idle_recycle_s):
+                            if log_queue is not None:
+                                log_queue.put(("log_info",
+                                    f"[worker pid={_os.getpid()}] idle "
+                                    f"{_idle_recycle_s:.0f}s; recycling to "
+                                    "release memory."))
+                            conn.close()
+                            _os._exit(0)
                         continue
                 if item is None:
                     break
@@ -967,6 +1019,7 @@ class IntegratedProcessingChain:
                     # Top-level + routed children both count: a worker draining
                     # only routed items would otherwise underestimate pressure.
                     _scans_processed += 1
+                    _dirty_since_idle = True
                     maybe_log_mem(tag=f"after scan")
                     # Deterministic scan-count recycle (vmmap can be flaky in spawn).
                     if (_recycle_scans > 0
