@@ -4315,15 +4315,20 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(idx)
         self._settings_tab = tab
 
-    def _open_model_downloader(self) -> None:
-        """Open the Model Downloader dialog (singleton, modeless)."""
+    def _open_model_downloader(self, autostart_keys: list[str] | None = None) -> None:
+        """Open the Model Downloader dialog (singleton, modeless).
+
+        ``autostart_keys`` (model spec keys) begin downloading immediately —
+        used by the first-run install invite."""
         existing = getattr(self, "_downloader_dialog", None)
         if existing is not None and existing.isVisible():
+            if autostart_keys:
+                existing.autostart(autostart_keys)
             existing.raise_()
             existing.activateWindow()
             return
         from aglaia.gui.ModelDownloaderTab import ModelDownloaderDialog
-        dlg = ModelDownloaderDialog(self)
+        dlg = ModelDownloaderDialog(self, autostart_keys=autostart_keys)
 
         def _on_close(*_):
             setattr(self, "_downloader_dialog", None)

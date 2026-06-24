@@ -320,6 +320,16 @@ def _qt_app() -> "QApplication":
         prompt_pending_plugins(None)
     except Exception as e:
         print(f"plugin-trust: skipped ({e})", file=sys.stderr)
+    # First-run invite to fetch the recommended offline models (EAST + Vosk;
+    # Vosk only on macOS). Stash the chosen keys — the downloader needs a
+    # MainWindow to host it, so _bootstrap_with_choice opens it once one's up.
+    try:
+        from aglaia.gui.ModelInstallPrompt import ModelInstallPrompt
+        _install_keys = ModelInstallPrompt.maybe_prompt(None)
+        if _install_keys:
+            app.setProperty("aglaia_install_models", _install_keys)
+    except Exception as e:
+        print(f"model-invite: skipped ({e})", file=sys.stderr)
     return app
 
 
@@ -684,6 +694,14 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     _heuristic_choice = maybe_show_heuristic_warning(pipeline_def, parent=window)
     if _heuristic_choice == "open_downloader":
         QTimer.singleShot(0, window._open_model_downloader)
+
+    # First-run model invite (recorded in _qt_app, before any window existed):
+    # open the downloader now and autostart the chosen downloads.
+    _install_keys = app.property("aglaia_install_models")
+    if _install_keys:
+        app.setProperty("aglaia_install_models", None)
+        QTimer.singleShot(
+            0, lambda: window._open_model_downloader(autostart_keys=list(_install_keys)))
 
     # ── ingest ────────────────────────────────────────────────────
     if _heuristic_choice == "open_downloader":
