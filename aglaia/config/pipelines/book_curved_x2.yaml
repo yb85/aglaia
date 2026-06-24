@@ -33,7 +33,7 @@ pipeline:
     method: wolf++
     window_mm_wolf: 5
     k_wolf: 0.25
-    roi_shrink: 10
+    roi_shrink: 2
     morpho_close: 2
 - name: pages_deskew
   processor: SkewFinder

@@ -125,7 +125,7 @@ def _build_binarizer_options() -> Dict[str, Any]:
         visible_when={"method": ["bernsen"]},
     )
     opts["roi_shrink"] = _i(
-        0, 0, 50,
+        2, 0, 50,
         "If meta.roi is set, erode the mask N iterations before applying.",
         advanced=True,
         visible_when={"method": _ALL_DOXA_METHODS},
@@ -148,7 +148,7 @@ def _build_binarizer_option_class():
     fields = [
         ("method", str, "wolf++"),
         ("bernsen_contrast", int, 15),
-        ("roi_shrink", int, 0),
+        ("roi_shrink", int, 2),
         ("morpho_close", int, 0),
         ("extra", Any, field(default_factory=dict)),
     ]
@@ -206,7 +206,7 @@ def _build_binarizer_option_class():
                 setattr(self, f"k_{active_family}", float(legacy_k))
 
         self.bernsen_contrast = int(kwargs.pop("bernsen_contrast", 15))
-        self.roi_shrink = kwargs.pop("roi_shrink", 0)
+        self.roi_shrink = kwargs.pop("roi_shrink", 2)
         # Clamp to the spec range so a stray yaml value can't drag a
         # huge kernel through cv2 and tank a scan's elapsed_ms.
         mc = int(kwargs.pop("morpho_close", 0))
