@@ -441,7 +441,12 @@ class OcrTab(QWidget):
                 eng = cls()
             except Exception:
                 continue
-            title = eng.display if eng.available else self.tr("{name} (not installed)").format(name=eng.display)
+            # "missing" (not "not installed") + a hard length cap: long names
+            # like "PaddleOCR-VL" otherwise overflow the sidebar card width,
+            # pushing the speed/quality badges off the row.
+            title = eng.display if eng.available else self.tr("{name} (missing)").format(name=eng.display)
+            if len(title) > 26:
+                title = title[:25].rstrip() + "…"
             badges = list(self._ENGINE_BADGES.get(name, ()))
             desc = getattr(eng, "description", "") or ""
             extras = None
