@@ -101,25 +101,34 @@ class Calibrator:
         
         return True, mtx, dist, final_dpi, "Success"
 
-def save_calibration(mtx, dist, dpi, resolution, new_mtx=None,
-                     path="config/camera_params.json", base_dpi=None,
-                     zoom_at_capture=None):
-    """`base_dpi` (DPI normalised to zoom=1.0) and `zoom_at_capture` let
-    the runtime scale DPI by the current camera zoom factor."""
+def _default_calibration_path() -> str:
+    """User-writable camera_params.json under APP_DATA. The old relative
+    'config/camera_params.json' default broke the frozen app: its CWD is '/'
+    (read-only), so save_calibration raised PermissionError — silently
+    aborting DPI calibration — and load_calibration never found the file."""
+    from aglaia.app_data import app_data_dir
+    return str(app_data_dir() / "camera_params.json")
+
+
+def save_calibration(mtx, dist, resolution, new_mtx=None, path=None):
+    """Persist ONLY the geometric camera intrinsics. DPI is NOT a camera
+    parameter — it depends on camera-to-page distance, which varies per
+    session/project, so it lives with the project, never here."""
+    if path is None:
+        path = _default_calibration_path()
     data = {
         "camera_matrix": mtx.tolist(),
         "dist_coeffs": dist.tolist(),
-        "dpi": dpi,
         "resolution": resolution,
         "new_camera_matrix": new_mtx.tolist() if new_mtx is not None else None,
-        "base_dpi": base_dpi,
-        "zoom_at_capture": zoom_at_capture,
     }
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
 
-def load_calibration(path="config/camera_params.json"):
+def load_calibration(path=None):
+    if path is None:
+        path = _default_calibration_path()
     if not os.path.exists(path):
         return None
     try:
@@ -128,11 +137,8 @@ def load_calibration(path="config/camera_params.json"):
             return {
                 "mtx": np.array(data["camera_matrix"]),
                 "dist": np.array(data["dist_coeffs"]),
-                "dpi": data["dpi"],
                 "resolution": data.get("resolution"),
                 "new_mtx": np.array(data["new_camera_matrix"]) if data.get("new_camera_matrix") is not None else None,
-                "base_dpi": data.get("base_dpi"),
-                "zoom_at_capture": data.get("zoom_at_capture"),
             }
-    except:
+    except Exception:
         return None

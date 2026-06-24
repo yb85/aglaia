@@ -1437,6 +1437,12 @@ class MainWindow(QMainWindow):
                 ct.transform_combo.addItem(_icon(ico_name), label)
         ct.transform_combo.setCurrentIndex(0)
         ct.btn_full_calibrate.clicked.connect(self.calibrate_camera)
+        # Full (chessboard) camera calibration isn't production-ready — disabled
+        # for now. Tracked in issue #16 ("Complete calibration routine"). DPI is
+        # set via the DPI-estimation dialog, which stays enabled.
+        ct.btn_full_calibrate.setEnabled(False)
+        ct.btn_full_calibrate.setToolTip(self.tr(
+            "Full camera calibration isn't ready yet — use “Calibrate DPI”."))
         ct.btn_dpi_calibrate.clicked.connect(self.calibrate_dpi)
         ct.dpi_label.clicked.connect(self._prompt_manual_dpi)
         ct.btn_freehand.clicked.connect(self._on_freehand_clicked)
@@ -1483,8 +1489,8 @@ class MainWindow(QMainWindow):
         ct.format_combo.currentIndexChanged.connect(self._on_capture_format_changed)
         # Seed the DPI readout (uncalibrated default until calibration runs).
         try:
-            ct.set_dpi(self.effective_dpi(), calibrated=bool(self.calibration),
-                       manual=bool(self._manual_dpi is not None and not self.calibration))
+            ct.set_dpi(self.effective_dpi(), calibrated=self._manual_dpi is not None,
+                       manual=False)
         except Exception:
             pass
         return ct
@@ -1514,16 +1520,23 @@ class MainWindow(QMainWindow):
             float(cur), 10.0, 4800.0, 0)
         if not ok:
             return
-        self._manual_dpi = float(val)
-        # Feed the workers: input_dpi is the uncalibrated DPI source.
+        self._apply_dpi(float(val))
+        self.toast(self.tr("DPI set manually — {dpi:.0f} dpi.").format(dpi=float(val)))
+
+    def _apply_dpi(self, dpi: float) -> None:
+        """Apply a per-session scan DPI (from manual entry, the card, or the
+        measure-a-distance dialog). DPI is distance-dependent — NOT a camera
+        intrinsic — so it is kept as a session override and fed to the workers
+        via ``input_dpi``; captured scans then persist their own DPI in the
+        project DB. Never written to camera_params.json."""
+        self._manual_dpi = float(dpi)
         try:
-            self.args.options["general"]["input_dpi"] = float(val)
+            self.args.options["general"]["input_dpi"] = float(dpi)
         except Exception:
             pass
         if self.processing_queue:
             for _ in range(self.total_workers + 2):
                 self.processing_queue.put(('reload_params',))
-        self.toast(self.tr("DPI set manually — {dpi:.0f} dpi.").format(dpi=float(val)))
         self._refresh_dpi_readout()
 
     def _populate_capture_devices(self, ct) -> None:
@@ -2578,8 +2591,9 @@ class MainWindow(QMainWindow):
                 newcameramtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
 
                 # Update persistent config/parameters
-                save_calibration(mtx, dist, dpi, (h, w), new_mtx=newcameramtx)
-                self.calibration = {"mtx": mtx, "dist": dist, "dpi": dpi, "resolution": (h, w), "new_mtx": newcameramtx}
+                save_calibration(mtx, dist, (h, w), new_mtx=newcameramtx)
+                self.calibration = {"mtx": mtx, "dist": dist, "resolution": (h, w), "new_mtx": newcameramtx}
+                self._apply_dpi(float(dpi))   # DPI is per-session, not a camera param
                 self.status_label.setText(self.tr("Full Calibration Success! DPI: {dpi:.1f}").format(dpi=dpi))
 
                 # Notify workers to reload parameters
@@ -2622,58 +2636,24 @@ class MainWindow(QMainWindow):
 
     def _on_dpi_calibration_committed(self, dpi: float, base_dpi: float,
                                       zoom: float, frame_bgr, _quad) -> None:
-        ref_shape = frame_bgr.shape
-        if self.calibration:
-            mtx = self.calibration["mtx"]
-            dist = self.calibration["dist"]
-            new_mtx = self.calibration.get("new_mtx")
-            res = self.calibration["resolution"]
-        else:
-            h, w = ref_shape[:2]
-            mtx = np.eye(3)
-            dist = np.zeros((1, 5))
-            new_mtx = None
-            res = [h, w]
-        save_calibration(mtx, dist, dpi, res, new_mtx=new_mtx,
-                         base_dpi=base_dpi, zoom_at_capture=zoom)
-        if self.calibration is None:
-            self.calibration = {
-                "mtx": mtx, "dist": dist, "dpi": dpi,
-                "resolution": res, "new_mtx": new_mtx,
-                "base_dpi": base_dpi, "zoom_at_capture": zoom,
-            }
-        else:
-            self.calibration["dpi"] = dpi
-            self.calibration["base_dpi"] = base_dpi
-            self.calibration["zoom_at_capture"] = zoom
-
-        num_signals = self.total_workers + 2
-        if self.processing_queue:
-            for _ in range(num_signals):
-                self.processing_queue.put(('reload_params',))
-        self.status_label.setText(
-            self.tr(
-                "DPI calibrated: base {base:.1f} @1.0x (now {now:.1f})"
-            ).format(base=base_dpi, now=self.effective_dpi())
-        )
-        self.toast(self.tr("DPI calibrated — {dpi:.0f} dpi.").format(dpi=self.effective_dpi()))
-        self._refresh_dpi_readout()
+        # DPI (from the card or measure-a-distance method) is a per-session,
+        # distance-dependent value — NOT a camera intrinsic. Apply it as the
+        # session DPI; do NOT write camera_params.json and do NOT touch the
+        # camera matrix. (The previous code routed this through save_calibration
+        # to a read-only relative path in the frozen app, which threw and left
+        # the readout stuck at the uncalibrated 100 dpi.)
+        self._apply_dpi(float(dpi))
+        self.toast(self.tr("DPI calibrated — {dpi:.0f} dpi.").format(dpi=float(dpi)))
         # The dialog auto-closes on `accept()`; nothing more to do here.
 
 
     def effective_dpi(self) -> float:
-        """Current DPI scaled by the camera's live zoom factor."""
-        if not self.calibration:
-            if self._manual_dpi is not None:
-                return float(self._manual_dpi)
-            return float(self.args.options["general"].get("input_dpi", 100.0))
-        base = self.calibration.get("base_dpi")
-        if base is None:
-            return float(self.calibration.get("dpi") or 100.0)
-        zoom = 1.0
-        if self.webcam_thread is not None:
-            zoom = float(getattr(self.webcam_thread, "current_zoom", 1.0))
-        return float(base) * zoom
+        """Current scan DPI. A per-session/project value set manually or by the
+        DPI-estimation dialog — decoupled from the camera matrix (which carries
+        no DPI, since DPI depends on camera-to-page distance)."""
+        if self._manual_dpi is not None:
+            return float(self._manual_dpi)
+        return float(self.args.options["general"].get("input_dpi", 100.0))
 
     # ── Pipeline editor ────────────────────────────────────────────────
     def open_fix_dpi_tab(self):
