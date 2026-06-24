@@ -38,12 +38,27 @@ from PySide6.QtWidgets import (
 
 from aglaia.assets import asset_path
 from aglaia.gui.colors import (
-    COLOR_FONT_DIM, COLOR_FONT_MUTED, COLOR_FONT_PRIMARY, COLOR_PRIMARY,
-    active_palette_name,
+    COLOR_BG_BUTTON, COLOR_FONT_DIM, COLOR_FONT_MUTED, COLOR_FONT_PRIMARY,
+    COLOR_PRIMARY, active_palette_name,
 )
 from aglaia.i18n import SUPPORTED_LOCALES
 
 _IS_MAC = sys.platform == "darwin"
+
+
+def _qcolor(spec: str) -> QColor:
+    """Parse a colors.py token into a QColor. Tokens are either hex
+    (``#rrggbb``) or CSS ``rgba(r, g, b, a)`` — and Qt's string ctor does NOT
+    understand ``rgba(...)``, so an unparsed token silently becomes black
+    (which is why the dimmed step dots/labels rendered black instead of grey)."""
+    s = spec.strip()
+    if s.startswith(("rgba(", "rgb(")):
+        nums = s[s.index("(") + 1:s.rindex(")")].split(",")
+        c = QColor(int(float(nums[0])), int(float(nums[1])), int(float(nums[2])))
+        if len(nums) > 3:
+            c.setAlphaF(float(nums[3]))
+        return c
+    return QColor(s)
 
 # Permission review copy — platform-neutral so it reads correctly on every OS.
 _PERM_INTRO = (
@@ -101,8 +116,8 @@ class _StepDots(QWidget):
         slot = self.width() / n
         dot_y = 11
         r = 6
-        prim = QColor(COLOR_PRIMARY)
-        dim = QColor(COLOR_FONT_DIM)
+        prim = _qcolor(COLOR_PRIMARY)
+        dim = _qcolor(COLOR_FONT_DIM)
         font = QFont(self.font())
         font.setPixelSize(10)
         for i, label in enumerate(self._labels):
@@ -120,10 +135,10 @@ class _StepDots(QWidget):
             # Label.
             if i == self._current:
                 font.setBold(True)
-                p.setPen(QColor(COLOR_FONT_PRIMARY))
+                p.setPen(_qcolor(COLOR_FONT_PRIMARY))
             else:
                 font.setBold(False)
-                p.setPen(QColor(COLOR_FONT_MUTED))
+                p.setPen(_qcolor(COLOR_FONT_MUTED))
             p.setFont(font)
             p.drawText(int(cx - slot / 2), 26, int(slot), 16,
                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
@@ -230,6 +245,14 @@ class OnboardingWizard(QDialog):
             self._lang_combo.addItem(label, userData=code)
         self._preselect_language()
         self._lang_combo.setMinimumWidth(200)
+        # Force an OPAQUE styled popup — the native/default popup renders with a
+        # transparent background here, so items overlap the text behind it.
+        self._lang_combo.setStyleSheet(
+            f"QComboBox QAbstractItemView {{"
+            f" background-color: {COLOR_BG_BUTTON};"
+            f" color: {COLOR_FONT_PRIMARY};"
+            f" selection-background-color: {COLOR_PRIMARY};"
+            f" selection-color: #ffffff; outline: 0; }}")
         lang_row.addWidget(self._lang_combo)
         lang_row.addStretch(1)
         v.addLayout(lang_row)
@@ -495,20 +518,28 @@ class OnboardingWizard(QDialog):
 
     # ── entry point ──────────────────────────────────────────────────────
     @classmethod
-    def run_if_first_run(cls, parent: Optional[QWidget] = None) -> None:
-        """Show the wizard once (gated by ``welcome_seen``), running its
-        downloads inline. Any failure is swallowed — onboarding must never
-        block launch."""
+    def run_if_first_run(cls, parent: Optional[QWidget] = None) -> bool:
+        """Show the wizard once and run its downloads inline.
+
+        Returns True to proceed with launch, False if the user CLOSED the
+        wizard before finishing (the caller should then exit the app — setup
+        is incomplete). The ``welcome_seen`` flag is written ONLY on a
+        successful Finish, so an early close re-runs the wizard next launch.
+        On any internal error we return True — onboarding must never block a
+        launch it merely failed to render."""
         try:
             from aglaia.app_data import db
             with db.session() as conn:
                 if db.get(conn, db.KEY_WELCOME_SEEN, False):
-                    return
-            cls(parent).exec()
+                    return True
+            if cls(parent).exec() != QDialog.DialogCode.Accepted:
+                return False  # closed early — flag NOT set, shows again
             with db.session() as conn:
                 db.set(conn, db.KEY_WELCOME_SEEN, True)
                 # Also retire the legacy standalone model invite.
                 db.set(conn, db.KEY_MODELS_PROMPT_DISMISSED, True)
                 conn.commit()
+            return True
         except Exception as e:
             print(f"onboarding: skipped ({e})", file=sys.stderr)
+            return True

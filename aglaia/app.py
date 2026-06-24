@@ -313,7 +313,11 @@ def _qt_app() -> "QApplication":
     # MainWindow and then needed a restart that didn't work).
     try:
         from aglaia.gui.OnboardingWizard import OnboardingWizard
-        OnboardingWizard.run_if_first_run(None)
+        if not OnboardingWizard.run_if_first_run(None):
+            # User closed first-run setup before finishing → don't launch.
+            # welcome_seen stays unset, so the wizard runs again next time.
+            app.setProperty("aglaia_abort_launch", True)
+            return app
     except Exception as e:
         print(f"onboarding: skipped ({e})", file=sys.stderr)
     # Trust gate for drop-in plugins — must run before any widget reads
@@ -896,6 +900,8 @@ def main(argv: list[str] | None = None) -> int:
     # GUI path.
     _trace("main: building QApplication")
     app = _qt_app()
+    if app.property("aglaia_abort_launch"):
+        return 0  # first-run setup was closed before completion — exit.
     _trace("main: QApplication built")
 
     # Optional tracemalloc loop for GUI debugging.
