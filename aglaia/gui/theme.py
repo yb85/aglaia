@@ -509,7 +509,9 @@ class _ComboPopupSizer(QObject):
                     win.setAutoFillBackground(True)
                 obj.setStyleSheet(
                     f"QAbstractItemView {{"
-                    f"  background-color: {COLOR_BG_INPUT};"
+                    # OPAQUE surface — COLOR_BG_INPUT is rgba(...,0.045), a near-
+                    # transparent input tint, which made the popup see-through.
+                    f"  background-color: {COLOR_BG_HINT};"
                     f"  color: palette(text);"
                     f"  border: 1px solid {COLOR_OUTLINE};"
                     f"  border-radius: 0px;"
