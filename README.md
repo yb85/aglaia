@@ -59,19 +59,39 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-Scanning a book by phone is misery: curved pages, skew, glare, and a
-hundred separate photos to wrangle. Flatbeds crack spines and take
-forever. **Aglaïa** makes the webcam you already have behave like a
-proper book scanner — and does the cleanup for you.
+The goal of this project is to provide a simple, comprehensive, extendable, tool for end-to-end book scanning.
 
-Point a camera at the page; Aglaïa captures, straightens, dewarps,
-binarizes and OCRs whole books in one pass, then exports a searchable PDF
-(invisible text layer over the image) or structured Markdown. It runs
-entirely on your machine — your pages never have to leave it (unless you
-explicitly pick a cloud OCR engine).
+Book scanning is usually done using custom rigs — *eg* [Custom rigs on diybookscanner.org](https://www.diybookscanner.org/en/designs.html)
 
-A single `IntegratedProcessingChain` powers both the PySide6 capture GUI and
-a headless CLI batch mode, driven by the same YAML-defined pipeline.
+This is a fine way of doing things which has many advantages : you control the perspective, the geometry, the illumination, …
+**BUT** it is not portable and requires a quite substancial time and resources investment.
+
+At the other end of the spectrum you have ugly phone pictures, and a myriad of "Free Scanner" aps on the iOS appStore which all repackage the simple homography and detection primitives of the Apple Vision SDK : if you are not scanning flat sheets of paper you are out of luck 
+
+**Aglaia** wants to do the following : **Provide a comprehensive solution to book scanning**, *ie* allow to use **physical books** and **the tools you have** (a laptop and a phone, maybe a camera) **in any situation** you could be (at your desk, on bench outside, at the libray…) to produce **high-quality digital materials** suitable for :
+- archiving, indexing and printing : **clean, OCRed PDFs**
+- feeding knowledgebases and AI research tools : **well structured Markdown files**
+
+The slider section on the project website demonstrates this purpose :
+![3 different scanning situations](./docs/assets/sliders_readme.png)
+
+
+**Aglaïa**'s purpose is similar to **Scantailor**'s, but it tries to reduce the friction with better import (images, pdf or capture), exports (pdf with OCR, markdown, ...), built-in OCR, extendability through custom pipelines, exporters and plugins and more modern algorithms. 
+
+### What the default pipeline will do to a standard book ?
+
+In a few word Aglaïa will produce precisely cut binarized text pages with perspective and page curvature correction. On a modern laptop it can process rougly 2 scans per second.
+
+To achieve it, it relies on :
+
+- a coarse scan-based deskewing followed  by a robust and precise page extraction using lightweight ML text recognition models
+- a finer page based deskewing followed by a robust binarization which can tolerate very unequal illumination and handle border constraints
+- keystone and page curvature correction. This is the most computationally demanding part, handed out to JAX/CUDA or JAX/MLX libraries if available
+- a final replay to intelligently compose the coordinate and morphological transforms to avoid successive interpolation artifacts, especially severe on bilevel images
+
+![Operator composition (Smart replay) prevents re-interpolation artifacts](./docs/assets/replay.png)
+
+
 
 > [!NOTE]
 > **Cross-platform.** Native GUI builds ship for **macOS** (signed/notarized
@@ -81,16 +101,19 @@ a headless CLI batch mode, driven by the same YAML-defined pipeline.
 > layout and to Surya / PaddleOCR-VL / Mistral for OCR. Voice control (Vosk)
 > is offline and cross-platform.
 
-🇫🇷 **Made in France.**
-
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### How much does it costs ?
+
+It's free. [Donations are appreciated](https://ko-fi.com/yb_85) to help cover developpement costs (signing and notarization, AI coding tool)
+
 
 ### Built With
 
 * [![Python][python-shield]][python-url] managed with [uv](https://docs.astral.sh/uv/)
 * **PySide6** — cross-platform desktop GUI
 * **OpenCV · NumPy · SciPy · Pillow** — image processing
-* **page-dewarp + JAX / MLX** — cubic-sheet page dewarp (MLX on Apple Silicon)
+* **page-dewarp + JAX / MLX** — cubic-sheet page dewarp (MLX on Apple Silicon). The original project has been highly modified and extended
 * **doxapy** — binarization (Wolf / Sauvola)
 * **pikepdf · pypdfium2** — PDF I/O
 * **Apple Vision · Speech** (pyobjc, macOS) — OCR, layout, with EAST/DBnet fallbacks
@@ -137,6 +160,10 @@ Optional extras: `--extra surya` / `--extra paddle` (OCR engines),
 `--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra cuda` (NVIDIA
 GPU dewarp on Linux).
 
+#[!WARNING] Build with the right options
+# The `--extra` options are mandatory to interface models and backends with python. If you download the models or install cuda drivers on your computer but forget to include teh relevant extra options, they won't be used
+#
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE -->
@@ -176,20 +203,6 @@ it in the trust prompt. See
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-<!-- ROADMAP -->
-## Roadmap
-
-- [x] Drop-in plugin trust gate (processors + OCR engines)
-- [x] Windows installer + Linux AppImage
-- [ ] Windows / Linux code-signing for fewer SmartScreen / Gatekeeper prompts
-- [ ] Sparkle in-app auto-update (appcast per release)
-- [ ] Homebrew cask (`brew install --cask aglaia`)
-- [ ] Intel / universal2 macOS builds
-
-See [open issues](https://github.com/yb85/aglaia/issues) for the full list.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 <!-- CONTRIBUTING -->
 ## Contributing
 
@@ -211,15 +224,22 @@ reference it (`feat/123-slug`); PRs close via `Closes #N`.
 Source-available under the **[PolyForm Shield License 1.0.0](https://polyformproject.org/licenses/shield/1.0.0/)**
 — see [`LICENSE`](LICENSE).
 
+#[!WARNING] This is not strictly-speaking "open-source" !
+#
+# the reason is not to make it one day a commercial product, but to avoid trivial SaaS repackaging which hurts the developpment of free Apps.
+#
+
 You may use, modify, and redistribute the software for **any purpose
 except building a product that competes with it**. Otherwise free.
+
+Repackaging it and removing the donation link is direct competition.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CONTACT -->
 ## Contact
 
-Yann Barbotin — yann.barbotin@gmail.com
+aglaia@bibli.cc
 
 Project: [github.com/yb85/aglaia](https://github.com/yb85/aglaia) ·
 Website: [aglaia.bibli.cc](https://aglaia.bibli.cc)
@@ -229,11 +249,7 @@ Website: [aglaia.bibli.cc](https://aglaia.bibli.cc)
 <!-- ACKNOWLEDGMENTS -->
 ## Acknowledgments
 
-* [page-dewarp](https://github.com/lmmx/page-dewarp) — cubic-sheet dewarp
-* [Surya](https://github.com/VikParuchuri/surya) · [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) · [Mistral Document AI](https://docs.mistral.ai/)
-* [doxapy](https://github.com/brandonmpetty/Doxa) — binarization
-* [Best-README-Template](https://github.com/othneildrew/Best-README-Template)
-* Documentation patterns from [The Good Docs Project](https://www.thegooddocsproject.dev/)
+See [ABOUT page](./ABOUT.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
