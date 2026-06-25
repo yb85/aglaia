@@ -389,7 +389,11 @@ class ScanItemWidget(QWidget):
             }}
         """)
         self.layout = QVBoxLayout()
-        self.layout.setContentsMargins(5, 5, 5, 5)
+        # Extra bottom inset: the thumbnail containers carry overlay glyphs
+        # (eye / OCR badge) pinned to their bottom edge, so a 5px bottom margin
+        # left them flush against the card's rounded border. 12px gives the
+        # bottom row visible breathing room inside the frame.
+        self.layout.setContentsMargins(5, 5, 5, 12)
         self.layout.setSpacing(2)
         self.setLayout(self.layout)
 
@@ -484,6 +488,15 @@ class ScanItemWidget(QWidget):
         self.thumbs_container.setGraphicsEffect(self._opacity_effect)
         self._spinner = _SpinnerOverlay(self.thumbs_container)
         self._is_processing = False
+
+        # Hide the card until its first composite build lands. The build is
+        # deferred to the coalesced timer (schedule_refresh above), so a freshly
+        # spawned card would otherwise show its empty chrome — header with the
+        # red scan-delete trash icon, no thumbs — for the ~200ms-2s until the
+        # thumbnails decode. Reveal once, at the end of the first
+        # refresh_composite, so the card appears complete.
+        self._revealed = False
+        self.setVisible(False)
 
     # ──────────────────────── processing state ────────────────────────────
     def set_processing(self, processing: bool):
@@ -880,6 +893,12 @@ class ScanItemWidget(QWidget):
                               new_w - 24, container_h - 24)
 
             self.thumbs_layout.addWidget(container)
+
+        # First build done → reveal the now-complete card (was hidden at
+        # construction to avoid flashing empty chrome before the thumbs land).
+        if not self._revealed:
+            self._revealed = True
+            self.setVisible(True)
 
     def _build_pixmap_w(self, node_info: Optional[dict], data: dict, actual_step: str,
                         max_w: int, is_final: bool
