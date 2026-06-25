@@ -433,7 +433,15 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         _splash_fg = QColor(245, 245, 250)
     pix = QPixmap(480, 220)
     pix.fill(_splash_bg)
-    splash = QSplashScreen(pix, Qt.WindowType.WindowStaysOnTopHint)
+    # X11BypassWindowManagerHint: stop tiling WMs (Hyprland/sway/i3) from
+    # managing the splash — without it they tile/resize this transient
+    # loading panel into the layout, which looks broken. Bypassed, Qt centres
+    # it on screen as a floating overlay. No-op on macOS/Windows.
+    splash = QSplashScreen(
+        pix,
+        Qt.WindowType.WindowStaysOnTopHint
+        | Qt.WindowType.X11BypassWindowManagerHint,
+    )
     splash.setFont(QFont("Helvetica", 14))
     splash.showMessage("Setting up project…", Qt.AlignmentFlag.AlignCenter,
                        _splash_fg)
