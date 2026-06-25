@@ -495,6 +495,11 @@ class IntegratedProcessingChain:
         import io as _io
         import numpy as _np
         from PIL import Image as _PILImage
+        # Spawn-worker lifecycle: hard-exit if orphaned (issue #23) + optional
+        # QoS (issue #24). Must run before the heavy imports / DB open so an
+        # orphaned worker can't get stuck holding resources.
+        from aglaia.workers.worker_lifecycle import install_worker_lifecycle
+        install_worker_lifecycle()
         from aglaia.storage.db import open_db, in_transaction
         from aglaia.storage.persister import Persister
         from aglaia.storage.repo import NodeRepo, BranchRepo, ImageRepo, StepOverrideRepo
