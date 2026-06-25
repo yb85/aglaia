@@ -1651,7 +1651,7 @@ class MainWindow(QMainWindow):
     def _open_tip_url(self) -> None:
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
-        QDesktopServices.openUrl(QUrl("https://ko-fi.com/yannbarbotin"))
+        QDesktopServices.openUrl(QUrl("https://ko-fi.com/yb_85"))
 
     def _on_voice_toggle(self, on: bool) -> None:
         if on:
