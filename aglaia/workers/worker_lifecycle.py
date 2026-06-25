@@ -88,16 +88,24 @@ _QOS_CLASSES = {
 
 
 def apply_worker_qos() -> None:
-    """Set this thread's QoS class from ``AGLAIA_WORKER_QOS`` (macOS only).
+    """Set this worker thread's macOS QoS class.
 
-    No-op unless the env var names a known class. Sets the CURRENT thread's
-    QoS via ``pthread_set_qos_class_self_np``; BLAS/XLA pool threads created
-    later may not inherit it, which is exactly what the #24 A/B must measure.
-    Default (unset) leaves the current scheduling behaviour untouched."""
-    want = os.environ.get("AGLAIA_WORKER_QOS")
-    if not want or sys.platform != "darwin":
+    Defaults to ``user_initiated`` — the semantically-correct class for an
+    interactive app's heavy compute, so macOS schedules it on the P-cores
+    instead of demoting un-annotated sustained work to the E-cores (#24).
+    Override / opt out with ``AGLAIA_WORKER_QOS`` (e.g. ``default``,
+    ``utility``, or ``none``/``off`` to leave scheduling untouched).
+
+    Sets the CURRENT thread via ``pthread_set_qos_class_self_np``. GCD-backed
+    work (Apple Accelerate / vecLib BLAS) inherits the QoS and moves with it;
+    libraries with their own pthread pools (XLA, OpenCV) may not — so the #24
+    A/B is still needed to quantify the real effect."""
+    if sys.platform != "darwin":
         return
-    cls = _QOS_CLASSES.get(want.strip().lower())
+    want = os.environ.get("AGLAIA_WORKER_QOS", "user_initiated").strip().lower()
+    if want in ("", "none", "off"):
+        return
+    cls = _QOS_CLASSES.get(want)
     if cls is None:
         return
     try:
