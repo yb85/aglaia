@@ -857,6 +857,17 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     from aglaia.workers.worker_lifecycle import maybe_start_memray, stop_memray
     _gui_memray = maybe_start_memray("gui")
 
+    # Ctrl-C: Qt's C++ event loop never yields to Python's SIGINT handler, so
+    # the GUI ignores Ctrl-C while a worker (same terminal group) dies from it
+    # and the watchdog respawns it. Route SIGINT → app.quit() and run an idle
+    # QTimer so the interpreter wakes often enough to deliver the signal →
+    # app.exec() returns → the finally below reaps the chain cleanly.
+    from PySide6.QtCore import QTimer as _QTimer
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    _sigint_pump = _QTimer()
+    _sigint_pump.timeout.connect(lambda: None)
+    _sigint_pump.start(150)
+
     try:
         app.exec()
     except KeyboardInterrupt:

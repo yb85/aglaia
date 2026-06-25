@@ -1102,6 +1102,24 @@ class IntegratedProcessingChain:
                             _os._exit(0)
                     except Exception:
                         pass
+            except (ConnectionError, EOFError, BrokenPipeError):
+                # Parent (and its Manager process) is gone — Ctrl-C, crash, or
+                # shutdown. The routed_queue (Manager.Queue) connection is dead,
+                # so there is no work source left. Exit quietly + immediately
+                # instead of spamming the error in a tight retry loop (which
+                # flooded the terminal with ConnectionRefusedError on shutdown).
+                try:
+                    import sys as _sys
+                    _sys.stderr.write(
+                        f"[worker {_os.getpid()}] parent/manager gone — exiting\n")
+                    _sys.stderr.flush()
+                except Exception:
+                    pass
+                try:
+                    stop_memray(_memray)
+                except Exception:
+                    pass
+                _os._exit(0)
             except Exception as e:
                 if log_queue is not None:
                     log_queue.put(("error",

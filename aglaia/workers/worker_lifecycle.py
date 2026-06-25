@@ -160,7 +160,22 @@ def stop_memray(tracker) -> None:
         pass
 
 
+def ignore_sigint() -> None:
+    """Ignore terminal SIGINT (Ctrl-C) in a worker. Ctrl-C signals the whole
+    foreground process group, so an un-ignoring worker dies independently —
+    and the watchdog just respawns it. The parent orchestrates shutdown
+    (chain.stop → _reap_workers), so workers should ignore SIGINT and let it
+    drive teardown cleanly."""
+    try:
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Exception:
+        pass
+
+
 def install_worker_lifecycle() -> None:
-    """One call for a spawned worker: parent-death watch + optional QoS."""
+    """One call for a spawned worker: ignore-SIGINT + parent-death watch +
+    optional QoS."""
+    ignore_sigint()
     install_parent_death_watch()
     apply_worker_qos()
