@@ -196,8 +196,15 @@ class IntegratedProcessingChain:
                 mb = phys_footprint_mb(p.pid)
                 th = thread_count(p.pid)
                 parts.append(f"{p.name}_pid={p.pid}={mb:.0f}MB/{th}t")
+            line = "[RSS-poll] " + " | ".join(parts)
             if self.log_queue is not None:
-                self.log_queue.put(("log_info", "[RSS-poll] " + " | ".join(parts)))
+                self.log_queue.put(("log_info", line))
+            # In GUI mode the log_queue is drained into Qt signals, never
+            # stdout — so the bench harness can't see memory. Under
+            # AGLAIA_TEST, echo straight to stdout so both GUI and headless
+            # expose the same parseable [RSS-poll] stream.
+            if _os.environ.get("AGLAIA_TEST"):
+                print(line, flush=True)
 
     def _watchdog_loop(self):
         """Parent-side supervision:
@@ -326,14 +333,42 @@ class IntegratedProcessingChain:
                 wt.join(timeout=3.0)
         except Exception:
             pass
+        self._reap_workers()
+
+    def _reap_workers(self, term_wait: float = 2.0) -> None:
+        """Terminate every worker and GUARANTEE it's gone. A worker wedged in
+        a native call (a JAX/XLA hang, or a `vmmap` shell-out on a stuck pid)
+        ignores SIGTERM, so a plain terminate()+join leaves it alive — and
+        once the parent exits it's orphaned (reparented to launchd), the
+        "leaked worker after a clean run" symptom. So we escalate: SIGTERM →
+        join(term_wait) → SIGKILL the stragglers → join. After this no worker
+        survives teardown."""
         for p in self.workers:
             if p.is_alive():
-                p.terminate()
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+        for p in self.workers:
+            try:
+                p.join(timeout=term_wait)
+            except Exception:
+                pass
+        # Escalate to SIGKILL for anything still breathing.
+        for p in self.workers:
+            if p.is_alive():
+                try:
+                    p.kill()              # SIGKILL — uninterruptible reap
+                except Exception:
+                    pass
         for p in self.workers:
             try:
                 p.join(timeout=2)
             except Exception:
                 pass
+            if p.is_alive() and self.log_queue is not None:
+                self.log_queue.put(("log_warning",
+                    f"worker {p.name} (pid={p.pid}) survived SIGKILL join"))
 
     def hard_stop(self) -> int:
         """Cancel all in-flight work: stop watchdog, terminate workers,
@@ -352,18 +387,9 @@ class IntegratedProcessingChain:
                 wt.join(timeout=3.0)
         except Exception:
             pass
-        # Terminate first so workers stop pulling new items while we drain.
-        for p in self.workers:
-            try:
-                if p.is_alive():
-                    p.terminate()
-            except Exception:
-                pass
-        for p in self.workers:
-            try:
-                p.join(timeout=2)
-            except Exception:
-                pass
+        # Terminate first so workers stop pulling new items while we drain;
+        # SIGKILL escalation guarantees no straggler is orphaned.
+        self._reap_workers()
         drained = 0
         # input_queue: bounded mp.Queue. routed_queue: Manager.Queue.
         for q in (self.input_queue, self.routed_queue):

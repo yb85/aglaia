@@ -170,11 +170,15 @@ class ThumbLoader(QObject):
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(2)
         self._inflight: set[tuple[int, int]] = set()
+        self._closed = False
         self._done.connect(self._on_done)
 
     def __call__(self, image_id: int, max_dim: int = 256) -> bytes | None:
-        if image_id is None:
+        if image_id is None or self._closed:
             return None
+        # A deferred composite refresh (lazy paint / queued QTimer) can fire
+        # after close() during app teardown — guard the now-closed conn so
+        # shutdown stays traceback-free.
         row = self._thumbs.get(image_id, max_dim)
         if row is not None:
             return bytes(row["blob"])
@@ -190,6 +194,7 @@ class ThumbLoader(QObject):
             self.ready.emit(image_id)
 
     def close(self) -> None:
+        self._closed = True
         try:
             self._pool.waitForDone(2000)
         except Exception:

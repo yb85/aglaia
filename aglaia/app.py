@@ -106,6 +106,89 @@ def _maybe_ui_shot(app, window) -> None:
     QTimer.singleShot(1500, lambda: _shot(0))
 
 
+def _maybe_test_autoquit(app, window) -> None:
+    """If ``AGLAIA_TEST`` is set, quit the app cleanly once the pipeline has
+    settled — enabling headless GUI benchmarking + open/close verification
+    without a human (or a SIGTERM) in the loop. No-op otherwise.
+
+    Two cases, one rule. Poll ``window._pipeline_idle()`` every 500 ms:
+
+      * **Open/close** (no ``--force-proc``): the project is already
+        complete, so the pipeline never goes busy — quit after a short
+        settle so bring-up + teardown are exercised end to end.
+      * **Reprocess** (``--force-proc``): the catch-up thread re-enqueues
+        scans a beat after launch, so we wait to *see* the busy phase, then
+        quit once it drains back to idle for ``quiet_s`` — bounding a full
+        memory/timing profile run.
+
+    ``AGLAIA_TEST_MAX_S`` (default 3600) is a hard ceiling: on expiry we
+    quit anyway (exit 0) so a wedged run can't hang CI; the harness judges
+    completion from the DB, not the exit path.
+
+    Disabled by ``AGLAIA_TEST_AUTOQUIT=0`` — the memory bench keeps
+    ``AGLAIA_TEST`` on (for the [RSS-poll] stdout echo) but turns the autoquit
+    OFF and bounds the run by wall-clock + process-group kill instead, because
+    idle-detection during a large force-proc reprocess is unreliable (the
+    catch-up thread feeds while no widget yet reports processing → a premature
+    quit that stops the log_queue drainer mid-feed → shutdown deadlock)."""
+    if not os.environ.get("AGLAIA_TEST") or \
+            os.environ.get("AGLAIA_TEST_AUTOQUIT", "1") == "0":
+        return
+    from PySide6.QtCore import QTimer
+
+    min_settle_s = float(os.environ.get("AGLAIA_TEST_SETTLE_S", "4.0"))
+    # Generous sustained-idle window: during a large reprocess the pipeline is
+    # busy almost continuously, with only sub-second lulls between scans while
+    # catch-up feeds; a transient lull must NOT trigger a quit. 10 s of
+    # *continuous* idle reliably means done. (We deliberately do NOT poll the
+    # DB here — a read every tick on the delete-journal project DB serialises
+    # against worker writes and slowed a full reprocess ~9×.)
+    quiet_s = float(os.environ.get("AGLAIA_TEST_QUIET_S", "10.0"))
+    max_s = float(os.environ.get("AGLAIA_TEST_MAX_S", "3600"))
+
+    import time as _time
+    state = {"start": _time.monotonic(), "saw_busy": False, "last_busy": 0.0,
+             "quit": False}
+
+    def _idle() -> bool:
+        try:
+            return bool(window._pipeline_idle())
+        except Exception:
+            return True
+
+    def _quit(reason: str) -> None:
+        if state["quit"]:
+            return
+        state["quit"] = True
+        print(f"[aglaia-test] {reason} → quit", flush=True)
+        app.quit()
+
+    def _tick() -> None:
+        if state["quit"]:
+            return
+        now = _time.monotonic()
+        elapsed = now - state["start"]
+        if elapsed >= max_s:
+            _quit(f"max {max_s:g}s reached")
+            return
+        if not _idle():
+            state["saw_busy"] = True
+            state["last_busy"] = now
+            QTimer.singleShot(500, _tick)
+            return
+        # idle now — quit only after `quiet_s` of CONTINUOUS idle.
+        if state["saw_busy"]:
+            if now - state["last_busy"] >= quiet_s:
+                _quit(f"reprocess drained, idle {quiet_s:g}s")
+                return
+        elif elapsed >= min_settle_s + quiet_s:
+            _quit(f"settled, nothing to process ({elapsed:.0f}s)")
+            return
+        QTimer.singleShot(500, _tick)
+
+    QTimer.singleShot(int(min_settle_s * 1000), _tick)
+
+
 def _install_flash_debug(app) -> None:
     """AGLAIA_FLASH_DEBUG=1: log every parentless top-level widget Show.
 
@@ -763,6 +846,11 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     #   QT_QPA_PLATFORM=offscreen AGLAIA_UI_SHOT_DIR=/tmp/s uv run \
     #       python aglaia.py path/to/project.agl
     _maybe_ui_shot(app, window)
+
+    # ── Test harness: clean auto-quit once the pipeline settles ──
+    # `AGLAIA_TEST=1` → quit after bring-up / reprocess drains, for
+    # headless GUI benchmarking + open/close verification. No-op otherwise.
+    _maybe_test_autoquit(app, window)
 
     try:
         app.exec()

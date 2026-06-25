@@ -29,6 +29,7 @@ import json
 import multiprocessing
 import queue as _q
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -126,11 +127,22 @@ def _run_ocr(db_path: str, *, engine_name: str, languages: list[str],
             try:
                 pil = Image.open(io.BytesIO(blob_row["blob"])).convert("RGB")
                 arr = np.array(pil, dtype=np.uint8)
+                _t0 = time.perf_counter()
                 result = engine.recognize(arr, languages)
+                _ms = (time.perf_counter() - _t0) * 1000.0
                 ocr.finish(run_id, result)
                 done += 1
-                print(f"  scan {scan_id}{('.' + branch_path) if branch_path else ''}: "
-                      f"{len(result.get('lines', []))} line(s)")
+                n_lines = len(result.get("lines", []))
+                # Per-page op-log line (parseable by the bench harness for
+                # OCR p5/p50/p95). Mirrors the pipeline op-log shape so the
+                # log strip / log tab read identically across subsystems.
+                from aglaia.workers.oplog import format_op
+                scope = {"scan": scan_id}
+                if branch_path:
+                    scope["layout"] = branch_path
+                print(format_op(f"ocr.{engine_canonical}", elapsed_ms=_ms,
+                                color=False, lines=n_lines, **scope),
+                      flush=True)
             except Exception as e:
                 ocr.fail(run_id, f"{type(e).__name__}: {e}")
                 print(f"  scan {scan_id}: ERROR {e}", file=sys.stderr)
@@ -309,64 +321,104 @@ def _run_exports(db_path: str, project_dir: Path, slug: str,
     return fail
 
 
-def _wait_for_chain(log_queue, *, total_expected: int,
-                    timeout_s: float) -> int:
-    """Drain log_queue until `total_expected` distinct scans have emitted
-    branch_ready or `timeout_s` elapses. Returns the count of completed
-    scans. Forwards log messages to stdout.
+class _LogDrainer(threading.Thread):
+    """Drains the chain's ``log_queue`` on its OWN thread, continuously,
+    from the moment the chain starts — INCLUDING while the main thread is
+    still feeding scans in.
 
-    A multi-branch scan fires branch_ready once per branch, so completion
-    is deduped by scan_id. Replay runs *after* the branch_ready emit, so
-    once the target is reached we keep draining until the queue stays
-    quiet for a grace period before handing back to chain.stop()."""
-    done_scans: set = set()
-    deadline = time.monotonic() + timeout_s
-    imported = 0
+    Why a thread and not an inline drain-after-feed loop: ``log_queue`` is an
+    ``mp.Queue`` backed by a finite OS pipe. Workers flood it (an op-log line
+    + image_event per step). If the main thread is busy in
+    ``catchup_active_scans`` → ``chain.enqueue`` (which blocks on the bounded
+    input_queue's backpressure) and isn't draining log_queue, the pipe fills,
+    the workers' queue-feeder threads block on it, they stop consuming
+    input_queue, and enqueue() never unblocks → a circular deadlock that bites
+    at scale (confirmed via faulthandler: main in input_queue.put, workers in
+    queues._feed). Draining concurrently keeps the pipe clear so backpressure
+    always resolves. See memory project_worker_queue_deadlock.
 
-    def _handle(msg) -> None:
-        nonlocal imported
+    Completion is deduped by scan_id (a multi-branch scan fires branch_ready
+    once per branch); replay runs after the emit, so the drainer keeps running
+    (and printing) until ``stop()``."""
+
+    def __init__(self, log_queue, *, total_expected: int = 0):
+        super().__init__(daemon=True, name="log-drainer")
+        self._log_queue = log_queue
+        # Settable after construction: the drainer starts BEFORE feeding (to
+        # keep the pipe clear), but the expected scan count is only known
+        # once feeding/import finishes. Int assignment is atomic in CPython.
+        self._total_expected = total_expected
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._done_scans: set = set()
+        self.imported = 0
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                msg = self._log_queue.get(timeout=0.3)
+            except _q.Empty:
+                continue
+            except (OSError, EOFError):
+                break
+            self._handle(msg)
+        # Final non-blocking sweep so late replay/sibling lines aren't lost.
+        while True:
+            try:
+                self._handle(self._log_queue.get_nowait())
+            except Exception:
+                break
+
+    def _handle(self, msg) -> None:
         if isinstance(msg, str):
             line = msg.strip()
             if line:
                 print(line, flush=True)
             return
-        # Chain protocol: every event is a tuple ('tag', payload…) — see
-        # docs/architecture.md "log_queue protocol".
         if isinstance(msg, tuple) and msg:
             tag = msg[0]
             if tag == "scan_imported":
-                imported += 1
+                self.imported += 1
             elif tag == "branch_ready":
                 payload = msg[1] if len(msg) > 1 else {}
                 sid = payload.get("scan_id")
-                done_scans.add(sid)
+                with self._lock:
+                    self._done_scans.add(sid)
+                    n = len(self._done_scans)
                 print(f"branch ready: scan={sid} "
                       f"path={payload.get('branch_path') or '-'} "
-                      f"({len(done_scans)}/{total_expected})", flush=True)
+                      f"({n}/{self._total_expected})", flush=True)
             elif tag in ("log_info", "log_warning", "error"):
                 txt = msg[1] if len(msg) > 1 else ""
                 if txt:
                     print(txt, flush=True)
 
-    while len(done_scans) < total_expected and time.monotonic() < deadline:
-        try:
-            msg = log_queue.get(timeout=1.0)
-        except _q.Empty:
-            continue
-        _handle(msg)
-    if len(done_scans) < total_expected:
-        print(f"WARN: only {len(done_scans)}/{total_expected} scans finished "
-              f"within timeout.", file=sys.stderr)
-        return len(done_scans)
-    # Grace drain: sibling branches / replay of the last scan may still be
-    # in flight. Exit after 5 s of queue silence.
-    while time.monotonic() < deadline:
-        try:
-            msg = log_queue.get(timeout=5.0)
-        except _q.Empty:
-            break
-        _handle(msg)
-    return len(done_scans)
+    def set_expected(self, n: int) -> None:
+        self._total_expected = n
+
+    def done_count(self) -> int:
+        with self._lock:
+            return len(self._done_scans)
+
+    def wait_for_completion(self, timeout_s: float) -> int:
+        """Block (on the calling thread) until ``total_expected`` distinct
+        scans have completed or ``timeout_s`` elapses. The drainer keeps
+        running after this returns — the caller stops it."""
+        deadline = time.monotonic() + timeout_s
+        while self.done_count() < self._total_expected and \
+                time.monotonic() < deadline:
+            time.sleep(0.2)
+        n = self.done_count()
+        if n < self._total_expected:
+            print(f"WARN: only {n}/{self._total_expected} scans finished "
+                  f"within timeout.", file=sys.stderr)
+        else:
+            # Grace: sibling branches / replay of the last scan settle.
+            time.sleep(2.0)
+        return n
+
+    def stop(self) -> None:
+        self._stop.set()
 
 
 def run(cfg: CliConfig) -> int:
@@ -437,6 +489,12 @@ def run(cfg: CliConfig) -> int:
     chain = create_processing_chain(args, log_queue, db_path=str(project_file))
     chain.start()
 
+    # Start draining log_queue NOW, on its own thread — before any feeding —
+    # so the pipe can't saturate while the main thread blocks in enqueue
+    # backpressure (the deadlock; see _LogDrainer).
+    drainer = _LogDrainer(log_queue)
+    drainer.start()
+
     try:
         # Inputs
         expected_branches = 0
@@ -490,11 +548,16 @@ def run(cfg: CliConfig) -> int:
             expected_branches = max(n_scans, n_branches)
         if expected_branches:
             print(f"Waiting for {expected_branches} scan(s) to finish processing…")
-            _wait_for_chain(log_queue, total_expected=expected_branches,
-                            timeout_s=DEFAULT_TIMEOUT_S)
+            drainer.set_expected(expected_branches)
+            drainer.wait_for_completion(DEFAULT_TIMEOUT_S)
         else:
             print("Nothing to process — pipeline objective already in DB.")
     finally:
+        drainer.stop()
+        try:
+            drainer.join(timeout=5)
+        except Exception:
+            pass
         try:
             chain.stop()
         except Exception:
