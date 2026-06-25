@@ -515,7 +515,7 @@ class IntegratedProcessingChain:
         _memray = maybe_start_memray("worker")
         _memray_target = int(_os.environ.get("AGLAIA_MEMRAY_PAGES", "3"))
         from aglaia.storage.db import open_db, in_transaction
-        from aglaia.storage.persister import Persister
+        from aglaia.storage.persister import Persister, encode_image
         from aglaia.storage.repo import NodeRepo, BranchRepo, ImageRepo, StepOverrideRepo
 
         conn = open_db(db_path)
@@ -668,16 +668,24 @@ class IntegratedProcessingChain:
             # Storage is cheap; an always-materialised tree is not surprising.
             if store_image is None:
                 store_image = True
+            # Encode the image BEFORE opening the write transaction. encode_image
+            # (JPEG/PNG compression of a multi-MB frame, tens of ms) used to run
+            # inside BEGIN IMMEDIATE, holding SQLite's single writer lock through
+            # the encode — so a full reprocess across 4 workers exceeded
+            # busy_timeout and raised "database is locked". The transaction now
+            # only covers the fast INSERTs.
+            encoded = (encode_image(out_buf.buffer, out_buf.type.value)
+                       if store_image else None)
             with in_transaction(conn):
                 return _persist_step_inner(out_buf, config, step_idx,
                                            parent_node_id, elapsed_ms, status_int,
-                                           store_image)
+                                           encoded)
 
         def _persist_step_inner(out_buf: ImageBuffer, config: SimpleChainElement, step_idx: int,
                                 parent_node_id: Optional[int], elapsed_ms: float, status_int: int,
-                                store_image: bool) -> tuple[int, Optional[int]]:
-            image_id = (persister.persist_image(out_buf.buffer, out_buf.type.value, out_buf.dpi)
-                        if store_image else None)
+                                encoded) -> tuple[int, Optional[int]]:
+            image_id = (persister.insert_encoded_image(encoded, out_buf.type.value, out_buf.dpi)
+                        if encoded is not None else None)
             node_id = persister.persist_node(
                 scan_id=out_buf.scan_id,
                 parent_id=parent_node_id,
