@@ -343,12 +343,16 @@ class IntegratedProcessingChain:
         "leaked worker after a clean run" symptom. So we escalate: SIGTERM →
         join(term_wait) → SIGKILL the stragglers → join. After this no worker
         survives teardown."""
-        for p in self.workers:
-            if p.is_alive():
-                try:
-                    p.terminate()
-                except Exception:
-                    pass
+        alive = [p for p in self.workers if p.is_alive()]
+        if alive and self.log_queue is not None:
+            self.log_queue.put(("log_info",
+                f"[chain] reaping {len(alive)} worker(s): SIGTERM "
+                + ", ".join(f"{p.name}({p.pid})" for p in alive)))
+        for p in alive:
+            try:
+                p.terminate()
+            except Exception:
+                pass
         for p in self.workers:
             try:
                 p.join(timeout=term_wait)
@@ -357,6 +361,10 @@ class IntegratedProcessingChain:
         # Escalate to SIGKILL for anything still breathing.
         for p in self.workers:
             if p.is_alive():
+                if self.log_queue is not None:
+                    self.log_queue.put(("log_warning",
+                        f"[chain] worker {p.name}({p.pid}) ignored SIGTERM "
+                        f"→ SIGKILL"))
                 try:
                     p.kill()              # SIGKILL — uninterruptible reap
                 except Exception:

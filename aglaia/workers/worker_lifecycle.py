@@ -42,16 +42,25 @@ def install_parent_death_watch(poll_s: float = 1.0) -> None:
       the instant the parent dies, regardless of what we're doing (even deep
       in a native call). Fully robust.
     * **All platforms** — a daemon thread polling ``getppid()``; when it
-      changes (reparented → parent gone) we ``os._exit``. This is the only
-      option on macOS (no PDEATHSIG), and it has a known limitation: a worker
-      stuck in a **GIL-holding native call** (JAX/XLA) can't run the watch
-      thread until that call returns, so its exit is bounded by the length of
-      the in-flight op rather than instant. Still bounds an orphan's life to
-      ~one operation instead of forever. See issue #23.
+      returns ``1`` the parent has died and we've been reparented to
+      launchd/init, so we ``os._exit``. This is the only option on macOS (no
+      PDEATHSIG), and it has a known limitation: a worker stuck in a
+      **GIL-holding native call** (JAX/XLA) can't run the watch thread until
+      that call returns, so its exit is bounded by the in-flight op rather
+      than instant. Still bounds an orphan's life to ~one op instead of
+      forever. See issue #23.
+
+    IMPORTANT — the test is ``getppid() == 1``, NOT "ppid changed from the
+    one captured at start". A spawn worker captures its ppid mid-bootstrap,
+    when the parent is a *transient* launcher that then exits and the worker
+    reparents to the real main → ppid legitimately CHANGES with the main
+    fully alive. The old "!= orig" check fired on exactly that, silently
+    ``os._exit``-ing healthy workers a beat after they started → processing
+    ground to a halt (~first batch). ``== 1`` only fires on a true orphan.
 
     ``os._exit`` (not ``sys.exit``) skips finalizers that could hang a wedged
     worker — the OS reclaims the DB handle etc."""
-    # Linux kernel-level guarantee.
+    # Linux kernel-level guarantee (only fires on a real parent death).
     if sys.platform.startswith("linux"):
         try:
             import ctypes
@@ -61,16 +70,18 @@ def install_parent_death_watch(poll_s: float = 1.0) -> None:
         except Exception:
             pass
 
-    orig_ppid = os.getppid()
-
     def _watch() -> None:
         while True:
             time.sleep(poll_s)
             try:
                 ppid = os.getppid()
             except Exception:
-                ppid = 1
-            if ppid != orig_ppid:        # reparented → parent died → orphan
+                continue
+            if ppid == 1:                # reparented to launchd/init = orphan
+                sys.stderr.write(
+                    f"[worker {os.getpid()}] parent died (reparented to pid 1) "
+                    f"— self-exiting, orphan cleanup (issue #23)\n")
+                sys.stderr.flush()
                 os._exit(1)
 
     threading.Thread(target=_watch, daemon=True,
