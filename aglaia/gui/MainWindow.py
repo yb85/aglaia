@@ -3873,6 +3873,8 @@ class MainWindow(QMainWindow):
                 conn.commit()
         except Exception:
             return
+        # Drop the memoised disable map for this scan (see cell_disable_states).
+        self.__dict__.get("_cell_disable_cache", {}).pop(int(scan_id), None)
         self.step_disabled_changed.emit(int(scan_id), bp, int(sidx), bool(disabled))
         # Rerun only the toggled page-branch (its sibling pages are unaffected).
         # `bp` is the branch path; reprocess_branch falls back to a whole-scan
@@ -3900,7 +3902,21 @@ class MainWindow(QMainWindow):
     def cell_disable_states(self, scan_id: int) -> dict:
         """`{node_id: (toggleable, disabled)}` for every node of a scan —
         one query, so a view can render its whole stage strip without a
-        per-cell DB round-trip."""
+        per-cell DB round-trip.
+
+        **Cached per scan.** This is the step-states provider every
+        ScanItemWidget.refresh_composite calls; at boot that is one call per
+        scan, and with journal_mode=DELETE each fresh ``open_db`` blocks on the
+        active workers/reprocess writer (up to busy_timeout) — the dominant
+        boot-time GUI stall in the traces. The disable map only changes when a
+        step is toggled, so memoise it and invalidate the one scan in
+        ``set_step_disabled``. Re-renders (OCR badge, zoom, visibility) then
+        cost nothing instead of a contended DB open each."""
+        sid = int(scan_id)
+        cache = self.__dict__.setdefault("_cell_disable_cache", {})
+        cached = cache.get(sid)
+        if cached is not None:
+            return cached
         out: dict[int, tuple[bool, bool]] = {}
         try:
             with db_session(str(self.db_path)) as conn:
@@ -3916,7 +3932,8 @@ class MainWindow(QMainWindow):
                         (bp, int(r["step_idx"])) in disabled,
                     )
         except Exception:
-            pass
+            return out  # don't cache a failed/partial read
+        cache[sid] = out
         return out
 
     def _on_card_visibility_changed(self, scan_id: int, branch_label: str,

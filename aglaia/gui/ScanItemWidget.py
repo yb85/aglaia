@@ -442,7 +442,16 @@ class ScanItemWidget(QWidget):
         # the dimmed-dependent palette actually flips. -1 = never applied.
         self._styled_dimmed: int = -1
 
-        self.refresh_composite()
+        # Defer the (expensive) composite build to the coalesced timer instead
+        # of building synchronously here. At boot load_existing_scans spawns a
+        # widget per scan on the GUI thread; a synchronous build per widget
+        # (cell_disable_states opens a fresh SQLite conn, _build_pixmap_w reads
+        # + decodes a blob) — N of those back-to-back, contending with the
+        # workers/reprocess for the single-writer DB — froze the UI for seconds
+        # at startup (proven by the stall-watch traces). schedule_refresh lets
+        # the load loop return so the window paints and stays responsive; the
+        # builds then run coalesced off the synchronous path.
+        self.schedule_refresh()
         self.update_header()
 
         # Spinner overlay + dim effect — toggled via `set_processing`.
@@ -481,7 +490,7 @@ class ScanItemWidget(QWidget):
         if state == self._ocr_state:
             return
         self._ocr_state = state
-        self.refresh_composite()
+        self.schedule_refresh()
 
     def set_ocr_state_per_stem(self, mapping: dict[str, str]) -> None:
         """Replace the per-stem OCR state map. Keys are stems (e.g.
@@ -492,7 +501,7 @@ class ScanItemWidget(QWidget):
         if clean == self._ocr_state_per_stem:
             return
         self._ocr_state_per_stem = clean
-        self.refresh_composite()
+        self.schedule_refresh()
 
     def is_processing(self) -> bool:
         return self._is_processing
