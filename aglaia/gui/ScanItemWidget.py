@@ -100,40 +100,76 @@ class _ClickableLabel(QLabel):
 
 class _SpinnerOverlay(QWidget):
     """Translucent overlay covering its parent. Renders a centred braille
-    spinner via a shared QTimer-driven frame index. Used to mark a scan
-    as "still being processed" — paired with a 50 % opacity effect on
-    the thumbs row.
+    spinner — paired with a 50 % opacity effect on the thumbs row — to mark
+    a scan as "still being processed".
 
     Click-through: `setAttribute(WA_TransparentForMouseEvents)` so the
     underlying nav buttons + thumbs stay clickable.
+
+    **One shared timer for ALL spinners** (not one per widget). A reprocess
+    spins up *every* on-screen scan at once (MainWindow sets processing=True
+    on all widgets); with a per-instance 80 ms timer that was N timers ×
+    ~12 Hz × a full antialiased paintEvent each — at 175 scans ≈ 2200
+    repaints/s on the GUI thread → the event loop starves and the UI
+    beachballs. The class drives a single timer that advances ONE shared
+    frame index and repaints only the spinners actually visible in the
+    scroll viewport (~6), so cost is independent of how many scans are
+    queued. Off-screen spinners just skip the repaint and catch up to the
+    shared frame when scrolled into view.
     """
 
     _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    # Shared across every overlay instance.
+    _idx = 0
+    _shared_timer: "QTimer | None" = None
+    _active: "set[_SpinnerOverlay]" = set()
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self._idx = 0
-        self._timer = QTimer(self)
-        self._timer.setInterval(80)
-        self._timer.timeout.connect(self._tick)
         self.hide()
 
+    @classmethod
+    def _ensure_timer(cls):
+        if cls._shared_timer is None:
+            t = QTimer()
+            t.setInterval(80)
+            t.timeout.connect(cls._tick_all)
+            cls._shared_timer = t
+        if not cls._shared_timer.isActive():
+            cls._shared_timer.start()
+
+    @classmethod
+    def _tick_all(cls):
+        cls._idx = (cls._idx + 1) % len(cls._FRAMES)
+        # Repaint only spinners on screen — off-screen ones (most of a long
+        # reprocess) cost nothing per tick.
+        dead = []
+        for sp in cls._active:
+            try:
+                if sp.isVisible() and not sp.visibleRegion().isEmpty():
+                    sp.update()
+            except RuntimeError:
+                dead.append(sp)  # C++ side deleted out from under us
+        for sp in dead:
+            cls._active.discard(sp)
+        if not cls._active and cls._shared_timer is not None:
+            cls._shared_timer.stop()
+
     def start(self):
-        if not self._timer.isActive():
-            self._timer.start()
+        _SpinnerOverlay._active.add(self)
+        _SpinnerOverlay._ensure_timer()
         self.show()
         self.raise_()
         self._resize_to_parent()
 
     def stop(self):
-        self._timer.stop()
+        _SpinnerOverlay._active.discard(self)
+        if not _SpinnerOverlay._active and _SpinnerOverlay._shared_timer is not None:
+            _SpinnerOverlay._shared_timer.stop()
         self.hide()
-
-    def _tick(self):
-        self._idx = (self._idx + 1) % len(self._FRAMES)
-        self.update()
 
     def _resize_to_parent(self):
         p = self.parentWidget()

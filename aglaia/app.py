@@ -857,13 +857,28 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     from aglaia.workers.worker_lifecycle import maybe_start_memray, stop_memray
     _gui_memray = maybe_start_memray("gui")
 
-    # Ctrl-C: Qt's C++ event loop never yields to Python's SIGINT handler, so
-    # the GUI ignores Ctrl-C while a worker (same terminal group) dies from it
-    # and the watchdog respawns it. Route SIGINT → app.quit() and run an idle
-    # QTimer so the interpreter wakes often enough to deliver the signal →
-    # app.exec() returns → the finally below reaps the chain cleanly.
+    # Ctrl-C handling. Qt's C++ event loop doesn't run Python between events,
+    # so a plain SIGINT is ignored; an idle QTimer wakes the interpreter often
+    # enough to deliver it. First Ctrl-C → app.quit() (graceful: exec returns →
+    # the finally below reaps the chain). But app.quit() is "soft" — it only
+    # takes effect once the event queue drains, which can lag if the main
+    # thread is busy. So a SECOND Ctrl-C hard-exits immediately (os._exit,
+    # no event loop needed); orphaned workers self-reap (parent-death watch /
+    # dead-Manager exit). Gives the user a guaranteed escape mid-processing.
     from PySide6.QtCore import QTimer as _QTimer
-    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    _sigint_n = {"c": 0}
+
+    def _on_sigint(*_):
+        _sigint_n["c"] += 1
+        if _sigint_n["c"] >= 2:
+            sys.stderr.write("\n[aglaia] forced quit (Ctrl-C×2).\n")
+            sys.stderr.flush()
+            os._exit(130)
+        sys.stderr.write("\n[aglaia] quitting… (Ctrl-C again to force)\n")
+        sys.stderr.flush()
+        app.quit()
+
+    signal.signal(signal.SIGINT, _on_sigint)
     _sigint_pump = _QTimer()
     _sigint_pump.timeout.connect(lambda: None)
     _sigint_pump.start(150)
