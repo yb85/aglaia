@@ -583,4 +583,10 @@ def run(cfg: CliConfig) -> int:
                           md_refine=cfg.md_refine)
         if rc:
             return rc
+    # Fold the WAL back into the .agl + drop -wal/-shm sidecars at rest.
+    try:
+        from aglaia.storage.db import compact_db
+        compact_db(str(project_file))
+    except Exception:
+        pass
     return 0

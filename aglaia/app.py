@@ -883,6 +883,41 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     _sigint_pump.timeout.connect(lambda: None)
     _sigint_pump.start(150)
 
+    # Main-thread stall watchdog (dev). AGLAIA_STALL_WATCH=<ms> (e.g. 500):
+    # a QTimer beats a heartbeat on the GUI thread; a daemon thread dumps the
+    # main thread's Python stack whenever the heartbeat is stale longer than
+    # the threshold — i.e. the event loop is blocked. Shows EXACTLY which call
+    # froze the UI instead of guessing. No-op when unset.
+    _stall_ms = os.environ.get("AGLAIA_STALL_WATCH", "").strip()
+    if _stall_ms:
+        import faulthandler
+        import threading as _threading
+        import time as _time
+        _beat = {"t": _time.monotonic()}
+        _thr_ms = max(100, int(_stall_ms))
+        _hb = _QTimer()
+        _hb.timeout.connect(lambda: _beat.__setitem__("t", _time.monotonic()))
+        _hb.start(max(50, _thr_ms // 4))
+
+        def _stall_watch():
+            last_dump = 0.0
+            while True:
+                _time.sleep(_thr_ms / 4000.0)
+                gap = (_time.monotonic() - _beat["t"]) * 1000.0
+                now = _time.monotonic()
+                if gap > _thr_ms and (now - last_dump) > (_thr_ms / 1000.0):
+                    last_dump = now
+                    sys.stderr.write(
+                        f"\n[stall-watch] GUI thread blocked ~{int(gap)}ms — "
+                        f"main-thread stack:\n")
+                    sys.stderr.flush()
+                    faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+
+        _threading.Thread(target=_stall_watch, daemon=True,
+                          name="stall-watch").start()
+        sys.stderr.write(f"[stall-watch] armed (threshold {_thr_ms}ms)\n")
+        sys.stderr.flush()
+
     try:
         app.exec()
     except KeyboardInterrupt:
@@ -891,6 +926,14 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         stop_memray(_gui_memray)
         try:
             state["chain"].stop()
+        except Exception:
+            pass
+        # Workers are reaped above → we're the sole DB connection now. Fold the
+        # WAL back into the .agl and drop the -wal/-shm sidecars so the project
+        # folder is a single clean file at rest (see storage/db.compact_db).
+        try:
+            from aglaia.storage.db import compact_db
+            compact_db(str(db_path))
         except Exception:
             pass
 
