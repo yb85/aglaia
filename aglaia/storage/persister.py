@@ -82,6 +82,15 @@ class Persister:
         blob, fmt, w, h = encode_image(buffer, image_type)
         return self.images.insert(blob, fmt, image_type, w, h, dpi)
 
+    def insert_encoded_image(self, encoded: tuple, image_type: str,
+                             dpi: float) -> int:
+        """Insert an already-encoded image — `(blob, fmt, w, h)` from
+        `encode_image`. Lets a caller run the (slow) JPEG/PNG compression
+        OUTSIDE its write transaction, so the SQLite single-writer lock is
+        held only for the fast INSERT, not the encode."""
+        blob, fmt, w, h = encoded
+        return self.images.insert(blob, fmt, image_type, w, h, dpi)
+
     def persist_node(self, *, scan_id: int, parent_id: Optional[int], pipeline_version_id: int,
                      step_idx: int, step_name: Optional[str], processor_name: Optional[str],
                      branch_label: Optional[str], depth: int, filestem: str,
