@@ -852,11 +852,17 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     # headless GUI benchmarking + open/close verification. No-op otherwise.
     _maybe_test_autoquit(app, window)
 
+    # Dev memory profiling of the GUI process (AGLAIA_MEMRAY_DIR). Flushes on
+    # clean quit — pair with AGLAIA_TEST autoquit or quit the window normally.
+    from aglaia.workers.worker_lifecycle import maybe_start_memray, stop_memray
+    _gui_memray = maybe_start_memray("gui")
+
     try:
         app.exec()
     except KeyboardInterrupt:
         pass
     finally:
+        stop_memray(_gui_memray)
         try:
             state["chain"].stop()
         except Exception:

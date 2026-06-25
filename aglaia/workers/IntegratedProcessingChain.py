@@ -506,8 +506,14 @@ class IntegratedProcessingChain:
         # Spawn-worker lifecycle: hard-exit if orphaned (issue #23) + optional
         # QoS (issue #24). Must run before the heavy imports / DB open so an
         # orphaned worker can't get stuck holding resources.
-        from aglaia.workers.worker_lifecycle import install_worker_lifecycle
+        from aglaia.workers.worker_lifecycle import (
+            install_worker_lifecycle, maybe_start_memray, stop_memray,
+        )
         install_worker_lifecycle()
+        # Dev memory profiling: trace the first AGLAIA_MEMRAY_PAGES top-level
+        # scans, then flush (a worker runs until killed, which wouldn't flush).
+        _memray = maybe_start_memray("worker")
+        _memray_target = int(_os.environ.get("AGLAIA_MEMRAY_PAGES", "3"))
         from aglaia.storage.db import open_db, in_transaction
         from aglaia.storage.persister import Persister
         from aglaia.storage.repo import NodeRepo, BranchRepo, ImageRepo, StepOverrideRepo
@@ -1060,6 +1066,9 @@ class IntegratedProcessingChain:
                     _scans_processed += 1
                     _dirty_since_idle = True
                     maybe_log_mem(tag=f"after scan")
+                    if _memray is not None and _scans_processed >= _memray_target:
+                        stop_memray(_memray)   # flush after N pages
+                        _memray = None
                     # Deterministic scan-count recycle (vmmap can be flaky in spawn).
                     if (_recycle_scans > 0
                             and _scans_processed >= _recycle_scans):

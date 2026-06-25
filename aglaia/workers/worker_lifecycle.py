@@ -125,6 +125,41 @@ def apply_worker_qos() -> None:
         pass
 
 
+def maybe_start_memray(label: str):
+    """If ``AGLAIA_MEMRAY_DIR`` is set, start a memray Tracker writing
+    ``<dir>/<label>_<pid>.bin`` and return it (caller must ``__exit__`` it to
+    flush). Returns None otherwise. Each process (GUI + every worker) gets its
+    own trace — memray can't follow multiprocessing-spawn or attach on macOS,
+    so we instrument from inside. Dev profiling only; no-op when unset."""
+    mdir = os.environ.get("AGLAIA_MEMRAY_DIR")
+    if not mdir:
+        return None
+    try:
+        import memray
+        os.makedirs(mdir, exist_ok=True)
+        path = os.path.join(mdir, f"{label}_{os.getpid()}.bin")
+        tracker = memray.Tracker(path, native_traces=True)
+        tracker.__enter__()
+        sys.stderr.write(f"[memray] tracing {label} (pid {os.getpid()}) → {path}\n")
+        sys.stderr.flush()
+        return tracker
+    except Exception as e:
+        sys.stderr.write(f"[memray] failed to start ({label}): {e}\n")
+        return None
+
+
+def stop_memray(tracker) -> None:
+    """Flush + close a tracker from :func:`maybe_start_memray`."""
+    if tracker is None:
+        return
+    try:
+        tracker.__exit__(None, None, None)
+        sys.stderr.write(f"[memray] flushed (pid {os.getpid()})\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
 def install_worker_lifecycle() -> None:
     """One call for a spawned worker: parent-death watch + optional QoS."""
     install_parent_death_watch()
