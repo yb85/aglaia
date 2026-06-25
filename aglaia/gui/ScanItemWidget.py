@@ -15,6 +15,7 @@ The widget loads thumbnail bytes lazily through the `thumb_loader` callable
 provided by `MainWindow` — it never touches the filesystem.
 """
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -435,6 +436,27 @@ class ScanItemWidget(QWidget):
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(200)
         self._refresh_timer.timeout.connect(self.refresh_composite)
+
+        # Decoded+scaled thumbnail cache. _build_pixmap_w is the dominant
+        # per-refresh cost (DB blob read + QImage decode + SmoothTransformation
+        # scale), and during a large reprocess every card's coalesced refresh
+        # re-runs it for ALL its thumbs even when nothing about a given thumb
+        # changed — N cards × M thumbs × (read+decode+scale) saturated the GUI
+        # event loop (stall-watch: 10 s blocks in refresh_composite/repo.get).
+        # image_id is content-addressed (regenerate wipes orphaned rows), so
+        # (image_id, max_w, is_final, global_zoom) fully determines the built
+        # pixmap → memoise it. Bounded LRU; placeholder (pending) results are
+        # never cached so a not-yet-written thumb still retries.
+        self._pix_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+        self._pix_cache_cap = 96
+        # One coalesced retry for pending (not-yet-written) thumbs, instead of
+        # a direct QTimer.singleShot(refresh_composite) per missing thumb —
+        # those bypassed the 200 ms coalescer and stacked into a full-rebuild
+        # storm (every card with any in-flight stage rebuilt every 800 ms).
+        self._pending_retry_timer = QTimer(self)
+        self._pending_retry_timer.setSingleShot(True)
+        self._pending_retry_timer.setInterval(800)
+        self._pending_retry_timer.timeout.connect(self.schedule_refresh)
 
         # Last `dimmed` value the (expensive) QSS was applied for. update_header
         # runs per affected card per batch during a reprocess; setStyleSheet
@@ -880,6 +902,19 @@ class ScanItemWidget(QWidget):
         new_h = int(max_w * 1.4)
         fit_zoom: Optional[float] = None
 
+        # Memoised fast path: same (image, width, final-clamp) → same pixmap.
+        # Skips the DB read + decode + smooth-scale + skew overlay below.
+        image_id = node_info.get("image_id") if node_info else None
+        gz = (round(self.global_zoom, 4)
+              if (is_final and self.global_zoom is not None) else None)
+        cache_key = ((image_id, int(max_w), bool(is_final), gz)
+                     if image_id is not None else None)
+        if cache_key is not None:
+            hit = self._pix_cache.get(cache_key)
+            if hit is not None:
+                self._pix_cache.move_to_end(cache_key)
+                return hit
+
         if node_info and node_info.get("image_id") is not None:
             blob = self.thumb_loader(node_info["image_id"], 512)
             if blob:
@@ -904,6 +939,7 @@ class ScanItemWidget(QWidget):
                     new_h = img.height()
                     pix = QPixmap.fromImage(img)
 
+        from_blob = pix is not None
         if pix is None:
             pix = QPixmap(new_w, new_h)
             pix.fill(QColor(COLOR_BG_BUTTON))
@@ -911,9 +947,12 @@ class ScanItemWidget(QWidget):
             p.setPen(QColor(COLOR_OUTLINE_STRONG))
             p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, self.tr("Pending\nImage…"))
             p.end()
-            # Retry once shortly in case the thumb is still being written.
+            # Thumb not written yet → retry, but coalesced through one guarded
+            # timer (not a direct per-thumb singleShot(refresh_composite),
+            # which bypassed the 200 ms coalescer and stacked full rebuilds).
             if node_info and node_info.get("image_id") is not None:
-                QTimer.singleShot(800, self.refresh_composite)
+                if not self._pending_retry_timer.isActive():
+                    self._pending_retry_timer.start()
 
         # Skew overlay (from processor meta)
         meta = node_info["meta"] if node_info else {}
@@ -927,6 +966,14 @@ class ScanItemWidget(QWidget):
                        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight,
                        f"{skew:.1f}°")
             p.end()
+
+        # Cache only real (decoded) thumbs — never the placeholder, so a
+        # not-yet-written thumb keeps retrying until its blob lands.
+        if cache_key is not None and from_blob:
+            self._pix_cache[cache_key] = (pix, new_w, new_h, fit_zoom)
+            self._pix_cache.move_to_end(cache_key)
+            while len(self._pix_cache) > self._pix_cache_cap:
+                self._pix_cache.popitem(last=False)
 
         return pix, new_w, new_h, fit_zoom
 
