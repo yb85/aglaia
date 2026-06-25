@@ -19,28 +19,22 @@ except ImportError:  # pragma: no cover
 SCHEMA_DIR = Path(__file__).parent / "schema"
 
 PRAGMAS = [
-    # journal_mode = WAL: readers run CONCURRENTLY with the single writer.
-    # The old DELETE mode made every reader and the writer mutually
-    # exclusive, so during a large reprocess the GUI thread's per-widget
-    # blob reads (ScanItemWidget._build_pixmap_w → NodeRepo.get) blocked on
-    # the workers' write lock up to `busy_timeout` — proven by stall-watch
-    # traces stalling the event loop for *5+ seconds* at exactly the 5 s
-    # ceiling. WAL removes that read/write contention entirely.
-    #
-    # WAL is crash-safe here: with synchronous=NORMAL a worker SIGKILLed
-    # mid-commit by the memory watchdog leaves a `-wal` that SQLite recovers
-    # on the next open (this is WAL's design; the corruption risk in the old
-    # note was specific to MEMORY journalling, never WAL). The cost is two
-    # sidecar files next to the `.agl` (`-wal`, `-shm`) that compact on a
-    # clean close — a worthwhile trade for a responsive UI during processing.
-    "PRAGMA journal_mode = WAL;",
+    # journal_mode = DELETE: NO permanent sidecar files in the user's project
+    # folder — the rollback journal exists only during a write transaction and
+    # is unlinked at commit (WAL leaves `-wal`/`-shm`; SQLite can't relocate
+    # them, and a Ctrl-C/crash hard-exit leaves them stranded — proven in the
+    # wild). The GUI freezes that WAL was meant to fix are instead solved by
+    # never blocking the GUI thread on a contended read: the thumb-cache reader
+    # uses a tiny busy_timeout and falls through to the async loader on lock
+    # (see MainWindow.ThumbLoader), so a large reprocess can hold the writer
+    # without ever stalling the event loop. Opening a WAL-leftover `.agl` here
+    # also folds it back + removes the sidecars (journal_mode switch checkpoints).
+    "PRAGMA journal_mode = DELETE;",
     "PRAGMA synchronous = NORMAL;",
     "PRAGMA foreign_keys = ON;",
     "PRAGMA temp_store = MEMORY;",
     "PRAGMA cache_size = -64000;",
     "PRAGMA mmap_size = 268435456;",
-    # Bound the WAL so a long write burst doesn't grow it without checkpointing.
-    "PRAGMA wal_autocheckpoint = 1000;",
     # Workers retry briefly on contention; ≤4 workers stay under SQLite's
     # single-writer ceiling.
     "PRAGMA busy_timeout = 5000;",

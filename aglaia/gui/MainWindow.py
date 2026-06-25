@@ -166,6 +166,16 @@ class ThumbLoader(QObject):
         self._db_path = db_path
         from aglaia.storage.db import open_db
         self._conn = open_db(db_path)     # GUI thread: cached reads only
+        # CRITICAL: this connection is read FROM THE GUI THREAD. A large
+        # reprocess holds the single SQLite writer for stretches; with the
+        # default 5 s busy_timeout a contended thumb-cache read froze the event
+        # loop for *seconds* (stall-watch traces). Cap the wait low so a
+        # contended read fails fast and we fall through to the async loader
+        # below instead of blocking the UI. The thumb just paints a beat later.
+        try:
+            self._conn.execute("PRAGMA busy_timeout = 75")
+        except Exception:
+            pass
         self._thumbs = ThumbRepo(self._conn)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(2)
@@ -178,8 +188,13 @@ class ThumbLoader(QObject):
             return None
         # A deferred composite refresh (lazy paint / queued QTimer) can fire
         # after close() during app teardown — guard the now-closed conn so
-        # shutdown stays traceback-free.
-        row = self._thumbs.get(image_id, max_dim)
+        # shutdown stays traceback-free. A "database is locked" here (writer
+        # busy) is NOT an error: treat it as a cache miss and let the async
+        # loader fetch it off-thread, keeping the GUI responsive.
+        try:
+            row = self._thumbs.get(image_id, max_dim)
+        except Exception:
+            row = None
         if row is not None:
             return bytes(row["blob"])
         key = (int(image_id), int(max_dim))
