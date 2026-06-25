@@ -4,6 +4,36 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0a3] — 2026-06-25
+
+Third alpha. Linux/GPU and tiling-WM fixes, plus dewarp robustness.
+
+### Fixed
+
+- **Dewarp produced no output on dense pages.** The padded JAX optimiser's
+  over-cap fallback re-imported a function `install()` had already replaced
+  with itself → infinite recursion (`maximum recursion depth exceeded`), which
+  killed the dewarp branch. This was also the "QEMU" recursion crash — never
+  QEMU-specific, just any page over the cap.
+- **Sidebar "Tip the developer" link** opened a dead Ko-fi handle (redirected
+  to the Ko-fi homepage); now points at the correct page.
+- **Loading splash** was tiled/mangled by tiling window managers
+  (Hyprland/sway/i3); it now floats.
+
+### Changed
+
+- **Over-cap dewarp** (dense or `baseline_source=both` pages — common now that
+  line extraction is fixed) no longer falls back to the slow, cubic-only stock
+  optimiser. It prunes text lines to fit (keeps the extremities, drops short
+  lines in dense regions, protects sparse regions) and pads to size buckets
+  (50 / 80 / 120 lines) so typical pages stay fast.
+
+### Performance
+
+- **Idle worker memory** is now released on Linux (`gc` + `malloc_trim`). An
+  opt-in aggressive recycle (`AGLAIA_WORKER_IDLE_RECYCLE_S`) frees the
+  JAX/CUDA resident stack (~1.6 GB → ~0.75 GB per worker) when idle.
+
 ## [0.1.0a2] — unreleased
 
 Second alpha. Bug-fix pass over a1 from macOS release testing.
