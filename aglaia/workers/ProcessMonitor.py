@@ -6,12 +6,25 @@
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
 import re
+import sys
 from collections import deque
 from queue import Empty
 from PySide6.QtCore import QThread, Signal
-from rich.console import Console
 
-console = Console()
+# The GUI's log lands in the UI (via Qt signals); the terminal echo here is
+# dev convenience. We deliberately do NOT use rich.Console.print per line —
+# at scale (175 scans × ~6 steps → thousands of lines) rich's per-line markup
+# parse + word-wrap churned ~500 MB in the GUI process (memray). Plain
+# sys.stdout.write with a constant ANSI prefix has no per-line allocation.
+_C_INFO, _C_WARN, _C_ERR, _C_OFF = "\033[36m", "\033[33m", "\033[31m", "\033[0m"
+_TTY = sys.stdout.isatty()
+
+
+def _echo(prefix_color: str, tag: str, text: str) -> None:
+    if _TTY:
+        sys.stdout.write(f"{prefix_color}[{tag}]{_C_OFF} {text}\n")
+    else:
+        sys.stdout.write(f"[{tag}] {text}\n")
 
 
 # `[RSS-poll] gui_pid=97338=774MB/25t | Worker-Integrated-0_pid=97883=281MB/38t | ...`
@@ -109,28 +122,24 @@ class ProcessMonitor(QThread):
                         # displays per-worker memory live.
                         text = _STAGE_RSS_SUFFIX_RE.sub("", text)
                         from aglaia.workers.oplog import strip_markup
-                        # Colour goes to the terminal; Qt status-bar
-                        # labels render plain text only.
-                        console.print(rf"[cyan]\[INFO][/] {text}")
+                        # Plain terminal echo; Qt labels get plain text too.
                         plain = strip_markup(text)
-                        line = f"[INFO] {plain}"
-                        self.log_buffer.append(line)
+                        _echo(_C_INFO, "INFO", plain)
+                        self.log_buffer.append(f"[INFO] {plain}")
                         self.log_signal.emit("info", plain)
                 elif msg[0] == 'log_warning':
                     text = str(msg[1])
                     from aglaia.workers.oplog import strip_markup
-                    console.print(rf"[yellow]\[WARN][/] {text}")
                     plain = strip_markup(text)
-                    line = f"[WARN] {plain}"
-                    self.log_buffer.append(line)
+                    _echo(_C_WARN, "WARN", plain)
+                    self.log_buffer.append(f"[WARN] {plain}")
                     self.log_signal.emit("warn", plain)
                 elif msg[0] == 'error':
                     text = str(msg[1])
                     from aglaia.workers.oplog import strip_markup
-                    console.print(rf"[red]\[ERROR][/] {text}")
                     plain = strip_markup(text)
-                    line = f"[ERROR] {plain}"
-                    self.log_buffer.append(line)
+                    _echo(_C_ERR, "ERROR", plain)
+                    self.log_buffer.append(f"[ERROR] {plain}")
                     self.log_signal.emit("error", plain)
                 elif msg[0] == 'progress':
                     pass # Ignore granular progress for now
@@ -152,22 +161,16 @@ class ProcessMonitor(QThread):
                     # msg format: ('timing', stem, dims, dpi, proc_name, ms, success)
                     stem, dims, dpi, proc, ms, success = msg[1], msg[2], msg[3], msg[4], msg[5], msg[6]
                     self.timing_signal.emit(str(proc), float(ms), bool(success))
-                    emoji = "[green]●[/]" if success else "[red]●[/]"
-                    
-                    # Pretty tabulation using fixed-width fields or rich columns
-                    # format: Emoji Stem (WxH@dpi) Proc MS
-                    line = f"{emoji} [bold white]{stem:<15}[/] "
-                    line += f"[dim]({dims}@{dpi:.0f})[/] "
-                    line += f"[cyan]{proc:<15}[/] "
-                    line += f"[bold yellow]{ms:6.1f}ms[/]"
-                    console.print(line)
+                    # Per-step timing already shows in the op-log [pipeline.*]
+                    # line + the Qt timing bar; no extra rich echo here (it was
+                    # ~1k redundant rich.print/scan-run → memory churn).
             except Empty:
                 # Queue went quiet — flush whatever images are buffered so the
                 # final stages of a burst appear without waiting for the cap.
                 self._flush_img_batch()
                 continue
             except Exception as e:
-                console.print(rf"[red]\[ERROR][/] ProcessMonitor Error: {e}")
+                _echo(_C_ERR, "ERROR", f"ProcessMonitor Error: {e}")
                 break
 
     def stop(self):

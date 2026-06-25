@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThreadPool, QRunnable
 from PySide6.QtGui import QKeySequence, QPixmap
 
 from aglaia.gui.WebcamThread import WebcamThread
-from aglaia.workers.ProcessMonitor import ProcessMonitor, console
+from aglaia.workers.ProcessMonitor import ProcessMonitor
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.gui.ScanItemWidget import ScanItemWidget
 from aglaia.workers.PDFprocessor import create_pdf_from_images, create_pdf_from_db

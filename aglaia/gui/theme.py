@@ -614,12 +614,21 @@ def _svg_color_opacity(color: str) -> tuple[str, float]:
 
 
 def _render_svg_tinted(name: str, color: Optional[str], size: int):
-    """Shared loader: read SVG, retint currentColor, render to a QPixmap
-    at 2× with the (possibly rgba) colour's opacity baked in. Returns None
-    when the SVG is missing."""
+    """Read an SVG, retint currentColor, render to a QPixmap at 2×. Resolves
+    a ``None`` colour to the palette text colour FIRST, then renders via the
+    cached inner — so a concrete colour is always the cache key and a theme
+    switch naturally keys to fresh entries (no stale tint)."""
     if color is None:
-        pal = QApplication.palette()
-        color = pal.color(QPalette.ColorRole.Text).name()
+        color = QApplication.palette().color(QPalette.ColorRole.Text).name()
+    return _render_svg_tinted_cached(name, color, size)
+
+
+@lru_cache(maxsize=512)
+def _render_svg_tinted_cached(name: str, color: str, size: int):
+    """Cached render+tint. Each (name, colour, size) renders ONCE and the
+    QPixmap is reused everywhere (Qt refcounts it, so sharing is safe).
+    Before this, icons re-rendered per widget/refresh → ~2 GB of churn in a
+    large reprocess (memray, issue #17)."""
     svg_src = _read_svg(name)
     if svg_src is None:
         return None
