@@ -436,6 +436,12 @@ class ScanItemWidget(QWidget):
         self._refresh_timer.setInterval(200)
         self._refresh_timer.timeout.connect(self.refresh_composite)
 
+        # Last `dimmed` value the (expensive) QSS was applied for. update_header
+        # runs per affected card per batch during a reprocess; setStyleSheet
+        # re-parses + re-polishes the whole subtree, so we only re-apply it when
+        # the dimmed-dependent palette actually flips. -1 = never applied.
+        self._styled_dimmed: int = -1
+
         self.refresh_composite()
         self.update_header()
 
@@ -1178,6 +1184,15 @@ class ScanItemWidget(QWidget):
         if self.dimmed:
             final_text += self.tr(" (No page detected)")
         self.name_label.setFullText(final_text)
+
+        # The QSS below only changes when `dimmed` flips. setStyleSheet
+        # re-parses the sheet and re-polishes this widget + every child, so
+        # skipping it when the palette is unchanged is the difference between
+        # a responsive and a frozen UI during a large reprocess (update_header
+        # fires for every affected card on every batch).
+        if int(self.dimmed) == self._styled_dimmed:
+            return
+        self._styled_dimmed = int(self.dimmed)
 
         # Palette dispatch happens in aglaia.gui.colors at import time —
         # the tokens below already resolve to the right shade for the
