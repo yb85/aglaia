@@ -4,6 +4,30 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0a5] — 2026-06-26
+
+Fifth alpha. GPU Linux AppImage, faster dewarp, auto worker count.
+
+### Added
+
+- **Prebuilt slim-CUDA Linux AppImage** (`Aglaia-x86_64-cuda.AppImage`) for
+  GPU-accelerated page dewarp on NVIDIA/Linux — no source / `--extra cuda`
+  install needed. The dewarp is matmul-only L-BFGS-B, so the bundle ships only
+  the CUDA libs it loads (cuBLAS, nvrtc, nvjitlink, ptxas, cupti, cudart) and
+  drops ~2.6 GB of dead weight (cuDNN/NCCL/nvshmem/cuFFT/cuSPARSE/cuSOLVER) —
+  1.3 GiB, under GitHub's 2 GiB release-asset cap. (#15)
+- **Auto pipeline-worker count.** A worker count of `0` (config, `--workers 0`,
+  or the Settings slider's leftmost notch) now means *auto* — sized to the CPU,
+  platform-aware (Apple Silicon → performance-core count; x86 → ~half the
+  physical cores). The pipeline sidebar shows `NN workers (auto|manual)`. Auto
+  is the new default.
+
+### Changed
+
+- **Dewarp shape buckets right-sized** to real page geometry (measured ~45
+  keypoints/line, not the ~70 the old caps assumed) plus finer steps — ~30%
+  faster dewarp on GPU, ~40% on CPU, no memory or quality cost.
+
 ## [0.1.0a3] — 2026-06-25
 
 Third alpha. Linux/GPU and tiling-WM fixes, plus dewarp robustness.
@@ -104,4 +128,5 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0a5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a5
 [0.1.0a1]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a1
