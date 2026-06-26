@@ -313,3 +313,80 @@ jobs:
           files: |
             dist/Aglaia-x86_64.AppImage
             dist/SHA256SUMS-linux.txt
+
+  build-linux-gpu:
+    # GPU-capable AppImage: same as build-linux + `--extra cuda`, with a slim
+    # CUDA bundle (Aglaia.spec drops cuDNN/NCCL/nvshmem/cuFFT/cuSPARSE/cuSOLVER
+    # — ~2.6 GB unused by the matmul-only L-BFGS-B dewarp) so it fits the 2 GiB
+    # release-asset cap. CI proves it builds/imports; GPU dewarp is verified on
+    # real NVIDIA hardware (runners have no GPU). Asset: Aglaia-x86_64-cuda.AppImage.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: System libs (AppImage tooling + Qt xcb runtime)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfuse2 libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+
+      - name: Vendor llama-server (Surya backend)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # lift anonymous API rate limit
+        run: uv run --no-project python scripts/fetch_llama_server.py --platform linux-x64
+
+      - name: Sync deps + CUDA (jax[cuda12] for GPU dewarp)
+        run: >-
+          uv sync --extra gui --extra voice --extra dev --extra package
+          --extra cloud --extra surya --extra cuda
+
+      - name: Build onedir (PyInstaller)
+        env:
+          AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
+        run: uv run pyinstaller Aglaia.spec --clean --noconfirm
+
+      - name: Fetch appimagetool
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Build AppImage (slim CUDA)
+        env:
+          AGLAIA_VERSION: ${{ steps.ver.outputs.version }}
+          ARCH: x86_64
+          SUFFIX: -cuda
+        run: ./packaging/build_appimage.sh
+
+      - name: Enforce the 2 GiB release-asset cap
+        run: |
+          set -euo pipefail
+          f=dist/Aglaia-x86_64-cuda.AppImage
+          bytes=$(stat -c%s "$f"); limit=2147483648
+          printf 'CUDA AppImage: %.2f GiB\n' "$(echo "scale=2; $bytes/1073741824" | bc)"
+          du -sh dist/Aglaia/_internal/nvidia/* 2>/dev/null | sort -rh || true
+          [ "$bytes" -lt "$limit" ] || { echo "::error::CUDA AppImage exceeds 2 GiB ($bytes)"; exit 1; }
+
+      - name: Checksum
+        run: cd dist && sha256sum Aglaia-x86_64-cuda.AppImage | tee SHA256SUMS-linux-cuda.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Aglaïa ${{ steps.ver.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            dist/Aglaia-x86_64-cuda.AppImage
+            dist/SHA256SUMS-linux-cuda.txt

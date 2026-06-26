@@ -8,8 +8,9 @@
 # Env:
 #   AGLAIA_VERSION  version string baked into the output name (default 0.0.0-dev)
 #   ARCH            target arch for appimagetool (default x86_64)
+#   SUFFIX          optional name suffix, e.g. "-cuda" → Aglaia-x86_64-cuda.AppImage
 #
-# Output: dist/Aglaia-<ARCH>.AppImage
+# Output: dist/Aglaia-<ARCH><SUFFIX>.AppImage
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,6 +18,7 @@ DIST="$REPO/dist"
 APPDIR="$DIST/Aglaia.AppDir"
 VERSION="${AGLAIA_VERSION:-0.0.0-dev}"
 ARCH="${ARCH:-x86_64}"
+SUFFIX="${SUFFIX:-}"
 
 if [ ! -d "$DIST/Aglaia" ]; then
   echo "error: $DIST/Aglaia not found — run pyinstaller Aglaia.spec first" >&2
@@ -51,7 +53,7 @@ EOF
 chmod +x "$APPDIR/AppRun"
 
 # ── build ────────────────────────────────────────────────────────────
-OUT="$DIST/Aglaia-${ARCH}.AppImage"
+OUT="$DIST/Aglaia-${ARCH}${SUFFIX}.AppImage"
 rm -f "$OUT"
 # APPIMAGE_EXTRACT_AND_RUN avoids needing a FUSE mount for appimagetool
 # itself (it's an AppImage) on CI runners without /dev/fuse.
