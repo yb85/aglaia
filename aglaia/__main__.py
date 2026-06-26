@@ -19,16 +19,32 @@ import sys
 
 
 def _ensure_std_streams() -> None:
-    """In a windowed PyInstaller build there is no attached console, so
-    ``sys.stdout``/``sys.stderr`` are ``None``. ``rich.Console()`` (built at
-    import time in the GUI) and the app's many ``print(..., file=sys.stderr)``
-    calls then crash on ``None.isatty()``. Point the missing streams at the
-    null device so writes are harmless no-ops. Runs on every spawned worker
-    too, since ``spawn`` re-imports this module before running its task."""
-    if sys.stdout is None:
-        sys.stdout = open(os.devnull, "w")
-    if sys.stderr is None:
-        sys.stderr = open(os.devnull, "w")
+    """Make ``sys.stdout``/``sys.stderr`` safe to write to on Windows, in two
+    cases the app's many ``print(...)`` / ``rich.Console()`` calls otherwise
+    crash on:
+
+    1. **Windowed PyInstaller build** — no attached console, so the streams are
+       ``None``; ``rich.Console()`` (built at GUI import) hits
+       ``None.isatty()``. Point them at the null device instead.
+    2. **Real console under a non-UTF-8 code page** (the default ``cp1252`` on
+       Windows) — startup banners print glyphs like ``✓``/``ï`` that ``cp1252``
+       can't encode, raising ``UnicodeEncodeError``. Reconfigure the existing
+       stream to UTF-8 (``errors='replace'`` so it can never crash on an odd
+       glyph).
+
+    Runs on every spawned worker too, since ``spawn`` re-imports this module
+    before running its task."""
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+        else:
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure is not None:
+                try:
+                    reconfigure(encoding="utf-8", errors="replace")
+                except (ValueError, OSError):
+                    pass
 
 
 _ensure_std_streams()
