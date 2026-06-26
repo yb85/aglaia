@@ -20,6 +20,16 @@ from typing import Optional, Any, Dict
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
 os.environ.setdefault("ENABLE_PJRT_COMPATIBILITY", "1")
+# The slim-CUDA Linux AppImage ships only the CUDA libs the L-BFGS-B dewarp
+# actually loads (cuBLAS/nvrtc/nvjitlink/cupti/nvcc/cudart) and DROPS the
+# ~2.6 GB of dead weight (cuDNN/NCCL/nvshmem/cuFFT/cuSPARSE/cuSOLVER) to fit
+# GitHub's 2 GiB release cap. JAX's CUDA plugin version-probes EVERY lib at
+# init and, finding one absent, hard-raises and silently falls back to CPU —
+# so the GPU bundle would secretly run on CPU. This bypasses that probe; the
+# bundled libs are the exact pinned wheels JAX was built against, so the
+# version check it skips would always have passed anyway. Source `--extra cuda`
+# installs (full CUDA present) are unaffected. setdefault → user-overridable.
+os.environ.setdefault("JAX_SKIP_CUDA_CONSTRAINTS_CHECK", "1")
 
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait

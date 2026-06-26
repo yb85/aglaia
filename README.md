@@ -144,7 +144,8 @@ fixed-name "latest" artifacts, so these links never go stale:
 |---|---|---|
 | **macOS** (Apple Silicon) | [`Aglaia-macos-arm64.dmg`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-macos-arm64.dmg) | Signed + notarized. Open and drag to Applications. |
 | **Windows** (x64) | [`Aglaia-windows-x64-setup.exe`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-windows-x64-setup.exe) | Installer; registers the `.agl` file type. **Not code-signed** — SmartScreen will warn; click **More info → Run anyway**. Verify with [`SHA256SUMS-windows.txt`](https://github.com/yb85/aglaia/releases/latest/download/SHA256SUMS-windows.txt). |
-| **Linux** (x86_64) | [`Aglaia-x86_64.AppImage`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-x86_64.AppImage) | `chmod +x`, then run. Needs FUSE (`fuse2`). |
+| **Linux** (x86_64) | [`Aglaia-x86_64.AppImage`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-x86_64.AppImage) | CPU dewarp. `chmod +x`, then run. Needs FUSE (`fuse2`). |
+| **Linux GPU** (x86_64, NVIDIA) | [`Aglaia-x86_64-cuda.AppImage`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-x86_64-cuda.AppImage) | GPU-accelerated dewarp — slim CUDA runtime bundled (no source/`--extra cuda` install needed). Needs an NVIDIA driver + FUSE (`fuse2`); falls back to CPU without a GPU. |
 
 ### Install from the command line
 

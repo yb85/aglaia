@@ -209,12 +209,74 @@ for _pkg in ("mlx", "vosk"):
     except Exception:
         pass
 
+# ── slim CUDA bundle for GPU page-dewarp (Linux only) ────────────────
+#
+# Ship a GPU-capable AppImage by bundling jax[cuda12]'s plugin + the CUDA
+# runtime libs the dewarp actually touches. The dewarp is L-BFGS-B over the
+# reprojection cost — matmul / elementwise / reductions, NO convolution, FFT,
+# sparse, or multi-GPU collectives — so most of the ~3.9 GB CUDA payload is
+# dead weight. Bundling ONLY the loaded libs keeps the AppImage under GitHub's
+# 2 GiB release-asset cap. Verified on an RTX 3090: GPU dewarp runs correctly
+# with the excluded libs absent (PageDewarper sets JAX_SKIP_CUDA_CONSTRAINTS_CHECK
+# so JAX's init-time version probe doesn't hard-fail on the missing libs and
+# silently drop to CPU).
+#
+# Keep:    cublas (matmul), cuda_nvrtc + nvjitlink + cuda_nvcc/ptxas (XLA JIT),
+#          cuda_cupti, cuda_runtime.
+# Exclude: cudnn, nccl, nvshmem, cufft, cusparse, cusolver (~2.6 GB, unused).
+#
+# Only collected when the `cuda` extra is installed (jax_cuda12_plugin present);
+# the macOS / Windows / CPU-Linux builds skip this block entirely.
+_cuda_binaries = []
+IS_LINUX = _plat.system() == "Linux"
+if IS_LINUX:
+    try:
+        import jax_cuda12_plugin  # noqa: F401  — only with `uv sync --extra cuda`
+        _HAS_CUDA = True
+    except ImportError:
+        _HAS_CUDA = False
+    if _HAS_CUDA:
+        from PyInstaller.utils.hooks import copy_metadata
+        # PJRT plugin (xla_cuda_plugin.so, resolved relative to the package
+        # __file__) + JAX's CUDA kernel extensions (cuda_plugin_extension,
+        # _versions, …). collect_all preserves the package layout both rely on.
+        for _pkg in ("jax_plugins.xla_cuda12", "jax_cuda12_plugin"):
+            try:
+                _d, _b, _h = collect_all(_pkg)
+                datas += _d
+                _cuda_binaries += _b
+                hiddenimports += _h
+            except Exception:
+                pass
+        # JAX discovers the GPU plugin through the `jax_plugins` entry point,
+        # provided by the jax-cuda12-pjrt dist. PyInstaller drops dist metadata
+        # by default → without this the frozen app never finds the plugin and
+        # silently runs on CPU.
+        try:
+            datas += copy_metadata("jax-cuda12-pjrt")
+        except Exception:
+            pass
+        # The CUDA runtime libs the dewarp loads. collect_all keeps each at
+        # nvidia/<pkg>/lib/lib*.so — exactly where jax_plugins.xla_cuda12._load
+        # looks (importlib.import_module("nvidia.<pkg>").__path__[0] / "lib").
+        # The big unused libs (cudnn/nccl/nvshmem/cufft/cusparse/cusolver) are
+        # simply not named here, so they never enter the bundle.
+        for _pkg in ("nvidia.cublas", "nvidia.cuda_nvrtc", "nvidia.cuda_runtime",
+                     "nvidia.cuda_cupti", "nvidia.cuda_nvcc", "nvidia.nvjitlink"):
+            try:
+                _d, _b, _h = collect_all(_pkg)
+                datas += _d
+                _cuda_binaries += _b
+                hiddenimports += _h
+            except Exception:
+                pass
+
 block_cipher = None
 
 a = Analysis(
     ["aglaia/__main__.py"],
     pathex=[str(REPO)],
-    binaries=list(_llama_binaries) + list(_jbig2_binaries) + list(_native_pkg_binaries),
+    binaries=list(_llama_binaries) + list(_jbig2_binaries) + list(_native_pkg_binaries) + list(_cuda_binaries),
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

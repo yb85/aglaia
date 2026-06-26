@@ -119,6 +119,32 @@ signtool sign /f aglaia-codesign.pfx /p <password> /fd SHA256 `
   /tr http://timestamp.digicert.com /td SHA256 path\to\Aglaia.exe
 ```
 
+## Linux AppImage
+
+The same tag triggers two `ubuntu-22.04` jobs (glibc 2.35 for portability),
+each PyInstaller-building the onedir and wrapping it with
+`packaging/build_appimage.sh` (`appimagetool`, `APPIMAGE_EXTRACT_AND_RUN=1`
+so no FUSE mount is needed on the runner):
+
+| Job | Extras | Asset | Dewarp |
+|---|---|---|---|
+| `build-linux` | `gui voice dev package cloud surya` | `Aglaia-x86_64.AppImage` | CPU |
+| `build-linux-gpu` | + `cuda` | `Aglaia-x86_64-cuda.AppImage` | NVIDIA GPU |
+
+The GPU asset bundles a **slim CUDA runtime**. The dewarp is L-BFGS-B over
+the reprojection cost (matmul / reductions — no conv, FFT, sparse, or
+multi-GPU), so `Aglaia.spec` ships only the CUDA libs it actually loads
+(cuBLAS, nvrtc, nvjitlink, ptxas, cupti, cudart) and drops ~2.6 GB of dead
+weight (cuDNN, NCCL, nvshmem, cuFFT, cuSPARSE, cuSOLVER) — landing ~1.3 GiB,
+well under GitHub's 2 GiB release-asset cap (the `build-linux-gpu` job fails
+the release if it ever exceeds it). JAX version-probes every CUDA lib at
+init and silently drops to CPU when one is missing, so `PageDewarper` sets
+`JAX_SKIP_CUDA_CONSTRAINTS_CHECK=1` to bypass that probe; the bundled libs
+are the exact pinned wheels JAX was built against, so the skipped check
+would always have passed. Verified on an RTX 3090. No GPU → clean CPU
+fallback. CI can only prove it builds/imports (runners have no GPU); GPU
+dewarp must be smoke-tested on real NVIDIA hardware before trusting a release.
+
 ## Local build (no CI)
 
 ```bash
