@@ -409,6 +409,49 @@ class DewarpOption(AbstractProcessorOption):
 from aglaia.processors.option_specs import _b, _e, _f, _i
 
 
+class SuppressOutput:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stderr.close()
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
+
+
+@dataclass
+class _DewarpCtx:
+    """Everything the SOLVE + finish stages need, produced by
+    _build_dewarp_problem. Lives within a single process() call (not pickled)."""
+    img: Any
+    small: Any
+    pad_px: int
+    is_bw: bool
+    input_dpi: float
+    char_h_frac: float
+    orig_buffer: Any
+    orig_roi: Any
+    corners: Any
+    rough_dims: Any
+    span_counts: Any
+    params: Any
+    model_dims: Any
+    support_x: Any
+    support_y: Any
+    support_decay: float
+    flat_flip: bool
+    flat_penalty_eff: float
+    n_extra: int
+    dstpoints: Any
+    spans: Any
+    span_points: Any
+    # Filled in by process() after the solve, only for the spline RMS log.
+    params_initial: Any = None
+
+
 class PageDewarper(AbstractImageProcessor):
     name: str = "PageDewarper"
     SUMMARY = "Cubic-sheet dewarp via page-dewarp + JAX."
@@ -879,9 +922,184 @@ class PageDewarper(AbstractImageProcessor):
         """
         Dewarp using JAX-accelerated cubic sheet model.
         Modifies img_buf in-place.
+
+        Structured as build -> solve (inline) -> finish. Geometry/IO is
+        byte-identical to the pre-split version (golden-hash verified); only
+        the code layout changed so the optimiser SOLVE is isolated.
         """
         # Unified debug dumps go through self.debug_save (see AbstractImageProcessor).
+        ctx, early_buf = self._build_dewarp_problem(img_buf)
+        if early_buf is not None:
+            return early_buf
 
+        from aglaia.processors import sheet_models
+
+        small = ctx.small
+        span_counts = ctx.span_counts
+        model_dims = ctx.model_dims
+        flat_flip = ctx.flat_flip
+        flat_penalty_eff = ctx.flat_penalty_eff
+        dstpoints = ctx.dstpoints
+        params = ctx.params
+
+        # DEBUG: Spans Overlay
+        if self.debug_enabled():
+            dbg_0 = small.copy()
+            overlay = np.zeros_like(small)
+            colors = [(255,0,0), (0,255,0), (0,0,255), (255,255,0), (0,255,255), (255,0,255), (200,100,0), (0,100,200)]
+            for i, span in enumerate(ctx.spans):
+                color = colors[i % len(colors)]
+                for cinfo in span:
+                    cv2.drawContours(overlay, [cinfo.contour], -1, color, -1)
+            cv2.addWeighted(overlay, 0.4, dbg_0, 0.6, 0, dbg_0)
+            # Every fitted model line (with baseline_source="both" a
+            # span contributes baseline AND topline as separate
+            # entries) — span_points are pix2norm'd, map back.
+            for j, sp in enumerate(ctx.span_points):
+                pts_px = norm2pix(small.shape, sp, False)
+                pts_px = pts_px.reshape(-1, 2).astype(np.int32)
+                cv2.polylines(dbg_0, [pts_px], False,
+                              colors[j % len(colors)], 2)
+            self.debug_save(dbg_0, "0_spans", img_buf)
+
+            # Debug Points Helper
+            def draw_points(img, pvec):
+                ki = make_keypoint_index(span_counts)
+                ppts = sheet_models.project_keypoints_model(
+                    np.asarray(pvec, dtype=np.float64).copy(), ki,
+                    model=self.sheet_model, n_modes=self.spline_modes,
+                    model_dims=model_dims,
+                    focal_length=self.focal_length,
+                    grading=self.knot_grading, flip=flat_flip)
+                res = img.copy()
+                for pt in ppts:
+                    cv2.circle(res, (int(pt[0,0]), int(pt[0,1])), 3, (255, 0, 0), -1)
+                for pt in dstpoints:
+                    cv2.circle(res, (int(pt[0,0]), int(pt[0,1])), 2, (0, 0, 255), -1)
+                return res
+
+            res_1 = np.hstack([draw_points(small, params), small])
+            self.debug_save(res_1, "1_initial", img_buf)
+
+        # 4. JAX Optimization
+        params_initial = params.copy()
+
+        try:
+            with SuppressOutput():
+                if (self.sheet_model in sheet_models.SPLINE_MODELS
+                        and self.backend == "powell"):
+                    # Library Powell objective is cubic-only — use
+                    # the vendored model-aware optimiser.
+                    params = sheet_models.optimise_params_spline_powell(
+                        dstpoints, span_counts, params,
+                        model=self.sheet_model,
+                        n_modes=self.spline_modes,
+                        twist=self.twist,
+                        model_dims=model_dims,
+                        focal_length=self.focal_length,
+                        shear_cost=float(self.cfg.SHEAR_COST),
+                        cubic_cost=self.cubic_cost,
+                        huber_delta=self.huber_delta,
+                        grading=self.knot_grading,
+                        flip=flat_flip,
+                        flat_penalty=flat_penalty_eff,
+                        maxiter=int(self.cfg.OPT_MAX_ITER))
+                else:
+                    params = optimise_params("dewarp", small, dstpoints, span_counts, params, self.cfg.DEBUG_LEVEL)
+        finally:
+            # Drop per-shape compiled programs every N dewarps. The
+            # padded backend always traces on one fixed shape, so a
+            # per-image clear would force a pointless re-trace/compile
+            # (~0.3-1 s) on every page; the residual XLA pool growth
+            # only needs an occasional flush to stay under the 3 GB
+            # watchdog cap.
+            if self.use_jax:
+                PageDewarper._dewarps_since_clear += 1
+                if PageDewarper._dewarps_since_clear >= PageDewarper.JAX_CLEAR_EVERY:
+                    PageDewarper._dewarps_since_clear = 0
+                    try:
+                        jax.clear_caches()
+                    except Exception:
+                        pass
+            # MLX clings to its allocator pool across calls (unified
+            # memory). After ~10 dewarps the per-worker phys_footprint
+            # hits the 3 GB watchdog cap → SIGKILL → scan dropped.
+            # clear_pool() frees the Metal buffers (the actual leak)
+            # but keeps the compiled value_and_grad closure so the
+            # next page skips re-tracing.
+            if self.backend == "mlx":
+                try:
+                    from aglaia.processors.page_dewarp_mlx import (
+                        clear_pool as _mlx_clear_pool,
+                    )
+                    _mlx_clear_pool()
+                except Exception:
+                    pass
+                # Optional JAX device-memory profile dump (env-gated).
+                # View with `pprof --web <file.prof>`.
+                _prof_dir = os.environ.get("AGLAIA_JAX_PROFILE_DIR")
+                if _prof_dir:
+                    try:
+                        import time as _t
+                        os.makedirs(_prof_dir, exist_ok=True)
+                        _path = os.path.join(
+                            _prof_dir,
+                            f"dewarp_pid{os.getpid()}_{int(_t.time()*1000)}.prof",
+                        )
+                        jax.profiler.save_device_memory_profile(_path)
+                    except Exception as e:
+                        print(f"[PageDewarper] jax memory profile dump failed: {e}",
+                              flush=True)
+
+        # Polish pass for Powell only — MLX/padded-JAX fold cubic_cost into
+        # their main pass. For Powell we re-optimise the 8 global params
+        # (rvec+tvec+α+β); per-span y/x stay frozen at lib's optimum.
+        # Cylindrical only: the spline Powell path folds its own reg.
+        if (self.cubic_cost > 0.0 and self.backend == "powell"
+                and self.sheet_model == "cylindrical"):
+            from scipy.optimize import minimize
+            kpidx = make_keypoint_index(span_counts)
+            target_pts = dstpoints.reshape((-1, 2))
+            shear_w = float(self.cfg.SHEAR_COST)
+            lam = float(self.cubic_cost)
+            full = np.asarray(params, dtype=np.float64).copy()
+            head0 = full[:8].copy()
+
+            def _cubic_obj(head):
+                full[:8] = head
+                ppts = project_keypoints(full, kpidx).reshape((-1, 2))
+                err = float(np.sum((ppts - target_pts) ** 2))
+                err += shear_w * float(head[0]) ** 2
+                err += lam * (float(head[6]) ** 2 + float(head[7]) ** 2)
+                return err
+
+            try:
+                with SuppressOutput():
+                    polish = minimize(
+                        _cubic_obj, head0, method="Powell",
+                        options={"maxiter": 2000,
+                                 "xtol": 1e-6, "ftol": 1e-7},
+                    )
+                full[:8] = polish.x
+                params = full.astype(np.float32)
+            except Exception as e:
+                print(f"[PageDewarper] cubic polish failed: {e}; "
+                      "keeping lib params.", flush=True)
+
+        if self.debug_enabled():
+            res_2 = np.hstack([draw_points(small, params_initial), draw_points(small, params)])
+            self.debug_save(res_2, "2_optimized", img_buf)
+
+        ctx.params_initial = params_initial
+        return self._finish_dewarp(img_buf, params, ctx)
+
+    def _build_dewarp_problem(self, img_buf: ImageBuffer):
+        """Build the dewarp optimisation problem: padding, page mask, text
+        mask, span assembly/filtering, default params, support ranges,
+        flat-spline state and dstpoints — plus the lib_cfg / spline-backend
+        side effects. Returns ``(ctx, None)`` to proceed, or ``(None,
+        early_buf)`` for the passthrough / gray-fallback short circuits that
+        process() returns verbatim."""
         # Snapshot the pre-padding buffer + ROI so a diverged cylindrical fit
         # can be retried cleanly with the stable bspline model (see
         # `_fallback_to_bspline`). copyMakeBorder below returns a NEW array,
@@ -1151,324 +1369,209 @@ class PageDewarper(AbstractImageProcessor):
                     _set_flat(flat_flip, flat_w)
             dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) + tuple(span_points)).astype(np.float32)
 
-            # DEBUG: Spans Overlay
-            if self.debug_enabled():
-                dbg_0 = small.copy()
-                overlay = np.zeros_like(small)
-                colors = [(255,0,0), (0,255,0), (0,0,255), (255,255,0), (0,255,255), (255,0,255), (200,100,0), (0,100,200)]
-                for i, span in enumerate(spans):
-                    color = colors[i % len(colors)]
-                    for cinfo in span:
-                        cv2.drawContours(overlay, [cinfo.contour], -1, color, -1)
-                cv2.addWeighted(overlay, 0.4, dbg_0, 0.6, 0, dbg_0)
-                # Every fitted model line (with baseline_source="both" a
-                # span contributes baseline AND topline as separate
-                # entries) — span_points are pix2norm'd, map back.
-                for j, sp in enumerate(span_points):
-                    pts_px = norm2pix(small.shape, sp, False)
-                    pts_px = pts_px.reshape(-1, 2).astype(np.int32)
-                    cv2.polylines(dbg_0, [pts_px], False,
-                                  colors[j % len(colors)], 2)
-                self.debug_save(dbg_0, "0_spans", img_buf)
-
-                # Debug Points Helper
-                def draw_points(img, pvec):
-                    ki = make_keypoint_index(span_counts)
-                    ppts = sheet_models.project_keypoints_model(
-                        np.asarray(pvec, dtype=np.float64).copy(), ki,
-                        model=self.sheet_model, n_modes=self.spline_modes,
-                        model_dims=model_dims,
-                        focal_length=self.focal_length,
-                        grading=self.knot_grading, flip=flat_flip)
-                    res = img.copy()
-                    for pt in ppts:
-                        cv2.circle(res, (int(pt[0,0]), int(pt[0,1])), 3, (255, 0, 0), -1)
-                    for pt in dstpoints:
-                        cv2.circle(res, (int(pt[0,0]), int(pt[0,1])), 2, (0, 0, 255), -1)
-                    return res
-
-                res_1 = np.hstack([draw_points(small, params), small])
-                self.debug_save(res_1, "1_initial", img_buf)
-
-            # 4. JAX Optimization
-            params_initial = params.copy()
-
-            class SuppressOutput:
-                def __enter__(self):
-                    self._original_stdout = sys.stdout
-                    self._original_stderr = sys.stderr
-                    sys.stdout = open(os.devnull, 'w')
-                    sys.stderr = open(os.devnull, 'w')
-                def __exit__(self, exc_type, exc_val, exc_tb):
-                    sys.stdout.close()
-                    sys.stderr.close()
-                    sys.stdout = self._original_stdout
-                    sys.stderr = self._original_stderr
-
-            try:
-                with SuppressOutput():
-                    if (self.sheet_model in sheet_models.SPLINE_MODELS
-                            and self.backend == "powell"):
-                        # Library Powell objective is cubic-only — use
-                        # the vendored model-aware optimiser.
-                        params = sheet_models.optimise_params_spline_powell(
-                            dstpoints, span_counts, params,
-                            model=self.sheet_model,
-                            n_modes=self.spline_modes,
-                            twist=self.twist,
-                            model_dims=model_dims,
-                            focal_length=self.focal_length,
-                            shear_cost=float(self.cfg.SHEAR_COST),
-                            cubic_cost=self.cubic_cost,
-                            huber_delta=self.huber_delta,
-                            grading=self.knot_grading,
-                            flip=flat_flip,
-                            flat_penalty=flat_penalty_eff,
-                            maxiter=int(self.cfg.OPT_MAX_ITER))
-                    else:
-                        params = optimise_params("dewarp", small, dstpoints, span_counts, params, self.cfg.DEBUG_LEVEL)
-            finally:
-                # Drop per-shape compiled programs every N dewarps. The
-                # padded backend always traces on one fixed shape, so a
-                # per-image clear would force a pointless re-trace/compile
-                # (~0.3-1 s) on every page; the residual XLA pool growth
-                # only needs an occasional flush to stay under the 3 GB
-                # watchdog cap.
-                if self.use_jax:
-                    PageDewarper._dewarps_since_clear += 1
-                    if PageDewarper._dewarps_since_clear >= PageDewarper.JAX_CLEAR_EVERY:
-                        PageDewarper._dewarps_since_clear = 0
-                        try:
-                            jax.clear_caches()
-                        except Exception:
-                            pass
-                # MLX clings to its allocator pool across calls (unified
-                # memory). After ~10 dewarps the per-worker phys_footprint
-                # hits the 3 GB watchdog cap → SIGKILL → scan dropped.
-                # clear_pool() frees the Metal buffers (the actual leak)
-                # but keeps the compiled value_and_grad closure so the
-                # next page skips re-tracing.
-                if self.backend == "mlx":
-                    try:
-                        from aglaia.processors.page_dewarp_mlx import (
-                            clear_pool as _mlx_clear_pool,
-                        )
-                        _mlx_clear_pool()
-                    except Exception:
-                        pass
-                    # Optional JAX device-memory profile dump (env-gated).
-                    # View with `pprof --web <file.prof>`.
-                    _prof_dir = os.environ.get("AGLAIA_JAX_PROFILE_DIR")
-                    if _prof_dir:
-                        try:
-                            import time as _t
-                            os.makedirs(_prof_dir, exist_ok=True)
-                            _path = os.path.join(
-                                _prof_dir,
-                                f"dewarp_pid{os.getpid()}_{int(_t.time()*1000)}.prof",
-                            )
-                            jax.profiler.save_device_memory_profile(_path)
-                        except Exception as e:
-                            print(f"[PageDewarper] jax memory profile dump failed: {e}",
-                                  flush=True)
-
-            # Polish pass for Powell only — MLX/padded-JAX fold cubic_cost into
-            # their main pass. For Powell we re-optimise the 8 global params
-            # (rvec+tvec+α+β); per-span y/x stay frozen at lib's optimum.
-            # Cylindrical only: the spline Powell path folds its own reg.
-            if (self.cubic_cost > 0.0 and self.backend == "powell"
-                    and self.sheet_model == "cylindrical"):
-                from scipy.optimize import minimize
-                kpidx = make_keypoint_index(span_counts)
-                target_pts = dstpoints.reshape((-1, 2))
-                shear_w = float(self.cfg.SHEAR_COST)
-                lam = float(self.cubic_cost)
-                full = np.asarray(params, dtype=np.float64).copy()
-                head0 = full[:8].copy()
-
-                def _cubic_obj(head):
-                    full[:8] = head
-                    ppts = project_keypoints(full, kpidx).reshape((-1, 2))
-                    err = float(np.sum((ppts - target_pts) ** 2))
-                    err += shear_w * float(head[0]) ** 2
-                    err += lam * (float(head[6]) ** 2 + float(head[7]) ** 2)
-                    return err
-
-                try:
-                    with SuppressOutput():
-                        polish = minimize(
-                            _cubic_obj, head0, method="Powell",
-                            options={"maxiter": 2000,
-                                     "xtol": 1e-6, "ftol": 1e-7},
-                        )
-                    full[:8] = polish.x
-                    params = full.astype(np.float32)
-                except Exception as e:
-                    print(f"[PageDewarper] cubic polish failed: {e}; "
-                          "keeping lib params.", flush=True)
-
-            if self.debug_enabled():
-                res_2 = np.hstack([draw_points(small, params_initial), draw_points(small, params)])
-                self.debug_save(res_2, "2_optimized", img_buf)
-
-            with SuppressOutput():
-                page_dims = sheet_models.get_page_dims_model(
-                    corners, rough_dims, params,
-                    model=self.sheet_model, n_modes=self.spline_modes,
-                    model_dims=model_dims, focal_length=self.focal_length,
-                    support=support_x, support_y=support_y,
-                    support_decay=support_decay,
-                    grading=self.knot_grading, flip=flat_flip)
-
-            if np.any(page_dims < 0):
-                page_dims = rough_dims
-            # Divergence guard: a runaway fit explodes page_dims (1e6+) and
-            # then overflows the arc-length remap below. Catch it here and
-            # retry the page with the stable bspline model; if we're already
-            # on a spline model, fall back to a safe near-identity instead.
-            if float(np.max(np.abs(page_dims))) > self._PAGE_DIM_SANE:
-                fb = self._fallback_to_bspline(img_buf, _orig_buffer, _orig_roi)
-                if fb is not None:
-                    return fb
-                print(f"[PageDewarper] {self.sheet_model} fit diverged "
-                      f"(page_dims={page_dims}); passing through.", flush=True)
-                page_dims = rough_dims
-            if self.sheet_model in sheet_models.SPLINE_MODELS:
-                _, _c, _g = sheet_models.split_extras(
-                    params, self.sheet_model, self.spline_modes)
-
-                def _kp_rms(pv):
-                    ki = make_keypoint_index(span_counts)
-                    pp = sheet_models.project_keypoints_model(
-                        np.asarray(pv, dtype=np.float64).copy(), ki,
-                        model=self.sheet_model, n_modes=self.spline_modes,
-                        model_dims=model_dims,
-                        focal_length=self.focal_length,
-                        grading=self.knot_grading,
-                        flip=flat_flip).reshape(-1, 2)
-                    tgt = dstpoints.reshape(-1, 2)
-                    return float(np.sqrt(np.mean(
-                        np.sum((tgt - pp) ** 2, axis=1))))
-
-                _flat_note = ""
-                if self.sheet_model == sheet_models.MODEL_FLAT_SPLINE:
-                    _flat_note = (f" binding={'left' if flat_flip else 'right'}"
-                                  f" g={self.knot_grading:g}"
-                                  f" lam={flat_penalty_eff:g}")
-                print(f"[PageDewarper] {self.sheet_model} fit: c="
-                      f"[{', '.join(f'{v:+.4f}' for v in _c)}] "
-                      f"gamma={_g:+.4f} "
-                      f"rms {_kp_rms(params_initial):.5f}->"
-                      f"{_kp_rms(params):.5f}{_flat_note}", flush=True)
-
-            # 5. Remapping — shared arc-length grid (same code path replay
-            # uses, so the live remap and a replayed remap are pixel-identical).
-            zoom = 1.0
-            decimate = self.cfg.REMAP_DECIMATE
-            image_points, grid_shape, target_w, target_h, w_small, h_small = \
-                self._sample_grid(
-                    img.shape[0], img.shape[1], params=params,
-                    page_dims_w=page_dims[0], page_dims_h=page_dims[1],
-                    model_dims=model_dims, decimate=decimate, zoom=zoom,
-                    model=self.sheet_model, n_modes=self.spline_modes,
-                    focal=self.focal_length, support=support_x,
-                    support_y=support_y, support_decay=support_decay,
-                    grading=self.knot_grading, flip=flat_flip)
-
-            im_x_dec = image_points[:, 0, 0].reshape(grid_shape).astype(np.float32)
-            im_y_dec = image_points[:, 0, 1].reshape(grid_shape).astype(np.float32)
-
-            im_x = cv2.resize(im_x_dec, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
-            im_y = cv2.resize(im_y_dec, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
-
-            # BW → nearest (preserve crisp text); gray/color → cubic.
-            # White border (not BORDER_REPLICATE) — replicating the dark
-            # book-edge would smear inward and bias the downstream binariser.
-            input_is_bw = img_buf.type == ImageType.BW
-            interp = cv2.INTER_NEAREST if input_is_bw else cv2.INTER_CUBIC
-            border_val = 255 if img.ndim == 2 else (255, 255, 255)
-            remapped = cv2.remap(img, im_x, im_y, interp, None,
-                                 cv2.BORDER_CONSTANT, border_val)
-            if input_is_bw:
-                _, remapped = cv2.threshold(remapped, 127, 255, cv2.THRESH_BINARY)
-
-            if self.debug_enabled():
-                self.debug_save(remapped, "3_remapped", img_buf)
-                # Warp mesh: where each output pixel reads from. Subsample im_x/im_y.
-                try:
-                    src_vis = img.copy()
-                    if src_vis.ndim == 2:
-                        src_vis = cv2.cvtColor(src_vis, cv2.COLOR_GRAY2BGR)
-                    th, tw = im_x.shape
-                    step_r = max(8, th // 32)
-                    step_c = max(8, tw // 32)
-                    for r in range(0, th, step_r):
-                        pts = np.stack([im_x[r, ::step_c], im_y[r, ::step_c]],
-                                       axis=-1).astype(np.int32)
-                        cv2.polylines(src_vis, [pts], False, (0, 220, 60), 1, cv2.LINE_AA)
-                    for c in range(0, tw, step_c):
-                        pts = np.stack([im_x[::step_r, c], im_y[::step_r, c]],
-                                       axis=-1).astype(np.int32)
-                        cv2.polylines(src_vis, [pts], False, (0, 220, 60), 1, cv2.LINE_AA)
-                    self.debug_save(src_vis, "4_grid_source", img_buf)
-
-                    # Uniform mesh on rectified output.
-                    dst_vis = remapped.copy()
-                    if dst_vis.ndim == 2:
-                        dst_vis = cv2.cvtColor(dst_vis, cv2.COLOR_GRAY2BGR)
-                    oh, ow = dst_vis.shape[:2]
-                    for r in range(0, oh, step_r):
-                        cv2.line(dst_vis, (0, r), (ow - 1, r), (0, 220, 60), 1, cv2.LINE_AA)
-                    for c in range(0, ow, step_c):
-                        cv2.line(dst_vis, (c, 0), (c, oh - 1), (0, 220, 60), 1, cv2.LINE_AA)
-                    self.debug_save(dst_vis, "5_grid_rectified", img_buf)
-                except Exception as e:
-                    print(f"[{self.name}] grid debug failed: {e}")
-
-            # Forward the ROI polygon: rasterise it on the padded source,
-            # remap with the same warp, extract the new contour. The
-            # downstream Binarizer can then mask off non-page area.
-            # ROI is already in padded-buffer coords (shifted at step 0).
-            old_roi = img_buf.meta.get("roi")
-            if old_roi:
-                roi_pts_src = np.array(old_roi, dtype=np.int32).reshape(-1, 1, 2)
-                roi_mask_src = np.zeros(img.shape[:2], dtype=np.uint8)
-                cv2.fillPoly(roi_mask_src, [roi_pts_src], 255)
-                # Remap on the decimated grid (1/decimate² the pixels of a
-                # full-res remap) — a polygon ROI doesn't need sub-pixel
-                # edges; the contour scales back by ×decimate.
-                roi_mask_warp = cv2.remap(
-                    roi_mask_src, im_x_dec, im_y_dec,
-                    cv2.INTER_NEAREST, None, cv2.BORDER_CONSTANT, 0,
-                )
-                cnts, _ = cv2.findContours(
-                    roi_mask_warp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
-                )
-                if cnts:
-                    biggest = max(cnts, key=cv2.contourArea)
-                    scale_x = target_w / float(w_small)
-                    scale_y = target_h / float(h_small)
-                    roi_full = biggest.reshape(-1, 2).astype(np.float64)
-                    roi_full[:, 0] *= scale_x
-                    roi_full[:, 1] *= scale_y
-                    img_buf.meta["roi"] = roi_full.tolist()
-            
-            # OOB stats
-            oh, ow = img.shape[:2]
-            oob = {
-                "x_oob": float(max(0.0, -np.min(im_x), np.max(im_x) - (ow - 1))),
-                "y_oob": float(max(0.0, -np.min(im_y), np.max(im_y) - (oh - 1)))
-            }
-            img_buf.meta["oob"] = oob
-
-            if oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
-                success = False
+            ctx = _DewarpCtx(
+                img=img, small=small, pad_px=pad_px, is_bw=is_bw,
+                input_dpi=input_dpi, char_h_frac=char_h_frac,
+                orig_buffer=_orig_buffer, orig_roi=_orig_roi,
+                corners=corners, rough_dims=rough_dims,
+                span_counts=span_counts, params=params, model_dims=model_dims,
+                support_x=support_x, support_y=support_y,
+                support_decay=support_decay, flat_flip=flat_flip,
+                flat_penalty_eff=flat_penalty_eff, n_extra=n_extra,
+                dstpoints=dstpoints, spans=spans, span_points=span_points)
+            return ctx, None
 
         if coward_skip:
             # Passthrough: keep input pixels as-is, mark fallback in meta.
             img_buf.meta["success"] = False
             img_buf.meta["status"] = int(Status.WARNING)
-            return img_buf
+            return None, img_buf
+
+        # len(spans) < 1 → ERROR gray fallback (the old not-success path).
+        # The OOB not-success case is handled separately in _finish_dewarp.
+        img_buf.buffer = img_buf.to_gray()
+        img_buf.type = ImageType.GRAY
+        img_buf.meta["success"] = False
+        img_buf.meta["status"] = int(Status.ERROR)
+        return None, img_buf
+
+    def _finish_dewarp(self, img_buf: ImageBuffer, params, ctx) -> ImageBuffer:
+        """Post-solve: build page_dims (with the divergence guard + bspline
+        fallback retry), run the arc-length remap, forward the ROI, gate on
+        OOB and stamp the output buffer + replay params. Reads every build
+        local from ``ctx``; returns the final img_buf."""
+        from aglaia.processors import sheet_models
+
+        corners = ctx.corners
+        rough_dims = ctx.rough_dims
+        model_dims = ctx.model_dims
+        support_x = ctx.support_x
+        support_y = ctx.support_y
+        support_decay = ctx.support_decay
+        flat_flip = ctx.flat_flip
+        flat_penalty_eff = ctx.flat_penalty_eff
+        span_counts = ctx.span_counts
+        dstpoints = ctx.dstpoints
+        img = ctx.img
+        pad_px = ctx.pad_px
+        char_h_frac = ctx.char_h_frac
+        _orig_buffer = ctx.orig_buffer
+        _orig_roi = ctx.orig_roi
+        params_initial = ctx.params_initial
+        success = True
+
+        with SuppressOutput():
+            page_dims = sheet_models.get_page_dims_model(
+                corners, rough_dims, params,
+                model=self.sheet_model, n_modes=self.spline_modes,
+                model_dims=model_dims, focal_length=self.focal_length,
+                support=support_x, support_y=support_y,
+                support_decay=support_decay,
+                grading=self.knot_grading, flip=flat_flip)
+
+        if np.any(page_dims < 0):
+            page_dims = rough_dims
+        # Divergence guard: a runaway fit explodes page_dims (1e6+) and
+        # then overflows the arc-length remap below. Catch it here and
+        # retry the page with the stable bspline model; if we're already
+        # on a spline model, fall back to a safe near-identity instead.
+        if float(np.max(np.abs(page_dims))) > self._PAGE_DIM_SANE:
+            fb = self._fallback_to_bspline(img_buf, _orig_buffer, _orig_roi)
+            if fb is not None:
+                return fb
+            print(f"[PageDewarper] {self.sheet_model} fit diverged "
+                  f"(page_dims={page_dims}); passing through.", flush=True)
+            page_dims = rough_dims
+        if self.sheet_model in sheet_models.SPLINE_MODELS:
+            _, _c, _g = sheet_models.split_extras(
+                params, self.sheet_model, self.spline_modes)
+
+            def _kp_rms(pv):
+                ki = make_keypoint_index(span_counts)
+                pp = sheet_models.project_keypoints_model(
+                    np.asarray(pv, dtype=np.float64).copy(), ki,
+                    model=self.sheet_model, n_modes=self.spline_modes,
+                    model_dims=model_dims,
+                    focal_length=self.focal_length,
+                    grading=self.knot_grading,
+                    flip=flat_flip).reshape(-1, 2)
+                tgt = dstpoints.reshape(-1, 2)
+                return float(np.sqrt(np.mean(
+                    np.sum((tgt - pp) ** 2, axis=1))))
+
+            _flat_note = ""
+            if self.sheet_model == sheet_models.MODEL_FLAT_SPLINE:
+                _flat_note = (f" binding={'left' if flat_flip else 'right'}"
+                              f" g={self.knot_grading:g}"
+                              f" lam={flat_penalty_eff:g}")
+            print(f"[PageDewarper] {self.sheet_model} fit: c="
+                  f"[{', '.join(f'{v:+.4f}' for v in _c)}] "
+                  f"gamma={_g:+.4f} "
+                  f"rms {_kp_rms(params_initial):.5f}->"
+                  f"{_kp_rms(params):.5f}{_flat_note}", flush=True)
+
+        # 5. Remapping — shared arc-length grid (same code path replay
+        # uses, so the live remap and a replayed remap are pixel-identical).
+        zoom = 1.0
+        decimate = self.cfg.REMAP_DECIMATE
+        image_points, grid_shape, target_w, target_h, w_small, h_small = \
+            self._sample_grid(
+                img.shape[0], img.shape[1], params=params,
+                page_dims_w=page_dims[0], page_dims_h=page_dims[1],
+                model_dims=model_dims, decimate=decimate, zoom=zoom,
+                model=self.sheet_model, n_modes=self.spline_modes,
+                focal=self.focal_length, support=support_x,
+                support_y=support_y, support_decay=support_decay,
+                grading=self.knot_grading, flip=flat_flip)
+
+        im_x_dec = image_points[:, 0, 0].reshape(grid_shape).astype(np.float32)
+        im_y_dec = image_points[:, 0, 1].reshape(grid_shape).astype(np.float32)
+
+        im_x = cv2.resize(im_x_dec, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
+        im_y = cv2.resize(im_y_dec, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
+
+        # BW → nearest (preserve crisp text); gray/color → cubic.
+        # White border (not BORDER_REPLICATE) — replicating the dark
+        # book-edge would smear inward and bias the downstream binariser.
+        input_is_bw = img_buf.type == ImageType.BW
+        interp = cv2.INTER_NEAREST if input_is_bw else cv2.INTER_CUBIC
+        border_val = 255 if img.ndim == 2 else (255, 255, 255)
+        remapped = cv2.remap(img, im_x, im_y, interp, None,
+                             cv2.BORDER_CONSTANT, border_val)
+        if input_is_bw:
+            _, remapped = cv2.threshold(remapped, 127, 255, cv2.THRESH_BINARY)
+
+        if self.debug_enabled():
+            self.debug_save(remapped, "3_remapped", img_buf)
+            # Warp mesh: where each output pixel reads from. Subsample im_x/im_y.
+            try:
+                src_vis = img.copy()
+                if src_vis.ndim == 2:
+                    src_vis = cv2.cvtColor(src_vis, cv2.COLOR_GRAY2BGR)
+                th, tw = im_x.shape
+                step_r = max(8, th // 32)
+                step_c = max(8, tw // 32)
+                for r in range(0, th, step_r):
+                    pts = np.stack([im_x[r, ::step_c], im_y[r, ::step_c]],
+                                   axis=-1).astype(np.int32)
+                    cv2.polylines(src_vis, [pts], False, (0, 220, 60), 1, cv2.LINE_AA)
+                for c in range(0, tw, step_c):
+                    pts = np.stack([im_x[::step_r, c], im_y[::step_r, c]],
+                                   axis=-1).astype(np.int32)
+                    cv2.polylines(src_vis, [pts], False, (0, 220, 60), 1, cv2.LINE_AA)
+                self.debug_save(src_vis, "4_grid_source", img_buf)
+
+                # Uniform mesh on rectified output.
+                dst_vis = remapped.copy()
+                if dst_vis.ndim == 2:
+                    dst_vis = cv2.cvtColor(dst_vis, cv2.COLOR_GRAY2BGR)
+                oh, ow = dst_vis.shape[:2]
+                for r in range(0, oh, step_r):
+                    cv2.line(dst_vis, (0, r), (ow - 1, r), (0, 220, 60), 1, cv2.LINE_AA)
+                for c in range(0, ow, step_c):
+                    cv2.line(dst_vis, (c, 0), (c, oh - 1), (0, 220, 60), 1, cv2.LINE_AA)
+                self.debug_save(dst_vis, "5_grid_rectified", img_buf)
+            except Exception as e:
+                print(f"[{self.name}] grid debug failed: {e}")
+
+        # Forward the ROI polygon: rasterise it on the padded source,
+        # remap with the same warp, extract the new contour. The
+        # downstream Binarizer can then mask off non-page area.
+        # ROI is already in padded-buffer coords (shifted at step 0).
+        old_roi = img_buf.meta.get("roi")
+        if old_roi:
+            roi_pts_src = np.array(old_roi, dtype=np.int32).reshape(-1, 1, 2)
+            roi_mask_src = np.zeros(img.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(roi_mask_src, [roi_pts_src], 255)
+            # Remap on the decimated grid (1/decimate² the pixels of a
+            # full-res remap) — a polygon ROI doesn't need sub-pixel
+            # edges; the contour scales back by ×decimate.
+            roi_mask_warp = cv2.remap(
+                roi_mask_src, im_x_dec, im_y_dec,
+                cv2.INTER_NEAREST, None, cv2.BORDER_CONSTANT, 0,
+            )
+            cnts, _ = cv2.findContours(
+                roi_mask_warp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+            )
+            if cnts:
+                biggest = max(cnts, key=cv2.contourArea)
+                scale_x = target_w / float(w_small)
+                scale_y = target_h / float(h_small)
+                roi_full = biggest.reshape(-1, 2).astype(np.float64)
+                roi_full[:, 0] *= scale_x
+                roi_full[:, 1] *= scale_y
+                img_buf.meta["roi"] = roi_full.tolist()
+
+        # OOB stats
+        oh, ow = img.shape[:2]
+        oob = {
+            "x_oob": float(max(0.0, -np.min(im_x), np.max(im_x) - (ow - 1))),
+            "y_oob": float(max(0.0, -np.min(im_y), np.max(im_y) - (oh - 1)))
+        }
+        img_buf.meta["oob"] = oob
+
+        if oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
+            success = False
 
         if not success:
             # Fallback to gray on padded image.
@@ -1477,7 +1580,7 @@ class PageDewarper(AbstractImageProcessor):
             img_buf.meta["success"] = False
             img_buf.meta["status"] = int(Status.ERROR)
             return img_buf
-        
+
         # Preserve original buffer type: BW input → BW output, etc.
         original_type = img_buf.type
         img_buf.buffer = remapped
@@ -1485,7 +1588,7 @@ class PageDewarper(AbstractImageProcessor):
             img_buf.type = original_type if original_type in (ImageType.BW, ImageType.GRAY) else ImageType.GRAY
         else:
             img_buf.type = ImageType.COLOR
-             
+
         img_buf.meta["success"] = success
         if char_h_frac > 0:
             img_buf.meta["char_h_frac"] = char_h_frac
