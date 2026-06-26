@@ -45,12 +45,17 @@ class DewarpBatcher(Batcher):
 
     def __init__(self, *, model: str = "cylindrical", n_modes: int = 0,
                  twist: bool = True, cubic_cost: float = 0.0, huber: float = 0.0,
-                 knot_grading: float = 1.0, iters: int = 500):
+                 knot_grading: float = 1.0, iters: int = 1500,
+                 grad_tol: float = 1e-3):
         # Baked (compile-constant) config — identical for every page of a run.
         self.cfg = dict(model=model, n_modes=int(n_modes), twist=bool(twist),
                         cubic_cost=float(cubic_cost), huber=float(huber),
                         knot_grading=float(knot_grading))
+        # `iters` is the MAX cap; the batched solve stops early per page once
+        # its gradient norm drops below `grad_tol` (convergence). Capping high +
+        # stopping early gives ~scipy quality without always paying the cap.
         self.iters = int(iters)
+        self.grad_tol = float(grad_tol)
 
     # ── helpers ──────────────────────────────────────────────────────
     def _apply_baked(self):
@@ -121,7 +126,8 @@ class DewarpBatcher(Batcher):
             flats.append(self._flat(pl))
             metas.append((rns, rnp))
 
-        iters = self.iters
+        maxit = self.iters
+        tol = self.grad_tol
 
         def solve_dev(x0, dst, ki, mask, dims, flat):
             def fun(p):
@@ -130,13 +136,23 @@ class DewarpBatcher(Batcher):
             st = opt.init(x0)
             vg = optax.value_and_grad_from_state(fun)
 
-            def body(carry, _):
-                p, s = carry
+            # Per-page convergence: iterate until the gradient norm is below tol
+            # or the cap. Under vmap this runs to the batch's slowest page;
+            # already-converged pages keep iterating but with ~zero gradient, so
+            # their params don't drift (optax update ≈ no-op).
+            def cond(carry):
+                _, _, it, gnorm = carry
+                return (it < maxit) & (gnorm > tol)
+
+            def body(carry):
+                p, s, it, _ = carry
                 v, g = vg(p, state=s)
                 upd, s = opt.update(g, s, p, value=v, grad=g, value_fn=fun)
-                return (optax.apply_updates(p, upd), s), None
+                p = optax.apply_updates(p, upd)
+                return (p, s, it + 1, jnp.linalg.norm(g))
 
-            (p, _), _ = lax.scan(body, (x0, st), None, length=iters)
+            p, _, _, _ = lax.while_loop(
+                cond, body, (x0, st, jnp.int32(0), jnp.asarray(jnp.inf)))
             return p
 
         batched = jax.jit(jax.vmap(solve_dev))
