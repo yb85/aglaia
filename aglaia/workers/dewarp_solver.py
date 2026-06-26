@@ -60,12 +60,32 @@ class DewarpSolver:
         return self._engine.pending
 
 
-def dewarp_solver_loop(request_q, result_qs: dict, batcher_cfg: dict,
+def dewarp_solver_loop(request_q, result_qs: dict, element,
                        stop_event, log_q=None, idle_sleep: float = 0.004) -> None:
     """Spawn-process entry: pump `request_q` → `DewarpSolver` → per-worker
     `result_qs`. Exits once `stop_event` is set AND all pending work is flushed
-    (so no parked worker is left waiting on a result)."""
+    (so no parked worker is left waiting on a result).
+
+    `element` is the batchable pipeline step (a SimpleChainElement). The batcher
+    config is resolved HERE (in the GPU-owner process) by instantiating the
+    processor and calling make_batcher — so the heavy JAX import stays out of
+    the GUI/parent process."""
     try:
+        from aglaia.processors import registry as _reg
+        proc = _reg.processor_classes()[element.processor_name](element.options)
+        # Reproduce the worker's solve environment: PageDewarper.process()
+        # stamps its whole AttrConfig (focal_length, shear_cost, OPT_MAX_ITER=
+        # 2000, …) into page_dewarp's global cfg, which the objective + L-BFGS-B
+        # read. Without the same stamp here the solver would optimise against
+        # page_dewarp's DEFAULTS (focal 1.2, maxiter 600000) → a different fit.
+        try:
+            from page_dewarp.options import cfg as _lib_cfg
+            for _k in proc.cfg.__struct_fields__:
+                setattr(_lib_cfg, _k, getattr(proc.cfg, _k))
+        except Exception:
+            pass
+        batcher = proc.make_batcher()
+        batcher_cfg = {**batcher.cfg, "iters": batcher.iters}
         solver = DewarpSolver(batcher_cfg)
     except Exception as e:                       # pragma: no cover
         if log_q is not None:
