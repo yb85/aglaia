@@ -33,6 +33,7 @@ os.environ.setdefault("JAX_SKIP_CUDA_CONSTRAINTS_CHECK", "1")
 
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
+from aglaia.processors.batching import BatchableTrait, BatchItem
 from aglaia.processors import utils
 from aglaia.Status import Status
 
@@ -452,9 +453,10 @@ class _DewarpCtx:
     params_initial: Any = None
 
 
-class PageDewarper(AbstractImageProcessor):
+class PageDewarper(AbstractImageProcessor, BatchableTrait):
     name: str = "PageDewarper"
     SUMMARY = "Cubic-sheet dewarp via page-dewarp + JAX."
+    batcher_key = "dewarp"
     REPLAY_TRAIT = ReplayTrait.COORDINATE  # nonlinear sheet remap
     OPTION_CLASS = DewarpOption
     PROVIDES_META = {
@@ -1092,6 +1094,60 @@ class PageDewarper(AbstractImageProcessor):
 
         ctx.params_initial = params_initial
         return self._finish_dewarp(img_buf, params, ctx)
+
+    # ── BatchableTrait: split the SOLVE out so the chain can batch it on the
+    # GPU (see aglaia/processors/batching.py + dewarp_batcher.py). to_request ==
+    # the build half, apply_result == the finish half; in between, the chain
+    # (or a test) runs the optimiser via the DewarpBatcher. The inline process()
+    # above is unchanged — this is a parallel entry for the batched path.
+    def make_batcher(self):
+        from aglaia.processors.dewarp_batcher import DewarpBatcher
+        return DewarpBatcher(model=self.sheet_model, n_modes=self.spline_modes,
+                             twist=self.twist, cubic_cost=self.cubic_cost,
+                             huber=self.huber_delta,
+                             knot_grading=self.knot_grading)
+
+    def to_request(self, img_buf: ImageBuffer):
+        """Build the dewarp problem and return a BatchItem, or None when this
+        page isn't batchable (non-JAX backend, a build short-circuit, or over
+        the largest bucket) — the caller then solves it inline. The build
+        context is stashed on the buffer for apply_result to finish from."""
+        # Only the padded-JAX path has a batched solver; Powell/MLX solve inline.
+        if self.backend != "jax":
+            return None
+        ctx, early_buf = self._build_dewarp_problem(img_buf)
+        if early_buf is not None:
+            # Passthrough / degenerate page: nothing to optimise. Stash the
+            # finished buffer so apply_result can hand it straight back.
+            img_buf.meta["_dewarp_early"] = early_buf
+            return None
+        from aglaia.processors import sheet_models
+        if ctx.n_extra:
+            flat_w = tuple(
+                float(w) for w in ctx.flat_penalty_eff
+                * sheet_models.flat_outer_weights(self.spline_modes,
+                                                  self.knot_grading))
+        else:
+            flat_w = ()
+        payload = {
+            "dstpoints": ctx.dstpoints,
+            "keypoint_index": make_keypoint_index(ctx.span_counts),
+            "params": ctx.params,
+            "model_dims": ctx.model_dims,
+            "flat_flip": ctx.flat_flip,
+            "flat_weights": flat_w,
+        }
+        bucket = self.make_batcher().bucket_key_for(payload)
+        if bucket is None:
+            return None                      # over the largest bucket → inline
+        img_buf.meta["_dewarp_ctx"] = ctx     # local resume state (never sent)
+        return BatchItem(bucket_key=bucket, payload=payload)
+
+    def apply_result(self, img_buf: ImageBuffer, result):
+        """Finish the dewarp from the solved param vector (the remap half),
+        returning the output ImageBuffer exactly as inline process() would."""
+        ctx = img_buf.meta.pop("_dewarp_ctx")
+        return self._finish_dewarp(img_buf, np.asarray(result), ctx)
 
     def _build_dewarp_problem(self, img_buf: ImageBuffer):
         """Build the dewarp optimisation problem: padding, page mask, text
