@@ -97,6 +97,11 @@ cuda = [
     # CUDA 12 wheels for JAX — speeds up PageDewarper optimisation on NVIDIA GPUs.
     # Install via: uv sync --extra cuda
     "jax[cuda12]>=0.9.0",
+    # On-device (vmap-batchable) L-BFGS for GPU-batched page dewarp. A GPU-only
+    # win — a single small problem loses to CPU, so batching is the lever (see
+    # aglaia/processors/dewarp_batcher.py + #28). Pure Python on JAX; the batched
+    # solver imports it lazily and the CPU per-page path never needs it.
+    "optax>=0.2.0",
 ]
 jbig2 = [
     # Native JBIG2 encoder for PDF export. Build the wheel locally with
