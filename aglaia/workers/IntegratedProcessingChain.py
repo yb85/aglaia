@@ -314,7 +314,10 @@ class IntegratedProcessingChain:
                         target=IntegratedProcessingChain._worker_loop,
                         args=(self.elements, self.input_queue,
                               self.routed_queue, self.log_queue, self.db_path,
-                              self._inflight, self.replay_enabled),
+                              self._inflight, self.replay_enabled,
+                              getattr(self, "_batch_request_q", None),
+                              getattr(self, "_batch_result_qs", {}).get(p.name),
+                              p.name, getattr(self, "_batch_min_queue", 0)),
                         name=p.name,
                         daemon=True,
                     )
@@ -345,17 +348,8 @@ class IntegratedProcessingChain:
                         except Exception:
                             pass
 
-    def _reenqueue_inflight(self, worker_name: str) -> None:
-        """Push the killed worker's in-flight item back so no scan is lost.
-        The in-flight entry is a small DB reference (node_id + start_idx);
-        the consuming worker re-decodes the image from the project DB.
-        Caps retries to break infinite kill/retry on a chronically over-budget scan."""
-        try:
-            entry = self._inflight.pop(worker_name, None)
-        except Exception:
-            entry = None
-        if entry is None:
-            return
+    def _reenqueue_one(self, entry, worker_name: str) -> None:
+        """Re-inject one pickled in-flight ref onto the routed queue (retry-capped)."""
         try:
             import pickle as _pickle
             ref = _pickle.loads(entry)
@@ -391,6 +385,33 @@ class IntegratedProcessingChain:
             if self.log_queue is not None:
                 self.log_queue.put(("log_warning",
                     f"reenqueue: put() failed: {e}"))
+
+    def _reenqueue_inflight(self, worker_name: str) -> None:
+        """Push the killed worker's in-flight item — AND any pipelines it had
+        parked on the batched-dewarp solver (keys ``worker::p<rid>``) — back so
+        no scan is lost. Each entry is a small DB ref (node_id + start_idx); the
+        consuming worker re-decodes from the project DB. Retry-capped."""
+        try:
+            entry = self._inflight.pop(worker_name, None)
+        except Exception:
+            entry = None
+        if entry is not None:
+            self._reenqueue_one(entry, worker_name)
+        # Parked-dewarp recovery: re-enqueue from the pre-dewarp node so a fresh
+        # worker re-runs (and re-batches) the dewarp the dead one was waiting on.
+        prefix = f"{worker_name}::p"
+        try:
+            keys = [k for k in list(self._inflight.keys())
+                    if isinstance(k, str) and k.startswith(prefix)]
+        except Exception:
+            keys = []
+        for k in keys:
+            try:
+                e = self._inflight.pop(k, None)
+            except Exception:
+                e = None
+            if e is not None:
+                self._reenqueue_one(e, worker_name)
 
     def stop(self):
         self.running = False
@@ -840,6 +861,34 @@ class IntegratedProcessingChain:
                 return True
             return False
 
+        def _park_register(parked) -> None:
+            """Record a parked pipeline in `inflight` (keyed worker::p<rid>) so
+            the watchdog re-enqueues it from the pre-dewarp node if this worker
+            is SIGKILLed before the result comes back."""
+            if inflight is None or worker_id is None:
+                return
+            b = parked.buf
+            if b.parent_node_id is None:
+                return
+            try:
+                inflight[f"{worker_id}::p{parked.request_id}"] = _pickle.dumps({
+                    "node_id": int(b.parent_node_id),
+                    "start_idx": int(parked.resume_idx),
+                    "branch_path": b.branch_path or "",
+                    "scan_id": b.scan_id,
+                    "parent_stem": b.parent_stem,
+                }, protocol=_pickle.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+
+        def _park_unregister(rid) -> None:
+            if inflight is None or worker_id is None:
+                return
+            try:
+                inflight.pop(f"{worker_id}::p{rid}", None)
+            except Exception:
+                pass
+
         def run_pipeline(buf: ImageBuffer, start_idx: int, precomputed=None):
             current = buf
             # Per-page processor disable: the layout's skip set, keyed
@@ -1169,6 +1218,7 @@ class IntegratedProcessingChain:
                 parked = _parked.pop(rid, None)
                 if parked is None:
                     continue
+                _park_unregister(rid)            # leaving the parked state
                 proc = processors[parked.resume_idx]
                 try:
                     out = proc.apply_result(parked.buf, params)
@@ -1183,6 +1233,7 @@ class IntegratedProcessingChain:
                 r = run_pipeline(out, parked.resume_idx, precomputed=out)
                 if isinstance(r, _ParkedDewarp):
                     _parked[r.request_id] = r
+                    _park_register(r)
                 else:
                     done += 1
             return done
@@ -1269,6 +1320,7 @@ class IntegratedProcessingChain:
                     _parked_now = isinstance(_ret, _ParkedDewarp)
                     if _parked_now:
                         _parked[_ret.request_id] = _ret
+                        _park_register(_ret)
                     if inflight is not None:
                         try:
                             inflight.pop(_worker_name, None)
