@@ -166,6 +166,14 @@ class IntegratedProcessingChain:
         self._batch_result_qs = {f"Worker-Integrated-{i}": self._mgr.Queue()
                                  for i in range(self.num_workers)}
         self._batch_stop = multiprocessing.Event()
+        # Park only above this backlog depth (below it, inline solve keeps small
+        # / interactive jobs fast). Importing DewarpBatcher here is cheap — it
+        # defers JAX to its solve methods.
+        try:
+            from aglaia.processors.dewarp_batcher import DewarpBatcher
+            self._batch_min_queue = int(DewarpBatcher.min_queue)
+        except Exception:
+            self._batch_min_queue = 0
         if self.log_queue is not None:
             self.log_queue.put(("log_info",
                 f"batched dewarp ENABLED for {self._batch_element.processor_name} "
@@ -190,7 +198,8 @@ class IntegratedProcessingChain:
                 args=(self.elements, self.input_queue, self.routed_queue,
                       self.log_queue, self.db_path, self._inflight,
                       self.replay_enabled, self._batch_request_q,
-                      self._batch_result_qs.get(w_name), w_name),
+                      self._batch_result_qs.get(w_name), w_name,
+                      getattr(self, "_batch_min_queue", 0)),
                 name=w_name,
                 daemon=True,
             )
@@ -584,7 +593,8 @@ class IntegratedProcessingChain:
                      replay_enabled: bool = True,
                      batch_request_q=None,
                      batch_result_q=None,
-                     worker_id=None):
+                     worker_id=None,
+                     batch_min_queue: int = 0):
         # Lazy imports inside worker (spawn-safe)
         import os as _os
         import pickle as _pickle
@@ -805,6 +815,31 @@ class IntegratedProcessingChain:
 
         _batch_submit = _batch_submit if batch_request_q is not None else None
 
+        # Activation: only batch (park) when there's a backlog deep enough to
+        # fill batches — below it, the solver round-trip + fill latency isn't
+        # worth it, so solve inline (keeps a single capture / tiny book fast).
+        # Hysteresis: once a burst arms it, stay armed for this work burst
+        # (cleared when the worker next goes idle). qsize() is unavailable on
+        # some platforms → treat as "no backlog" (mac uses the MLX dewarp, which
+        # isn't batchable anyway). min_queue 0 == always-on.
+        _batch_armed = [False]
+
+        def _batch_should_park() -> bool:
+            if batch_min_queue <= 0:
+                return True
+            if _batch_armed[0]:
+                return True
+            depth = 0
+            for q in (input_queue, routed_queue):
+                try:
+                    depth += q.qsize()
+                except Exception:
+                    pass
+            if depth > batch_min_queue:
+                _batch_armed[0] = True
+                return True
+            return False
+
         def run_pipeline(buf: ImageBuffer, start_idx: int, precomputed=None):
             current = buf
             # Per-page processor disable: the layout's skip set, keyed
@@ -878,7 +913,8 @@ class IntegratedProcessingChain:
                 # Park: ship a BatchableTrait step's solve to the GPU solver and
                 # suspend — the worker keeps going on other items meanwhile.
                 elif (_batch_submit is not None
-                      and isinstance(processor, BatchableTrait)):
+                      and isinstance(processor, BatchableTrait)
+                      and _batch_should_park()):
                     item = processor.to_request(current)
                     if item is not None:
                         rid = _batch_submit(item)
@@ -1178,6 +1214,7 @@ class IntegratedProcessingChain:
                             # silent — extra log traffic perturbs the headless
                             # grace-drain's queue-silence exit detection.
                             _dirty_since_idle = False
+                            _batch_armed[0] = False   # burst over → re-evaluate
                             _release_idle_memory()
                             _idle_at = time.time()
                             _recycle_armed = True
