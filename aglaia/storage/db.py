@@ -35,10 +35,36 @@ PRAGMAS = [
     "PRAGMA temp_store = MEMORY;",
     "PRAGMA cache_size = -64000;",
     "PRAGMA mmap_size = 268435456;",
-    # Workers retry briefly on contention; ≤4 workers stay under SQLite's
-    # single-writer ceiling.
-    "PRAGMA busy_timeout = 5000;",
+    # Workers retry on contention. journal_mode=DELETE recreates+unlinks the
+    # rollback journal per write; on Windows those file syscalls (plus AV
+    # scanning the -journal) make each write much slower, so a burst of
+    # contended writes can serialize past a short timeout → "database is
+    # locked". 20s gives ample headroom (the GUI read path uses its own tiny
+    # timeout + async fallback, so this never stalls the event loop).
+    "PRAGMA busy_timeout = 20000;",
 ]
+
+
+def execute_write(conn: sqlite3.Connection, sql: str, params: Iterable = (),
+                  *, attempts: int = 6):
+    """Run a write statement, retrying on a transient "database is locked".
+
+    busy_timeout already retries lock *acquisition*, but on Windows a write
+    can still surface SQLITE_BUSY when the journal file is momentarily held
+    (AV / another connection unlinking it). A short bounded backoff on top of
+    the PRAGMA timeout makes the hot insert path robust under contention
+    without abandoning the single-file (DELETE-mode) design. Returns the
+    cursor."""
+    import time
+    delay = 0.05
+    for i in range(attempts):
+        try:
+            return conn.execute(sql, tuple(params))
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or i == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 1.0)
 
 
 def open_db(path: str | Path) -> sqlite3.Connection:

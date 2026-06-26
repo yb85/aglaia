@@ -13,6 +13,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
+from aglaia.storage.db import execute_write
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -270,7 +272,8 @@ class ScanRepo:
         from MAX + 1.0 — `reorder` then assigns the mean of neighbours when
         the user drags a card, so siblings never need a rewrite.
         """
-        cur = self.conn.execute(
+        cur = execute_write(
+            self.conn,
             "INSERT INTO scans (idx, source, source_ref, transform, capture_dpi, "
             "calibration_id, pipeline_version_id, created_at, page_order) "
             "VALUES ((SELECT COALESCE(MAX(idx), 0) + 1 FROM scans), "
