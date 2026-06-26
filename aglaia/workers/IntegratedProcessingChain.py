@@ -35,7 +35,22 @@ from typing import Dict, List, Optional, Type
 
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, ReplayTrait
+from aglaia.processors.batching import BatchableTrait
 from aglaia.workers.chain_abstraction import SimpleChainElement
+
+
+class _ParkedDewarp:
+    """A pipeline suspended at a BatchableTrait step: its SOLVE was shipped to
+    the GPU solver process. run_pipeline returns one of these instead of
+    finishing; the worker keeps it (with the buffer + build context) until the
+    solved params come back, then resumes via apply_result. Heavy state stays
+    here — only the small payload crossed to the solver."""
+    __slots__ = ("buf", "resume_idx", "request_id")
+
+    def __init__(self, buf, resume_idx, request_id):
+        self.buf = buf
+        self.resume_idx = resume_idx
+        self.request_id = request_id
 
 # Auto-discovered registry — adding a processor only needs its file in `aglaia/processors/`.
 from aglaia.processors import registry as _proc_registry
@@ -125,6 +140,37 @@ class IntegratedProcessingChain:
 
         self._build_chain()
 
+    def _setup_batching(self):
+        """Opt-in (AGLAIA_DEWARP_BATCH) GPU-batched solve for the first
+        BatchableTrait step in the pipeline. Creates the request queue, a
+        per-worker result queue, and a stop event; the solver process itself is
+        spawned in start(). No-op (default path unchanged) when off or when no
+        step is batchable."""
+        self._batch_element = None
+        self._batch_request_q = None
+        self._batch_result_qs = {}
+        self._batch_stop = None
+        self._batch_proc = None
+        import os as _os
+        if not _os.environ.get("AGLAIA_DEWARP_BATCH"):
+            return
+        registry = processor_registry()
+        for el in self.elements:
+            cls = registry.get(el.processor_name)
+            if cls is not None and issubclass(cls, BatchableTrait):
+                self._batch_element = el
+                break
+        if self._batch_element is None:
+            return
+        self._batch_request_q = self._mgr.Queue()
+        self._batch_result_qs = {f"Worker-Integrated-{i}": self._mgr.Queue()
+                                 for i in range(self.num_workers)}
+        self._batch_stop = multiprocessing.Event()
+        if self.log_queue is not None:
+            self.log_queue.put(("log_info",
+                f"batched dewarp ENABLED for {self._batch_element.processor_name} "
+                f"(GPU solver process)"))
+
     def _build_chain(self):
         # Bounded input queue — put() blocks naturally where qsize() is N/A.
         try:
@@ -136,19 +182,33 @@ class IntegratedProcessingChain:
         # sibling's get_nowait() forever. Manager.Queue lives in the manager
         # process — worker death only drops the RPC connection.
         self.routed_queue = self._mgr.Queue()
+        self._setup_batching()
         for w_idx in range(self.num_workers):
+            w_name = f"Worker-Integrated-{w_idx}"
             p = multiprocessing.Process(
                 target=IntegratedProcessingChain._worker_loop,
                 args=(self.elements, self.input_queue, self.routed_queue,
                       self.log_queue, self.db_path, self._inflight,
-                      self.replay_enabled),
-                name=f"Worker-Integrated-{w_idx}",
+                      self.replay_enabled, self._batch_request_q,
+                      self._batch_result_qs.get(w_name), w_name),
+                name=w_name,
                 daemon=True,
             )
             self.workers.append(p)
 
     def start(self):
         self.running = True
+        # GPU-owner solver process (opt-in batched dewarp) — start before the
+        # workers so it's draining requests as soon as they park.
+        if getattr(self, "_batch_request_q", None) is not None:
+            from aglaia.workers.dewarp_solver import dewarp_solver_loop
+            self._batch_proc = multiprocessing.Process(
+                target=dewarp_solver_loop,
+                args=(self._batch_request_q, self._batch_result_qs,
+                      self._batch_element, self._batch_stop, self.log_queue),
+                name="Dewarp-Solver", daemon=True,
+            )
+            self._batch_proc.start()
         for p in self.workers:
             p.start()
         if self.log_queue is not None:
@@ -340,6 +400,24 @@ class IntegratedProcessingChain:
             pass
         self._reap_workers()
 
+    def _reap_solver(self) -> None:
+        """Stop the batched-dewarp solver process: signal flush-and-exit, then
+        escalate SIGTERM → SIGKILL like the workers. No-op when batching is off."""
+        proc = getattr(self, "_batch_proc", None)
+        if proc is None:
+            return
+        try:
+            if self._batch_stop is not None:
+                self._batch_stop.set()
+            proc.join(timeout=3.0)
+            if proc.is_alive():
+                proc.terminate(); proc.join(timeout=2.0)
+            if proc.is_alive():
+                proc.kill(); proc.join(timeout=2.0)
+        except Exception:
+            pass
+        self._batch_proc = None
+
     def _reap_workers(self, term_wait: float = 2.0) -> None:
         """Terminate every worker and GUARANTEE it's gone. A worker wedged in
         a native call (a JAX/XLA hang, or a `vmmap` shell-out on a stuck pid)
@@ -382,6 +460,8 @@ class IntegratedProcessingChain:
             if p.is_alive() and self.log_queue is not None:
                 self.log_queue.put(("log_warning",
                     f"worker {p.name} (pid={p.pid}) survived SIGKILL join"))
+        # Workers are gone (no more parking/submitting) → stop the solver.
+        self._reap_solver()
 
     def hard_stop(self) -> int:
         """Cancel all in-flight work: stop watchdog, terminate workers,
@@ -501,7 +581,10 @@ class IntegratedProcessingChain:
                      log_queue: multiprocessing.Queue,
                      db_path: str,
                      inflight=None,
-                     replay_enabled: bool = True):
+                     replay_enabled: bool = True,
+                     batch_request_q=None,
+                     batch_result_q=None,
+                     worker_id=None):
         # Lazy imports inside worker (spawn-safe)
         import os as _os
         import pickle as _pickle
@@ -708,7 +791,21 @@ class IntegratedProcessingChain:
             )
             return node_id, image_id
 
-        def run_pipeline(buf: ImageBuffer, start_idx: int):
+        # ── batched-dewarp plumbing (opt-in) ─────────────────────────────
+        # When the chain spawned a solver process, ship batchable solves to it
+        # and keep the suspended pipelines here until the params come back.
+        _parked: dict = {}            # request_id -> _ParkedDewarp
+        _req_seq = [0]
+
+        def _batch_submit(item):
+            _req_seq[0] += 1
+            rid = _req_seq[0]
+            batch_request_q.put((worker_id, rid, item.bucket_key, item.payload))
+            return rid
+
+        _batch_submit = _batch_submit if batch_request_q is not None else None
+
+        def run_pipeline(buf: ImageBuffer, start_idx: int, precomputed=None):
             current = buf
             # Per-page processor disable: the layout's skip set, keyed
             # (branch_path, step_idx). A disabled step is bypassed with a
@@ -772,15 +869,43 @@ class IntegratedProcessingChain:
                 except Exception:
                     in_h, in_w = 0, 0
                 in_dpi = float(getattr(current, "dpi", 0) or 0)
-                # No per-call timeout: parent watchdog SIGKILLs over-budget
-                # workers instead (a per-call thread leak hits ~500 MB per hang).
-                try:
-                    result = processor.run(current)
-                except Exception as e:
-                    if log_queue is not None:
-                        log_queue.put(("error",
-                            f"[{current.filestem}] {config.processor_name}: {e}\n{traceback.format_exc()}"))
-                    return
+                # ── batched GPU dewarp (opt-in, AGLAIA_DEWARP_BATCH) ──────────
+                # Resume: a parked step's SOLVE was done off-process; splice the
+                # solved output back in (apply_result already ran in the worker).
+                if precomputed is not None and i == start_idx:
+                    result = precomputed
+                    precomputed = None
+                # Park: ship a BatchableTrait step's solve to the GPU solver and
+                # suspend — the worker keeps going on other items meanwhile.
+                elif (_batch_submit is not None
+                      and isinstance(processor, BatchableTrait)):
+                    item = processor.to_request(current)
+                    if item is not None:
+                        rid = _batch_submit(item)
+                        return _ParkedDewarp(current, i, rid)
+                    # to_request declined: a finished passthrough (use it) or
+                    # over-cap / non-jax (fall through to the inline solve).
+                    early = (current.meta or {}).pop("_dewarp_early", None)
+                    if early is not None:
+                        result = early
+                    else:
+                        try:
+                            result = processor.run(current)
+                        except Exception as e:
+                            if log_queue is not None:
+                                log_queue.put(("error",
+                                    f"[{current.filestem}] {config.processor_name}: {e}\n{traceback.format_exc()}"))
+                            return
+                else:
+                    # No per-call timeout: parent watchdog SIGKILLs over-budget
+                    # workers instead (a per-call thread leak hits ~500 MB per hang).
+                    try:
+                        result = processor.run(current)
+                    except Exception as e:
+                        if log_queue is not None:
+                            log_queue.put(("error",
+                                f"[{current.filestem}] {config.processor_name}: {e}\n{traceback.format_exc()}"))
+                        return
                 elapsed_ms = (time.time() - start_t) * 1000.0
 
                 if result is None:
@@ -994,19 +1119,59 @@ class IntegratedProcessingChain:
                         log_queue.put(("log_warning",
                             f"[{current.filestem}] replay failed: {e}"))
 
+        def _drain_results() -> int:
+            """Resume any parked pipelines whose solved params have arrived.
+            Returns how many finished (for the scan counter)."""
+            if batch_result_q is None or not _parked:
+                return 0
+            done = 0
+            while True:
+                try:
+                    rid, params = batch_result_q.get_nowait()
+                except queue.Empty:
+                    break
+                parked = _parked.pop(rid, None)
+                if parked is None:
+                    continue
+                proc = processors[parked.resume_idx]
+                try:
+                    out = proc.apply_result(parked.buf, params)
+                except Exception as e:
+                    if log_queue is not None:
+                        log_queue.put(("error",
+                            f"[{parked.buf.filestem}] dewarp apply_result: "
+                            f"{e}\n{traceback.format_exc()}"))
+                    continue
+                # Resume at the dewarp step with the solved output spliced in;
+                # may park again at a later batchable step (none today).
+                r = run_pipeline(out, parked.resume_idx, precomputed=out)
+                if isinstance(r, _ParkedDewarp):
+                    _parked[r.request_id] = r
+                else:
+                    done += 1
+            return done
+
         # Drain routed (branch) queue first; clearing children before pulling
         # another raw input keeps memory bounded.
         while True:
             try:
+                # Resume any parked dewarps whose params arrived (cheap no-op
+                # when batching is off / nothing parked).
+                _scans_processed += _drain_results()
                 item = None
                 try:
                     item = routed_queue.get_nowait()
                 except queue.Empty:
                     pass
                 if item is None:
+                    # Poll faster while pipelines are parked so results resume
+                    # promptly; otherwise the normal half-second idle wait.
+                    _wait = 0.05 if _parked else 0.5
                     try:
-                        item = input_queue.get(timeout=0.5)
+                        item = input_queue.get(timeout=_wait)
                     except queue.Empty:
+                        if _parked:
+                            continue        # work outstanding — keep draining
                         if _dirty_since_idle:
                             # First idle tick after a work burst: cheap release
                             # now, then arm the deferred full recycle. Stay
@@ -1063,7 +1228,10 @@ class IntegratedProcessingChain:
                             }, protocol=_pickle.HIGHEST_PROTOCOL)
                         except Exception:
                             pass
-                    run_pipeline(buf_to_process, start_node_idx)
+                    _ret = run_pipeline(buf_to_process, start_node_idx)
+                    _parked_now = isinstance(_ret, _ParkedDewarp)
+                    if _parked_now:
+                        _parked[_ret.request_id] = _ret
                     if inflight is not None:
                         try:
                             inflight.pop(_worker_name, None)
@@ -1076,7 +1244,9 @@ class IntegratedProcessingChain:
                     _gc.collect()
                     # Top-level + routed children both count: a worker draining
                     # only routed items would otherwise underestimate pressure.
-                    _scans_processed += 1
+                    # A parked pipeline counts later, when _drain_results finishes it.
+                    if not _parked_now:
+                        _scans_processed += 1
                     _dirty_since_idle = True
                     maybe_log_mem(tag=f"after scan")
                     if _memray is not None and _scans_processed >= _memray_target:
