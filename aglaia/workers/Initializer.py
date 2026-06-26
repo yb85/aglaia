@@ -283,7 +283,7 @@ DEFAULT_CONFIG = {
 
 # Default CLI arguments
 DEFAULT_ARGS = {
-    "workers": 4,
+    "workers": 0,   # 0 = auto (resolved from CPU budget; see aglaia.worker_count)
     "max_pages": 2,
     "make_pdf": False,
     "camera_id": 0,
@@ -357,7 +357,7 @@ def initialize(mode="capture"):
         parser.add_argument("--pdf-workers", type=int, default=None, help="Number of concurrent PDF extractors (default: CPU count)")
 
     # Common Processing Arguments
-    parser.add_argument("--workers", type=int, default=current_args["workers"], help="Number of workers for the processing chain")
+    parser.add_argument("--workers", type=int, default=current_args["workers"], help="Number of workers for the processing chain. 0 = auto (sized to the CPU).")
     parser.add_argument("--max-pages", type=int, default=current_args["max_pages"], help="Max layouts per page (merging small ones). 0=Infinity. Default 2.")
     parser.add_argument("--make-pdf", action="store_true", default=current_args["make_pdf"], help="Create a PDF from the extracted layouts")
     parser.add_argument("--debug", action="store_true", default=current_args["debug"], help="Save debug images for analysis")

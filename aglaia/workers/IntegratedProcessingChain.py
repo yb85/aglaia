@@ -90,7 +90,10 @@ class IntegratedProcessingChain:
                  queue_factory=multiprocessing.Queue, paths: Optional[dict] = None,
                  replay_enabled: bool = True):
         self.elements = elements
-        self.num_workers = max(1, int(num_workers))
+        # 0 / non-positive → auto (CPU-budget derived). Track the mode so the
+        # GUI sidebar can render "NN workers (auto|manual)".
+        from aglaia.worker_count import resolve_workers
+        self.num_workers, self.workers_auto = resolve_workers(num_workers)
         self.log_queue = log_queue
         self.db_path = str(db_path)
         self.queue_factory = queue_factory
@@ -151,9 +154,11 @@ class IntegratedProcessingChain:
         if self.log_queue is not None:
             import os as _os
             pid_list = ", ".join(f"{p.name}={p.pid}" for p in self.workers)
+            mode = "auto" if self.workers_auto else "manual"
             self.log_queue.put(("log_info",
                 f"IntegratedProcessingChain (DB-backed) started with "
-                f"{len(self.workers)} workers. gui_pid={_os.getpid()} | {pid_list}"))
+                f"{len(self.workers)} workers ({mode}). "
+                f"gui_pid={_os.getpid()} | {pid_list}"))
 
         # Respawn workers that self-exited on RSS budget. Without it the
         # chain silently bleeds capacity over long sessions.

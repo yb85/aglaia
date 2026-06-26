@@ -345,19 +345,28 @@ class SettingsTab(QWidget):
         # Workers slider: 1..10 with live read-out. The hard floor is 1
         # (no parallelism); the 10-worker ceiling matches the practical
         # limit before SQLite contention + RSS pressure dominates gains.
-        cur_workers = int(self._values.get(cfg.KEY_WORKERS, 4))
-        cur_workers = max(1, min(10, cur_workers))
+        # Slider position 0 = AUTO (CPU-budget derived); 1..N = manual count.
+        from aglaia.worker_count import auto_workers
+        self._auto_workers = auto_workers()
+        cur_workers = int(self._values.get(cfg.KEY_WORKERS, 0))
+        cur_workers = max(0, min(16, cur_workers))
         workers_row = QHBoxLayout()
         self.workers_slider = QSlider(Qt.Orientation.Horizontal)
-        self.workers_slider.setRange(1, 10)
+        self.workers_slider.setRange(0, 16)
         self.workers_slider.setValue(cur_workers)
         self.workers_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.workers_slider.setTickInterval(1)
-        self.workers_value = QLabel(str(cur_workers))
-        self.workers_value.setMinimumWidth(28)
+
+        def _fmt_workers(v: int) -> str:
+            return self.tr("auto ({n})").format(n=self._auto_workers) if v == 0 else str(v)
+
+        self.workers_value = QLabel(_fmt_workers(cur_workers))
+        self.workers_value.setMinimumWidth(56)
         self.workers_slider.valueChanged.connect(
-            lambda v: self.workers_value.setText(str(v))
+            lambda v: self.workers_value.setText(_fmt_workers(v))
         )
+        self.workers_slider.setToolTip(self.tr(
+            "Pipeline worker processes. 0 = auto (sized to the CPU)."))
         workers_row.addWidget(self.workers_slider, 1)
         workers_row.addWidget(self.workers_value)
         workers_wrap = QWidget()
