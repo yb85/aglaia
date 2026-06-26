@@ -4422,6 +4422,12 @@ class MainWindow(QMainWindow):
                 self.ocr_frame.lang_input.set_tags(langs)
             if engine:
                 self.ocr_frame.engine_group.set_current_key(engine)
+        # Worker count change shows in the sidebar immediately; it takes
+        # effect on the next chain start (reprocess), like other chain config.
+        try:
+            self._pipeline_tab._backends.refresh_workers()
+        except Exception:
+            pass
 
     def _prompt_theme_restart(self) -> None:
         """Tell the user the new theme will fully apply on next startup."""

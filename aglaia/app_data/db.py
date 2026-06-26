@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import math
-import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,10 +33,10 @@ from . import config_db_path, default_documents_dir
 
 
 def _default_workers() -> int:
-    """min(ceil(ncores/2), 4) — leaves headroom for the GUI process and
-    avoids saturating laptops where SMT inflates the reported core count."""
-    cores = os.cpu_count() or 4
-    return min(math.ceil(cores / 2), 4)
+    """0 = AUTO — the chain derives a CPU-budget-aware count at start time
+    (aglaia.worker_count.auto_workers). A manual override is stored only when
+    the user moves the Settings slider off the 'auto' position."""
+    return 0
 
 # Bundled defaults — shipped INSIDE the package (aglaia/config/), both in
 # source and in the PyInstaller bundle. `parents[1]` is the `aglaia/` package

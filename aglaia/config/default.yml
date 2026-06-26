@@ -5,7 +5,7 @@ args:
   make_pdf: false
   camera_id: 0
   voice_control: true
-  workers: 6
+  workers: 0   # 0 = auto (CPU-budget derived; see aglaia.worker_count)
   pdf_workers: 4
 
 # you can override default settings such as keybindings and voice commands here

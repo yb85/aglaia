@@ -87,14 +87,42 @@ class _BackendsView(QWidget):
         sep.setFixedHeight(1)
         outer.addWidget(sep)
 
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
         title = QLabel(self.tr("Backends"))
         title.setObjectName("FieldLabel")
-        outer.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        # "NN workers (auto|manual)" — resolved pipeline worker count + mode.
+        self._workers_lbl = QLabel("")
+        self._workers_lbl.setStyleSheet(
+            f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+        self._workers_lbl.setToolTip(self.tr(
+            "Pipeline worker processes. Set in Settings (0 = auto)."))
+        title_row.addWidget(self._workers_lbl)
+        outer.addLayout(title_row)
 
         self._rows = QVBoxLayout()
         self._rows.setSpacing(2)
         outer.addLayout(self._rows)
+        self.refresh_workers()
         self.refresh()
+
+    def refresh_workers(self) -> None:
+        """Read the configured worker count and render 'NN workers (auto|manual)'."""
+        from aglaia.worker_count import resolve_workers
+        raw = None
+        try:
+            from aglaia.app_data import db as _cfg
+            with _cfg.session() as conn:
+                _cfg.bootstrap(conn)
+                raw = _cfg.get(conn, _cfg.KEY_WORKERS, 0)
+        except Exception:
+            raw = 0
+        count, is_auto = resolve_workers(raw)
+        mode = self.tr("auto") if is_auto else self.tr("manual")
+        self._workers_lbl.setText(self.tr("{n} workers ({mode})").format(
+            n=count, mode=mode))
 
     def refresh(self) -> None:
         while self._rows.count():

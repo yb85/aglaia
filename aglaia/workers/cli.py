@@ -131,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="One .agl project file, OR one or more PDFs, OR one or more image files.",
     )
     p.add_argument("--workers", type=int, default=None,
-                   help="Number of pipeline worker processes (overrides config).")
+                   help="Number of pipeline worker processes (overrides config). 0 = auto (sized to the CPU).")
     p.add_argument("-p", "--pipeline", type=str, default=None,
                    help="Pipeline name (e.g. 'book_curved_x2') or path to a .yaml file.")
     p.add_argument(
@@ -464,17 +464,19 @@ def default_project_name(cfg: CliConfig) -> str:
 
 
 def effective_workers(cli_value: Optional[int]) -> int:
-    """CLI flag wins; otherwise use the preference stored in the app-
-    data config DB; otherwise the bootstrap default."""
+    """CLI flag wins; otherwise the preference stored in the app-data config
+    DB; otherwise auto. 0 (or any non-positive value) is PRESERVED and means
+    AUTO — the chain derives the count from the CPU budget at start time (see
+    aglaia.worker_count.resolve_workers)."""
     if cli_value is not None:
-        return max(1, int(cli_value))
+        return int(cli_value)
     try:
         from aglaia.app_data import db as app_db
         with app_db.session() as conn:
             app_db.bootstrap(conn)
-            return max(1, int(app_db.get(conn, app_db.KEY_WORKERS, 4)))
+            return int(app_db.get(conn, app_db.KEY_WORKERS, 0))
     except Exception:
-        return 4
+        return 0
 
 
 def default_parent_dir(cfg: CliConfig) -> Path:
