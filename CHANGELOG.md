@@ -4,6 +4,20 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0a6] — 2026-06-26
+
+Sixth alpha. Same as a5 plus a Windows build fix (a5's Windows installer
+failed its release gate, so no a5 `.exe` shipped).
+
+### Fixed
+
+- **Windows "database is locked" under concurrent writers.** `journal_mode=DELETE`
+  recreates the rollback journal per write; on Windows the file syscalls (plus
+  AV scanning) make contended writes serialize past the old 5 s `busy_timeout`.
+  Bumped to 20 s and added a bounded backoff-retry on the hot insert path (keeps
+  the single-file `.agl` design — no WAL sidecars). Unblocks the Windows
+  installer/ZIP.
+
 ## [0.1.0a5] — 2026-06-26
 
 Fifth alpha. GPU Linux AppImage, faster dewarp, auto worker count.
@@ -128,5 +142,6 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0a6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a5
 [0.1.0a1]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a1
