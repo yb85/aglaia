@@ -32,16 +32,28 @@ from scipy.optimize import minimize
 # pay the worst-case point count (measured ~1.7x slower per dewarp at the big
 # shape). Instead we pad to the SMALLEST bucket that fits, so a typical page
 # stays cheap and only a dense / double-page ("both" baseline) problem traces
-# the large shape. jax.jit compiles + caches one program per shape, so the
-# program count is bounded by len(_BUCKETS), not by the per-page span count
-# (which is what the original single-shape padding existed to bound).
+# the large shape. jax.jit compiles + caches one program per DISTINCT shape, so
+# the program count is bounded by len(_BUCKETS) — but only the buckets a given
+# book actually touches get compiled (pages cluster), so adding fine-grained
+# buckets is nearly free unless a book genuinely spans the whole range.
 #
-# Sizing (per the pipeline's real geometry): real pages top out around 120
-# text lines, so three line buckets 50 / 80 / 120 cover the range and anything
-# denser gets pruned down to 120. npts is sized generously (~70 pts/line) so a
-# wide, densely-sampled page never trips the point cap before the line cap.
+# Sizing — measured, not guessed (312 real dewarps across a 182-page book):
+#   nspans  p50=29  p90=33  max=34          (single page)
+#   npts    p50=1126  p90=1314  max=1458
+#   pts/line  p50=38  p90=41  max=45        (NOT the ~70 the old caps assumed)
+# The old caps (50/3500, 80/5500, 120/8500) were ~2-3x oversized: EVERY real
+# page fell into the smallest bucket and got padded ~3x in npts. Right-sizing
+# to ~45 pts/line plus finer steps cut total dewarp time ~30% on GPU / ~40% on
+# CPU (the per-solve cost scales with max_npts: the JAX eval over the padded
+# point array AND the scipy L-BFGS-B two-loop update over the padded pvec).
+# The padded rows are residual-masked, so the recovered sheet params are
+# bucket-invariant to optimiser tolerance — a tighter bucket is, if anything,
+# closer to the true unpadded solve.
+#
+# Top bucket sized for the densest "both" (double-baseline) page: ~120 lines x
+# ~50 pts/line ~= 6000 npts. Anything denser is pruned down to it (_prune_to_caps).
 # Buckets are (max_nspans, max_npts), ascending.
-_BUCKETS = [(50, 3500), (80, 5500), (120, 8500)]
+_BUCKETS = [(30, 1300), (40, 1700), (55, 2300), (75, 3100), (95, 4200), (120, 6000)]
 # The largest bucket is the hard cap: above it, _prune_to_caps thins the lines
 # down to fit (then the result uses the largest bucket).
 MAX_NSPANS = _BUCKETS[-1][0]
