@@ -986,6 +986,13 @@ class IntegratedProcessingChain:
                 if precomputed is not None and i == start_idx:
                     result = precomputed
                     precomputed = None
+                    # `current` IS the freshly-solved dewarp output (apply_result
+                    # already stamped replay_kind/params on it), so the snapshot
+                    # above read THIS step's own stamp. Clear it, or the
+                    # "drop inherited stamp" guard below would strip the dewarp's
+                    # replay_params → replay then skips the dewarp. (Bug: replay
+                    # broke whenever batching was active.)
+                    old_replay_kind = None
                 # Park: ship a BatchableTrait step's solve to the GPU solver and
                 # suspend — the worker keeps going on other items meanwhile.
                 elif (_batch_submit is not None
