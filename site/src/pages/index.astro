@@ -397,7 +397,7 @@ aglaia ~/scans/my-book              # launch</code></pre>
               </tr>
               <tr>
                 <th>Price</th>
-                <td>≥&nbsp;$420</td>
+                <td>≥&nbsp;$330</td>
                 <td class="cmp__hot"><a href={KOFI} target="_blank" rel="noopener">Free</a>, voluntary donation</td>
               </tr>
               <tr>
@@ -1054,8 +1054,12 @@ aglaia ~/scans/my-book              # launch</code></pre>
       @media (max-width: 760px) { .continuity { grid-template-columns: 1fr; gap: 28px; } }
 
       /* ── speed / compute ──────────────────────────────────────── */
+      /* Top-align: the copy is short and the chart tall, so centering left the
+         heading floating above the bars. A small chart offset lines the first
+         bar up with the heading. */
       .speed { max-width: 980px; margin: 0 auto; padding: 64px 20px;
-            display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
+            display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: start; }
+      .speed__chart { padding-top: 8px; }
       .speed__copy h2 { font-size: clamp(1.8rem, 4.5vw, 3rem); font-weight: 800; }
       .speed__copy h2 span { color: #8fd0ff;
             text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
