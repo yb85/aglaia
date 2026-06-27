@@ -50,10 +50,14 @@ class DewarpSolver:
 
     def drain(self, *, final: bool = False, now_ms=None) -> list:
         """Flush ready groups (or everything when `final`). Returns
-        `[(worker_id, request_id, params), …]`."""
+        `[(worker_id, request_id, params, solve_ms), …]`, where solve_ms is the
+        flush's wall time amortised per page (for the step-timing display)."""
+        import time
+        t0 = time.perf_counter()
         ready = (self._engine.flush_all(now_ms=now_ms) if final
                  else self._engine.poll(now_ms=now_ms))
-        return [(wid, rid, result) for (wid, rid), result in ready]
+        per_ms = (time.perf_counter() - t0) * 1000.0 / max(len(ready), 1)
+        return [(wid, rid, result, per_ms) for (wid, rid), result in ready]
 
     @property
     def pending(self) -> int:
@@ -93,10 +97,10 @@ def dewarp_solver_loop(request_q, result_qs: dict, element,
         return
 
     def _route(results):
-        for wid, rid, result in results:
+        for wid, rid, result, solve_ms in results:
             rq = result_qs.get(wid)
             if rq is not None:
-                rq.put((rid, result))
+                rq.put((rid, result, solve_ms))
 
     while True:
         stopping = stop_event.is_set()

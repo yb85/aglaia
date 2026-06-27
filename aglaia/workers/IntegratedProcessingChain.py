@@ -916,7 +916,8 @@ class IntegratedProcessingChain:
             except Exception:
                 pass
 
-        def run_pipeline(buf: ImageBuffer, start_idx: int, precomputed=None):
+        def run_pipeline(buf: ImageBuffer, start_idx: int, precomputed=None,
+                         precomputed_elapsed_ms=None):
             current = buf
             # Per-page processor disable: the layout's skip set, keyed
             # (branch_path, step_idx). A disabled step is bypassed with a
@@ -1025,7 +1026,14 @@ class IntegratedProcessingChain:
                             log_queue.put(("error",
                                 f"[{current.filestem}] {config.processor_name}: {e}\n{traceback.format_exc()}"))
                         return
-                elapsed_ms = (time.time() - start_t) * 1000.0
+                # On a batched resume the real work was build+solve+remap across
+                # processes; the caller passes the summed time so the step shows
+                # its true cost instead of ~0 for the instant splice.
+                if precomputed_elapsed_ms is not None and i == start_idx:
+                    elapsed_ms = float(precomputed_elapsed_ms)
+                    precomputed_elapsed_ms = None
+                else:
+                    elapsed_ms = (time.time() - start_t) * 1000.0
 
                 if result is None:
                     if log_queue is not None:
@@ -1246,7 +1254,7 @@ class IntegratedProcessingChain:
             done = 0
             while True:
                 try:
-                    rid, params = batch_result_q.get_nowait()
+                    rid, params, solve_ms = batch_result_q.get_nowait()
                 except queue.Empty:
                     break
                 parked = _parked.pop(rid, None)
@@ -1254,17 +1262,23 @@ class IntegratedProcessingChain:
                     continue
                 _park_unregister(rid)            # leaving the parked state
                 proc = processors[parked.resume_idx]
+                # Step timing = build (CPU) + solve (GPU, amortised) + remap (CPU).
+                build_ms = float((parked.buf.meta or {}).pop("_dewarp_build_ms", 0.0))
                 try:
+                    _t0 = time.time()
                     out = proc.apply_result(parked.buf, params)
+                    finish_ms = (time.time() - _t0) * 1000.0
                 except Exception as e:
                     if log_queue is not None:
                         log_queue.put(("error",
                             f"[{parked.buf.filestem}] dewarp apply_result: "
                             f"{e}\n{traceback.format_exc()}"))
                     continue
+                total_ms = build_ms + float(solve_ms) + finish_ms
                 # Resume at the dewarp step with the solved output spliced in;
                 # may park again at a later batchable step (none today).
-                r = run_pipeline(out, parked.resume_idx, precomputed=out)
+                r = run_pipeline(out, parked.resume_idx, precomputed=out,
+                                 precomputed_elapsed_ms=total_ms)
                 if isinstance(r, _ParkedDewarp):
                     _parked[r.request_id] = r
                     _park_register(r)
