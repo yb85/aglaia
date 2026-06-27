@@ -4,6 +4,28 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc1] — 2026-06-27
+
+First release candidate. Linux and Windows builds confirmed working; macOS
+re-verified (full test suite + end-to-end headless chain on the MLX backend).
+
+### Fixed
+
+- **cv2 collision broke installs non-deterministically.** `page-dewarp` pulls a
+  bare `opencv-python` (GUI build) while Aglaïa pins `opencv-python-headless`;
+  both write the same `cv2/` directory. With `numpy<2.1` holding headless at
+  4.11 and the GUI build floating to 4.13, a reinstall could leave a
+  half-written `cv2/` (`cv2 has no attribute 'imdecode'`), and the bundle picked
+  up whichever payload won. Pinned `opencv-python` to 4.11.0.86 so the shared
+  `cv2/` is always one consistent payload.
+- **Stuck per-card spinner.** A card could stay dimmed + spinning after the chain
+  went idle and the progress bar read 100% (a dropped `branch_ready`). Idle
+  reconciliation now sweeps any card still marked processing, even once the bar
+  has finished.
+- **Lost page-visibility toggle.** A hide/show whose `(scan, label)` matched no
+  branch row was silently dropped and reappeared on reload; it now logs a loud
+  `[visibility]` warning so the offending label can be diagnosed.
+
 ## [0.1.0a6] — 2026-06-26
 
 Sixth alpha. Same as a5 plus a Windows build fix (a5's Windows installer
@@ -142,6 +164,7 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0rc1]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc1
 [0.1.0a6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a5
 [0.1.0a1]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a1
