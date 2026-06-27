@@ -140,19 +140,46 @@ class IntegratedProcessingChain:
 
         self._build_chain()
 
+    @staticmethod
+    def _batched_dewarp_enabled() -> bool:
+        """Resolve whether to GPU-batch the dewarp: env override
+        (AGLAIA_DEWARP_BATCH=0/1) wins; else the KEY_DEWARP_BATCH setting
+        ("auto"/"on"/"off"); "auto" → on iff a CUDA JAX plugin is installed (the
+        GPU build) — so CPU-only installs stay on the inline path."""
+        import os as _os
+        env = _os.environ.get("AGLAIA_DEWARP_BATCH")
+        if env is not None:
+            return env.strip().lower() not in ("0", "false", "no", "")
+        mode = "auto"
+        try:
+            from aglaia.app_data import db as _cfg
+            with _cfg.session() as conn:
+                _cfg.bootstrap(conn)
+                mode = str(_cfg.get(conn, _cfg.KEY_DEWARP_BATCH, "auto")
+                           or "auto").lower()
+        except Exception:
+            mode = "auto"
+        if mode == "on":
+            return True
+        if mode == "off":
+            return False
+        try:
+            import importlib.util
+            return importlib.util.find_spec("jax_cuda12_plugin") is not None
+        except Exception:
+            return False
+
     def _setup_batching(self):
-        """Opt-in (AGLAIA_DEWARP_BATCH) GPU-batched solve for the first
-        BatchableTrait step in the pipeline. Creates the request queue, a
-        per-worker result queue, and a stop event; the solver process itself is
-        spawned in start(). No-op (default path unchanged) when off or when no
-        step is batchable."""
+        """GPU-batched solve for the first BatchableTrait step (see
+        _batched_dewarp_enabled). Creates the request queue, a per-worker result
+        queue, and a stop event; the solver process is spawned in start().
+        No-op (default path unchanged) when disabled or nothing is batchable."""
         self._batch_element = None
         self._batch_request_q = None
         self._batch_result_qs = {}
         self._batch_stop = None
         self._batch_proc = None
-        import os as _os
-        if not _os.environ.get("AGLAIA_DEWARP_BATCH"):
+        if not self._batched_dewarp_enabled():
             return
         registry = processor_registry()
         for el in self.elements:
@@ -166,6 +193,14 @@ class IntegratedProcessingChain:
         self._batch_result_qs = {f"Worker-Integrated-{i}": self._mgr.Queue()
                                  for i in range(self.num_workers)}
         self._batch_stop = multiprocessing.Event()
+        # Park only above this backlog depth (below it, inline solve keeps small
+        # / interactive jobs fast). Importing DewarpBatcher here is cheap — it
+        # defers JAX to its solve methods.
+        try:
+            from aglaia.processors.dewarp_batcher import DewarpBatcher
+            self._batch_min_queue = int(DewarpBatcher.min_queue)
+        except Exception:
+            self._batch_min_queue = 0
         if self.log_queue is not None:
             self.log_queue.put(("log_info",
                 f"batched dewarp ENABLED for {self._batch_element.processor_name} "
@@ -190,7 +225,8 @@ class IntegratedProcessingChain:
                 args=(self.elements, self.input_queue, self.routed_queue,
                       self.log_queue, self.db_path, self._inflight,
                       self.replay_enabled, self._batch_request_q,
-                      self._batch_result_qs.get(w_name), w_name),
+                      self._batch_result_qs.get(w_name), w_name,
+                      getattr(self, "_batch_min_queue", 0)),
                 name=w_name,
                 daemon=True,
             )
@@ -305,7 +341,10 @@ class IntegratedProcessingChain:
                         target=IntegratedProcessingChain._worker_loop,
                         args=(self.elements, self.input_queue,
                               self.routed_queue, self.log_queue, self.db_path,
-                              self._inflight, self.replay_enabled),
+                              self._inflight, self.replay_enabled,
+                              getattr(self, "_batch_request_q", None),
+                              getattr(self, "_batch_result_qs", {}).get(p.name),
+                              p.name, getattr(self, "_batch_min_queue", 0)),
                         name=p.name,
                         daemon=True,
                     )
@@ -336,17 +375,8 @@ class IntegratedProcessingChain:
                         except Exception:
                             pass
 
-    def _reenqueue_inflight(self, worker_name: str) -> None:
-        """Push the killed worker's in-flight item back so no scan is lost.
-        The in-flight entry is a small DB reference (node_id + start_idx);
-        the consuming worker re-decodes the image from the project DB.
-        Caps retries to break infinite kill/retry on a chronically over-budget scan."""
-        try:
-            entry = self._inflight.pop(worker_name, None)
-        except Exception:
-            entry = None
-        if entry is None:
-            return
+    def _reenqueue_one(self, entry, worker_name: str) -> None:
+        """Re-inject one pickled in-flight ref onto the routed queue (retry-capped)."""
         try:
             import pickle as _pickle
             ref = _pickle.loads(entry)
@@ -382,6 +412,33 @@ class IntegratedProcessingChain:
             if self.log_queue is not None:
                 self.log_queue.put(("log_warning",
                     f"reenqueue: put() failed: {e}"))
+
+    def _reenqueue_inflight(self, worker_name: str) -> None:
+        """Push the killed worker's in-flight item — AND any pipelines it had
+        parked on the batched-dewarp solver (keys ``worker::p<rid>``) — back so
+        no scan is lost. Each entry is a small DB ref (node_id + start_idx); the
+        consuming worker re-decodes from the project DB. Retry-capped."""
+        try:
+            entry = self._inflight.pop(worker_name, None)
+        except Exception:
+            entry = None
+        if entry is not None:
+            self._reenqueue_one(entry, worker_name)
+        # Parked-dewarp recovery: re-enqueue from the pre-dewarp node so a fresh
+        # worker re-runs (and re-batches) the dewarp the dead one was waiting on.
+        prefix = f"{worker_name}::p"
+        try:
+            keys = [k for k in list(self._inflight.keys())
+                    if isinstance(k, str) and k.startswith(prefix)]
+        except Exception:
+            keys = []
+        for k in keys:
+            try:
+                e = self._inflight.pop(k, None)
+            except Exception:
+                e = None
+            if e is not None:
+                self._reenqueue_one(e, worker_name)
 
     def stop(self):
         self.running = False
@@ -584,7 +641,8 @@ class IntegratedProcessingChain:
                      replay_enabled: bool = True,
                      batch_request_q=None,
                      batch_result_q=None,
-                     worker_id=None):
+                     worker_id=None,
+                     batch_min_queue: int = 0):
         # Lazy imports inside worker (spawn-safe)
         import os as _os
         import pickle as _pickle
@@ -805,6 +863,59 @@ class IntegratedProcessingChain:
 
         _batch_submit = _batch_submit if batch_request_q is not None else None
 
+        # Activation: only batch (park) when there's a backlog deep enough to
+        # fill batches — below it, the solver round-trip + fill latency isn't
+        # worth it, so solve inline (keeps a single capture / tiny book fast).
+        # Hysteresis: once a burst arms it, stay armed for this work burst
+        # (cleared when the worker next goes idle). qsize() is unavailable on
+        # some platforms → treat as "no backlog" (mac uses the MLX dewarp, which
+        # isn't batchable anyway). min_queue 0 == always-on.
+        _batch_armed = [False]
+
+        def _batch_should_park() -> bool:
+            if batch_min_queue <= 0:
+                return True
+            if _batch_armed[0]:
+                return True
+            depth = 0
+            for q in (input_queue, routed_queue):
+                try:
+                    depth += q.qsize()
+                except Exception:
+                    pass
+            if depth > batch_min_queue:
+                _batch_armed[0] = True
+                return True
+            return False
+
+        def _park_register(parked) -> None:
+            """Record a parked pipeline in `inflight` (keyed worker::p<rid>) so
+            the watchdog re-enqueues it from the pre-dewarp node if this worker
+            is SIGKILLed before the result comes back."""
+            if inflight is None or worker_id is None:
+                return
+            b = parked.buf
+            if b.parent_node_id is None:
+                return
+            try:
+                inflight[f"{worker_id}::p{parked.request_id}"] = _pickle.dumps({
+                    "node_id": int(b.parent_node_id),
+                    "start_idx": int(parked.resume_idx),
+                    "branch_path": b.branch_path or "",
+                    "scan_id": b.scan_id,
+                    "parent_stem": b.parent_stem,
+                }, protocol=_pickle.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+
+        def _park_unregister(rid) -> None:
+            if inflight is None or worker_id is None:
+                return
+            try:
+                inflight.pop(f"{worker_id}::p{rid}", None)
+            except Exception:
+                pass
+
         def run_pipeline(buf: ImageBuffer, start_idx: int, precomputed=None):
             current = buf
             # Per-page processor disable: the layout's skip set, keyed
@@ -878,7 +989,8 @@ class IntegratedProcessingChain:
                 # Park: ship a BatchableTrait step's solve to the GPU solver and
                 # suspend — the worker keeps going on other items meanwhile.
                 elif (_batch_submit is not None
-                      and isinstance(processor, BatchableTrait)):
+                      and isinstance(processor, BatchableTrait)
+                      and _batch_should_park()):
                     item = processor.to_request(current)
                     if item is not None:
                         rid = _batch_submit(item)
@@ -1133,6 +1245,7 @@ class IntegratedProcessingChain:
                 parked = _parked.pop(rid, None)
                 if parked is None:
                     continue
+                _park_unregister(rid)            # leaving the parked state
                 proc = processors[parked.resume_idx]
                 try:
                     out = proc.apply_result(parked.buf, params)
@@ -1147,6 +1260,7 @@ class IntegratedProcessingChain:
                 r = run_pipeline(out, parked.resume_idx, precomputed=out)
                 if isinstance(r, _ParkedDewarp):
                     _parked[r.request_id] = r
+                    _park_register(r)
                 else:
                     done += 1
             return done
@@ -1178,6 +1292,7 @@ class IntegratedProcessingChain:
                             # silent — extra log traffic perturbs the headless
                             # grace-drain's queue-silence exit detection.
                             _dirty_since_idle = False
+                            _batch_armed[0] = False   # burst over → re-evaluate
                             _release_idle_memory()
                             _idle_at = time.time()
                             _recycle_armed = True
@@ -1232,6 +1347,7 @@ class IntegratedProcessingChain:
                     _parked_now = isinstance(_ret, _ParkedDewarp)
                     if _parked_now:
                         _parked[_ret.request_id] = _ret
+                        _park_register(_ret)
                     if inflight is not None:
                         try:
                             inflight.pop(_worker_name, None)

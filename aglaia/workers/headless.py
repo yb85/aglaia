@@ -351,6 +351,13 @@ class _LogDrainer(threading.Thread):
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._done_scans: set = set()
+        # Count distinct branches (scan_id, branch_path) and stamp the last
+        # branch_ready — a scan emits one per layout (A/B…), so scan-id dedup
+        # alone declared a multi-layout scan "done" after its FIRST branch and
+        # tore the run down with siblings still in flight. Completion now waits
+        # for every scan to start finishing AND for branch activity to go quiet.
+        self._done_branches: set = set()
+        self._last_branch_ts = 0.0
         self.imported = 0
 
     def run(self) -> None:
@@ -384,6 +391,8 @@ class _LogDrainer(threading.Thread):
                 sid = payload.get("scan_id")
                 with self._lock:
                     self._done_scans.add(sid)
+                    self._done_branches.add((sid, payload.get("branch_path") or ""))
+                    self._last_branch_ts = time.monotonic()
                     n = len(self._done_scans)
                 print(f"branch ready: scan={sid} "
                       f"path={payload.get('branch_path') or '-'} "
@@ -400,10 +409,18 @@ class _LogDrainer(threading.Thread):
         with self._lock:
             return len(self._done_scans)
 
-    def wait_for_completion(self, timeout_s: float) -> int:
-        """Block (on the calling thread) until ``total_expected`` distinct
-        scans have completed or ``timeout_s`` elapses. The drainer keeps
-        running after this returns — the caller stops it."""
+    def wait_for_completion(self, timeout_s: float,
+                            quiesce_s: float = 8.0) -> int:
+        """Block until the run settles or ``timeout_s`` elapses.
+
+        Two phases, because a scan's branch count is dynamic (PageDetector
+        emits 1–N layouts) so the total isn't known up front:
+          1. every expected scan has emitted at least one branch (all scans
+             have started finishing), then
+          2. branch activity goes quiet for ``quiesce_s`` (the remaining
+             sibling branches — incl. parked/batched dewarps — and replay
+             settle). Returning on the scan count alone tore multi-layout
+             scans down after their first branch."""
         deadline = time.monotonic() + timeout_s
         while self.done_count() < self._total_expected and \
                 time.monotonic() < deadline:
@@ -412,9 +429,14 @@ class _LogDrainer(threading.Thread):
         if n < self._total_expected:
             print(f"WARN: only {n}/{self._total_expected} scans finished "
                   f"within timeout.", file=sys.stderr)
-        else:
-            # Grace: sibling branches / replay of the last scan settle.
-            time.sleep(2.0)
+            return n
+        # Phase 2: wait for branch activity to go silent (all siblings done).
+        while time.monotonic() < deadline:
+            with self._lock:
+                quiet = time.monotonic() - self._last_branch_ts
+            if quiet >= quiesce_s:
+                break
+            time.sleep(0.2)
         return n
 
     def stop(self) -> None:

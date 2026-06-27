@@ -396,6 +396,20 @@ class SettingsTab(QWidget):
             )
         )
         form.addRow(self.tr("Worker processes:"), workers_wrap)
+        # Batched GPU dewarp: auto (on with an NVIDIA/CUDA build) / on / off.
+        self.dewarp_batch_combo = QComboBox()
+        self._dewarp_batch_modes = ["auto", "on", "off"]
+        self.dewarp_batch_combo.addItems([
+            self.tr("Auto (GPU only)"), self.tr("On"), self.tr("Off")])
+        _cur_db = str(self._values.get(cfg.KEY_DEWARP_BATCH, "auto") or "auto").lower()
+        self.dewarp_batch_combo.setCurrentIndex(
+            self._dewarp_batch_modes.index(_cur_db)
+            if _cur_db in self._dewarp_batch_modes else 0)
+        self.dewarp_batch_combo.setToolTip(self.tr(
+            "Batch the page-dewarp optimisation on the GPU across pages — a big "
+            "speedup for bulk reprocessing on NVIDIA hardware. 'Auto' enables it "
+            "only on a CUDA build."))
+        form.addRow(self.tr("Batched GPU dewarp:"), self.dewarp_batch_combo)
         form.addRow(self.tr("Input DPI:"), self.input_dpi_spin)
         form.addRow(self.tr("Camera ID:"), self.camera_spin)
         form.addRow("", self.voice_check)
@@ -576,6 +590,8 @@ class SettingsTab(QWidget):
                 "stage": stage,
             })
             cfg.set(conn, cfg.KEY_WORKERS, int(self.workers_slider.value()))
+            cfg.set(conn, cfg.KEY_DEWARP_BATCH,
+                    self._dewarp_batch_modes[self.dewarp_batch_combo.currentIndex()])
             cfg.set(conn, cfg.KEY_INPUT_DPI, float(self.input_dpi_spin.value()))
             cfg.set(conn, cfg.KEY_CAMERA_ID, int(self.camera_spin.value()))
             cfg.set(conn, cfg.KEY_VOICE_CONTROL, bool(self.voice_check.isChecked()))
