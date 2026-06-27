@@ -12,6 +12,9 @@ const DOWNLOADS = {
 };
 const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
+// Comparison-table check / cross marks.
+const CHK = '<svg class="ic ic--ok" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="yes"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+const NO  = '<svg class="ic ic--no" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="no"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
 
 // Icons match the app sidebar tabs (lucide): camera, sliders-horizontal,
 // scan-text (all stroke) and export (fill).
@@ -356,6 +359,60 @@ pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
 # Apple Vision OCR needs no extra — it ships with [macos].
 
 aglaia ~/scans/my-book              # launch</code></pre>
+        </div>
+      </section>
+
+      <!-- COMPARISON -->
+      <section class="versus">
+        <h2 class="versus__title reveal">Compared to a commercial scanner <span>with curve removal</span></h2>
+        <div class="versus__wrap reveal">
+          <table class="cmp">
+            <thead>
+              <tr>
+                <th class="cmp__feat"></th>
+                <th>Commercial solution</th>
+                <th class="cmp__hot">Aglaïa</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th>Curve removal</th>
+                <td><Fragment set:html={CHK} /></td>
+                <td class="cmp__hot"><Fragment set:html={CHK} /></td>
+              </tr>
+              <tr>
+                <th>Fully automatic</th>
+                <td><Fragment set:html={NO} /></td>
+                <td class="cmp__hot"><Fragment set:html={CHK} /></td>
+              </tr>
+              <tr>
+                <th>Hardware</th>
+                <td>Specialized rig</td>
+                <td class="cmp__hot">Mobile phone + laptop</td>
+              </tr>
+              <tr>
+                <th>Portability</th>
+                <td><Fragment set:html={NO} /></td>
+                <td class="cmp__hot"><Fragment set:html={CHK} /></td>
+              </tr>
+              <tr>
+                <th>Price</th>
+                <td>≥&nbsp;$420</td>
+                <td class="cmp__hot"><a href={KOFI} target="_blank" rel="noopener">Free</a>, voluntary donation</td>
+              </tr>
+              <tr>
+                <th>Speed</th>
+                <td>40&nbsp;pages/min</td>
+                <td class="cmp__hot">100–200&nbsp;pages/min <small>(with GPU)</small></td>
+              </tr>
+              <tr>
+                <th>Extendable?</th>
+                <td><span class="cmp__inline"><Fragment set:html={NO} /> Closed source / proprietary</span></td>
+                <td class="cmp__hot"><span class="cmp__inline"><Fragment set:html={CHK} /> Sources available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a></span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="versus__foot">* Personal modifications and contributions welcome; competitive redistribution (SaaS, repackaging) prohibited.</p>
         </div>
       </section>
 
@@ -864,6 +921,38 @@ aglaia ~/scans/my-book              # launch</code></pre>
       .code__panel .tok-cmd { color: #7ee0b8; }
       .code__panel .tok-flag { color: #e3b341; }
       .code__panel .tok-str { color: #9ecbff; }
+
+      /* ── comparison table ─────────────────────────────────────── */
+      .versus { max-width: 880px; margin: 0 auto; padding: 64px 20px; }
+      .versus__title { text-align: center; font-size: clamp(1.6rem, 4vw, 2.4rem);
+            font-weight: 800; margin: 0 0 32px; }
+      .versus__title span { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .versus__wrap { overflow-x: auto; }
+      .cmp { width: 100%; border-collapse: collapse; min-width: 560px;
+            color: #cfe0f2; font-size: .98rem; }
+      .cmp th, .cmp td { padding: 14px 18px; text-align: center; vertical-align: middle;
+            border-bottom: 1px solid #1b2735; }
+      .cmp thead th { font-weight: 700; font-size: 1.05rem; padding-bottom: 16px; color: #e8eef5; }
+      .cmp tbody th { text-align: left; font-weight: 600; color: #a6b6c8; white-space: nowrap; }
+      .cmp td { color: #9fb0c2; }
+      /* highlighted Aglaïa column */
+      .cmp__hot { position: relative; }
+      .cmp thead .cmp__hot { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 30px rgba(143,208,255,.30); }
+      .cmp tbody td.cmp__hot { color: #e8eef5; font-weight: 600;
+            background: linear-gradient(180deg, rgba(143,208,255,.06), rgba(143,208,255,.03)); }
+      .cmp tbody tr:first-child td.cmp__hot { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+      .cmp tbody tr:last-child td.cmp__hot { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; border-bottom: 1px solid #2b4763; }
+      .cmp thead th.cmp__hot { border-bottom: 2px solid #3a6ea5; }
+      .cmp__hot a { color: #8fd0ff; text-decoration: underline; text-underline-offset: 2px; }
+      .cmp small { color: #6fa8df; font-size: .8rem; }
+      .cmp .ic { vertical-align: middle; }
+      .ic--ok { color: #34d399; filter: drop-shadow(0 0 6px rgba(52,211,153,.4)); }
+      .ic--no { color: #f43f5e; }
+      .cmp__inline { display: inline-flex; align-items: center; gap: 8px; text-align: left; }
+      .versus__foot { margin: 22px 4px 0; color: #7d8da0; font-size: .78rem; line-height: 1.5; }
+      @media (max-width: 620px) { .cmp th, .cmp td { padding: 11px 12px; } }
 
       .final { padding: clamp(90px,16vh,200px) 20px; display: grid; place-items: center; text-align: center; }
       .final__inner { max-width: 680px; }
