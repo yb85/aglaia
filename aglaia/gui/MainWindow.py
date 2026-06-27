@@ -6,6 +6,7 @@
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
 import os
+import sys
 import time
 import shutil
 import cv2
@@ -2899,18 +2900,22 @@ class MainWindow(QMainWindow):
         self._update_ocr_frame_state()
 
     def _reconcile_progress_if_idle(self):
-        """Snap a stuck progress bar to 100% once the chain has gone idle.
+        """Snap a stuck progress bar to 100% AND clear stuck per-card spinners
+        once the chain has gone idle.
 
         `done`/`total` are independent event counters that can permanently
         desync (a scan completes on disk but its branch_ready never reaches the
-        bar — partial-open, mid-run re-enable, a dropped event). Polling the
-        chain's idle state and requiring a few consecutive idle ticks (so a
-        slow single stage doesn't trip it) lets us reconcile without chasing
-        every off-by-one cause."""
-        bar = getattr(self.status_bar_widget, "progress", None)
+        bar — partial-open, mid-run re-enable, a dropped event). The per-card
+        spinner has the SAME failure: it's cleared only by branch_ready, so a
+        dropped event leaves one card dimmed + spinning forever even after the
+        chain is idle and the bar reads 100% (observed: one stuck card at
+        175/175). Polling the chain's idle state and requiring a few
+        consecutive idle ticks (so a slow single stage doesn't trip it) lets us
+        reconcile both without chasing every off-by-one cause. The card sweep
+        runs even when the bar is already finished — that is exactly the stuck
+        state."""
         cb = self._pipeline_idle_callback
-        if bar is None or cb is None or bar.is_finished():
-            self._progress_idle_ticks = 0
+        if cb is None:
             return
         try:
             idle = bool(cb())
@@ -2920,9 +2925,20 @@ class MainWindow(QMainWindow):
             self._progress_idle_ticks = 0
             return
         self._progress_idle_ticks += 1
-        if self._progress_idle_ticks >= 3:   # ~6 s of sustained idle
+        if self._progress_idle_ticks < 3:   # need ~6 s of sustained idle
+            return
+        self._progress_idle_ticks = 0
+        bar = getattr(self.status_bar_widget, "progress", None)
+        if bar is not None and not bar.is_finished():
             bar.force_complete()
-            self._progress_idle_ticks = 0
+        # Sweep any card left spinning despite an idle chain (dropped
+        # branch_ready). set_processing(False) is idempotent / cheap.
+        for w in self.scan_widgets_by_scan.values():
+            try:
+                if getattr(w, "_is_processing", False):
+                    w.set_processing(False)
+            except Exception:
+                pass
 
     def _on_status_branch_ready(self, payload: dict):
         scan_id = payload.get("scan_id")
@@ -3780,6 +3796,13 @@ class MainWindow(QMainWindow):
                         f"UPDATE branches SET {set_clause} WHERE id IN ({placeholders})",
                         ids,
                     )
+                else:
+                    # No branch row matched (scan, label) → the hide/show is
+                    # silently lost and reappears on reload. Surface it so the
+                    # offending label can be diagnosed instead of vanishing.
+                    print(f"[visibility] WARN: no branch matched scan={scan_id} "
+                          f"label={branch_label!r} — toggle NOT persisted",
+                          file=sys.stderr)
                 conn.commit()
         except Exception:
             return
