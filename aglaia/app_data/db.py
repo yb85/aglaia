@@ -57,6 +57,7 @@ KEY_OCR_DEFAULTS = "ocr_defaults"     # {"engine": str, "languages": [str]}
 KEY_EXPORT_DEFAULTS = "export_defaults"  # {"compression": str, "stage": str|None}
 KEY_THUMB_SIZE = "thumb_size_default"  # int (px max card width)
 KEY_WORKERS = "workers"                # int
+KEY_DEWARP_BATCH = "dewarp_batch"      # "auto" | "on" | "off" — GPU-batched dewarp
 KEY_VOICE_CONTROL = "voice_control"    # bool
 KEY_INPUT_DPI = "input_dpi"            # float
 KEY_CAMERA_ID = "camera_id"            # int
@@ -117,6 +118,9 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
                           "image_format": "jpg"},
     KEY_THUMB_SIZE: 150,
     KEY_WORKERS: _default_workers(),
+    # "auto" = batched GPU dewarp on iff a CUDA JAX plugin is installed (the GPU
+    # build); on CPU-only installs it stays off. "on"/"off" force it.
+    KEY_DEWARP_BATCH: "auto",
     KEY_VOICE_CONTROL: False,
     KEY_INPUT_DPI: 100.0,
     KEY_CAMERA_ID: 0,

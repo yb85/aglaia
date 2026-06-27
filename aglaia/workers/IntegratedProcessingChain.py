@@ -140,19 +140,46 @@ class IntegratedProcessingChain:
 
         self._build_chain()
 
+    @staticmethod
+    def _batched_dewarp_enabled() -> bool:
+        """Resolve whether to GPU-batch the dewarp: env override
+        (AGLAIA_DEWARP_BATCH=0/1) wins; else the KEY_DEWARP_BATCH setting
+        ("auto"/"on"/"off"); "auto" → on iff a CUDA JAX plugin is installed (the
+        GPU build) — so CPU-only installs stay on the inline path."""
+        import os as _os
+        env = _os.environ.get("AGLAIA_DEWARP_BATCH")
+        if env is not None:
+            return env.strip().lower() not in ("0", "false", "no", "")
+        mode = "auto"
+        try:
+            from aglaia.app_data import db as _cfg
+            with _cfg.session() as conn:
+                _cfg.bootstrap(conn)
+                mode = str(_cfg.get(conn, _cfg.KEY_DEWARP_BATCH, "auto")
+                           or "auto").lower()
+        except Exception:
+            mode = "auto"
+        if mode == "on":
+            return True
+        if mode == "off":
+            return False
+        try:
+            import importlib.util
+            return importlib.util.find_spec("jax_cuda12_plugin") is not None
+        except Exception:
+            return False
+
     def _setup_batching(self):
-        """Opt-in (AGLAIA_DEWARP_BATCH) GPU-batched solve for the first
-        BatchableTrait step in the pipeline. Creates the request queue, a
-        per-worker result queue, and a stop event; the solver process itself is
-        spawned in start(). No-op (default path unchanged) when off or when no
-        step is batchable."""
+        """GPU-batched solve for the first BatchableTrait step (see
+        _batched_dewarp_enabled). Creates the request queue, a per-worker result
+        queue, and a stop event; the solver process is spawned in start().
+        No-op (default path unchanged) when disabled or nothing is batchable."""
         self._batch_element = None
         self._batch_request_q = None
         self._batch_result_qs = {}
         self._batch_stop = None
         self._batch_proc = None
-        import os as _os
-        if not _os.environ.get("AGLAIA_DEWARP_BATCH"):
+        if not self._batched_dewarp_enabled():
             return
         registry = processor_registry()
         for el in self.elements:
