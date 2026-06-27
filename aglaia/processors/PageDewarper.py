@@ -1115,7 +1115,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # Only the padded-JAX path has a batched solver; Powell/MLX solve inline.
         if self.backend != "jax":
             return None
+        import time as _t
+        _t0 = _t.perf_counter()
         ctx, early_buf = self._build_dewarp_problem(img_buf)
+        # Build (CPU) is one of the three parts of a batched dewarp's time; the
+        # chain sums build + solve (GPU) + remap (CPU) for the step's timing.
+        img_buf.meta["_dewarp_build_ms"] = (_t.perf_counter() - _t0) * 1000.0
         if early_buf is not None:
             # Passthrough / degenerate page: nothing to optimise. Stash the
             # finished buffer so apply_result can hand it straight back.

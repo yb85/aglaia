@@ -41,7 +41,7 @@ def test_solver_routes_results_by_worker_and_request():
 
     out = solver.drain(final=True, now_ms=0)            # flush everything
     assert solver.pending == 0
-    by_key = {(w, r): res for w, r, res in out}
+    by_key = {(w, r): res for w, r, res, _ in out}
     assert set(by_key) == {("w0", "r0"), ("w1", "r1"), ("w0", "r2")}
     for (w, r), res in by_key.items():
         src = p1 if r == "r1" else p0
@@ -57,4 +57,4 @@ def test_solver_no_flush_until_timeout_or_full():
     assert solver.drain(now_ms=10) == []                # 1 item, 10ms < flush_ms(40)
     assert solver.pending == 1
     out = solver.drain(now_ms=100)                       # past flush_ms → drains
-    assert [(w, r) for w, r, _ in out] == [("w0", "r0")]
+    assert [(w, r) for w, r, _, _ in out] == [("w0", "r0")]
