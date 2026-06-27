@@ -5,9 +5,10 @@ const GITHUB = 'https://github.com/yb85/aglaia';
 // macOS (the most mature build) first; client JS swaps in the visitor's OS.
 const REL = `${GITHUB}/releases/latest/download`;
 const DOWNLOADS = {
-  mac:     { url: `${REL}/Aglaia-macos-arm64.dmg`,       name: 'macOS',   sub: 'Apple Silicon · .dmg · Metal GPU' },
-  windows: { url: `${REL}/Aglaia-windows-x64-setup.exe`, name: 'Windows', sub: 'x64 · installer · CPU' },
-  linux:   { url: `${REL}/Aglaia-x86_64.AppImage`,       name: 'Linux',   sub: 'x86_64 · AppImage · CPU' },
+  mac:        { url: `${REL}/Aglaia-macos-arm64.dmg`,        name: 'macOS',          sub: 'Apple Silicon · .dmg · Metal GPU' },
+  windows:    { url: `${REL}/Aglaia-windows-x64-setup.exe`,  name: 'Windows',        sub: 'x64 · installer · CPU' },
+  linux:      { url: `${REL}/Aglaia-x86_64.AppImage`,        name: 'Linux',          sub: 'x86_64 · AppImage · CPU' },
+  'linux-gpu':{ url: `${REL}/Aglaia-x86_64-cuda.AppImage`,   name: 'Linux (NVIDIA)', sub: 'x86_64 · AppImage · CUDA GPU' },
 };
 const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
@@ -55,7 +56,13 @@ const powers = [
       </a>
       <nav>
         <a href="/docs">Docs</a>
-        <a href={GITHUB}>GitHub</a>
+        <a class="nav-gh" href={GITHUB}>
+          <span>GitHub</span>
+          <span class="nav-gh__stars" data-gh-stars hidden>
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="m12 17.27 6.18 3.73-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+            <span class="nav-gh__n"></span>
+          </span>
+        </a>
         <a class="nav-tip" href={KOFI} target="_blank" rel="noopener" aria-label="Tip the developer">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
           Tip
@@ -89,6 +96,7 @@ const powers = [
                 <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
                 <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
                 <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
+                <a role="menuitem" data-os="linux-gpu" href={DOWNLOADS['linux-gpu'].url}><b>Linux (NVIDIA&nbsp;GPU)</b><span>{DOWNLOADS['linux-gpu'].sub}</span></a>
               </div>
             </div>
             <a class="btn btn--ghost btn--lg btn--stack" href="#install" data-cli>
@@ -96,7 +104,7 @@ const powers = [
               <span class="dl__sub">uv · pip · brew</span>
             </a>
           </div>
-          <p class="cta__note reveal">CUDA GPU acceleration available via <a href="#install">CLI install</a> on Linux / WSL2.</p>
+          <p class="cta__note reveal">Linux NVIDIA users get a ready-to-run CUDA AppImage. On Windows, CUDA acceleration is available only via <a href="#install">CLI install</a> on WSL2.</p>
           <p class="fineprint reveal">macOS · Windows · Linux — free &amp; source-available.</p>
           <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
             <span class="tip__heart" aria-hidden="true">
@@ -208,11 +216,46 @@ const powers = [
         <div class="continuity__copy reveal">
           <h2>Scan anywhere with the <span>continuity camera</span></h2>
           <p>Put your phone on your desk, your book on a chair, <i>et voilà</i> !</p>
-          <p>With a typical capacity of <span>1&nbsp;page / sec</span> and a <span>sub-2&nbsp;seconds latency per scan</span>, you may not turn the pages fast enough to overwhelm Aglaïa.</p>
+          <p>With a typical capacity of <span>more&nbsp;than 1&nbsp;page per second</span> and a <span>sub-2&nbsp;seconds latency per scan</span>, you may not turn the pages fast enough to overwhelm Aglaïa.</p>
         </div>
         <figure class="continuity__demo reveal">
           <img src="/landing/usage.webp" width="760" height="874" loading="lazy" alt="Overhead diagram: a person at a laptop, an iPhone on a stand acting as the camera, pointed at an open book propped on a chair." />
         </figure>
+      </section>
+
+      <!-- SPEED / COMPUTE -->
+      <section class="speed">
+        <div class="speed__copy reveal">
+          <h2>Take full advantage of your <span>computing power</span></h2>
+          <p>Aglaïa uses the latest GPU acceleration where it matters. Automatic
+            batching delivers <span>2.5× speed on NVIDIA GPUs</span>.</p>
+        </div>
+        <div class="speed__chart reveal" data-parallax="0.05">
+          <ul class="bars">
+            <li class="bar">
+              <div class="bar__head">
+                <span class="bar__name">Apple MacBook M4 base (4&nbsp;P-cores) · MLX (JAX/Metal)</span>
+                <span class="bar__val" data-to="1.8">1.8 p/s</span>
+              </div>
+              <div class="bar__track"><span class="bar__fill" style="--w:53%"></span></div>
+            </li>
+            <li class="bar">
+              <div class="bar__head">
+                <span class="bar__name">AMD Ryzen&nbsp;9 7900X · JAX/CPU</span>
+                <span class="bar__val" data-to="1.4">1.4 p/s</span>
+              </div>
+              <div class="bar__track"><span class="bar__fill" style="--w:41%"></span></div>
+            </li>
+            <li class="bar bar--hot">
+              <div class="bar__head">
+                <span class="bar__name">AMD Ryzen&nbsp;9 7900X + NVIDIA RTX&nbsp;3090 · Batched JAX/CUDA</span>
+                <span class="bar__val" data-to="3.4">3.4 p/s</span>
+              </div>
+              <div class="bar__track"><span class="bar__fill" style="--w:100%"></span></div>
+            </li>
+          </ul>
+          <p class="speed__foot">headless mode · 175 scans of a 2-pages/scan book</p>
+        </div>
       </section>
 
       <!-- SMART REPLAY -->
@@ -333,6 +376,7 @@ aglaia ~/scans/my-book              # launch</code></pre>
                 <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
                 <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
                 <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
+                <a role="menuitem" data-os="linux-gpu" href={DOWNLOADS['linux-gpu'].url}><b>Linux (NVIDIA&nbsp;GPU)</b><span>{DOWNLOADS['linux-gpu'].sub}</span></a>
               </div>
             </div>
             <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
@@ -356,9 +400,27 @@ aglaia ~/scans/my-book              # launch</code></pre>
       // Reveal-on-scroll FIRST and independent of anything that can throw,
       // so the page content always appears even if smooth-scroll init fails.
       const revealEls = [...document.querySelectorAll('.reveal')];
+      // Count a [data-to] number up from 0 to its value (the speed bars "pop").
+      const countUp = (el: HTMLElement) => {
+        const to = parseFloat(el.getAttribute('data-to') || '0');
+        if (!to) return;
+        const suffix = (el.textContent || '').replace(/[\d.]/g, '').trim();
+        const t0 = performance.now(), dur = 1100;
+        const tick = (now: number) => {
+          const k = Math.min((now - t0) / dur, 1);
+          const v = (to * (1 - Math.pow(1 - k, 3))).toFixed(1);
+          el.textContent = suffix ? `${v} ${suffix}` : v;
+          if (k < 1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      };
       const io = new IntersectionObserver((entries) => {
         for (const e of entries) {
-          if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+          if (e.isIntersecting) {
+            e.target.classList.add('in');
+            e.target.querySelectorAll<HTMLElement>('[data-to]').forEach(countUp);
+            io.unobserve(e.target);
+          }
         }
       }, { threshold: 0.18 });
       revealEls.forEach((el) => io.observe(el));
@@ -380,8 +442,24 @@ aglaia ~/scans/my-book              # launch</code></pre>
         if (p.includes('linux') && !p.includes('android')) return 'linux';
         return 'mac';   // default to the most mature build
       };
-      const OS_NAME = { mac: 'macOS', windows: 'Windows', linux: 'Linux' };
-      const os = detectOS();
+      const OS_NAME: Record<string, string> = {
+        mac: 'macOS', windows: 'Windows', linux: 'Linux', 'linux-gpu': 'Linux (NVIDIA GPU)' };
+      // Best-effort NVIDIA probe via the WebGL renderer string — so Linux
+      // visitors with an NVIDIA card default to the ready-to-run CUDA AppImage
+      // (others get the universal CPU build; the menu always lists both).
+      const hasNvidiaGpu = (): boolean => {
+        try {
+          const c = document.createElement('canvas');
+          const gl = (c.getContext('webgl') || c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
+          if (!gl) return false;
+          const ext = gl.getExtension('WEBGL_debug_renderer_info');
+          const r = ext ? gl.getParameter((ext as any).UNMASKED_RENDERER_WEBGL)
+                        : gl.getParameter(gl.RENDERER);
+          return /nvidia|geforce|\brtx\b|quadro/i.test(String(r || ''));
+        } catch { return false; }
+      };
+      let os: string = detectOS();
+      if (os === 'linux' && hasNvidiaGpu()) os = 'linux-gpu';
       const menuLink = document.querySelector<HTMLAnchorElement>(`.dl__menu [data-os="${os}"]`);
       if (menuLink) {
         const url = menuLink.getAttribute('href') || '';
@@ -526,6 +604,21 @@ aglaia ~/scans/my-book              # launch</code></pre>
           setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1400);
         } catch { /* clipboard blocked — no-op */ }
       });
+
+      // ── live GitHub star count (best-effort; silent on rate-limit/offline) ─
+      fetch('https://api.github.com/repos/yb85/aglaia')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const n = d && d.stargazers_count;
+          if (typeof n !== 'number') return;
+          const fmt = n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
+          document.querySelectorAll<HTMLElement>('[data-gh-stars]').forEach((el) => {
+            const span = el.querySelector('.nav-gh__n');
+            if (span) span.textContent = fmt;
+            el.removeAttribute('hidden');
+          });
+        })
+        .catch(() => {});
     </script>
 
     <style is:global>
@@ -579,6 +672,13 @@ aglaia ~/scans/my-book              # launch</code></pre>
         color: #f43f5e; font-weight: 600;
         filter: drop-shadow(0 0 6px rgba(244,63,94,.4)); }
       .nav-tip:hover { color: #ff5d77; }
+      .nav-gh { display: inline-flex; align-items: center; gap: 7px; }
+      .nav-gh__stars { display: inline-flex; align-items: center; gap: 3px;
+        padding: 1px 7px; border: 1px solid #233247; border-radius: 999px;
+        font-size: .78rem; font-weight: 600; color: #cfe0f2; line-height: 1.4;
+        background: #0e141d; }
+      .nav-gh__stars svg { color: #ffc857; }
+      .nav-gh:hover .nav-gh__stars { border-color: #2e4a66; }
 
       .btn {
         --bg: linear-gradient(180deg, #5aa9e6, #3d7fc4);
@@ -863,6 +963,45 @@ aglaia ~/scans/my-book              # launch</code></pre>
       .continuity__demo img { width: 100%; height: auto; display: block; border-radius: 14px;
             background: #fff; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
       @media (max-width: 760px) { .continuity { grid-template-columns: 1fr; gap: 28px; } }
+
+      /* ── speed / compute ──────────────────────────────────────── */
+      .speed { max-width: 980px; margin: 0 auto; padding: 64px 20px;
+            display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
+      .speed__copy h2 { font-size: clamp(1.8rem, 4.5vw, 3rem); font-weight: 800; }
+      .speed__copy h2 span { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .speed__copy p { color: #a6b6c8; line-height: 1.6; margin-top: 16px; font-size: 1.05rem; }
+      .speed__copy p span { color: #8fd0ff; font-weight: 600;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
+      .bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+      .bar__head { display: flex; justify-content: space-between; align-items: baseline;
+            gap: 12px; margin-bottom: 7px; }
+      .bar__name { color: #cfe0f2; font-size: .82rem; line-height: 1.35; }
+      .bar__val { color: #a6b6c8; font-weight: 700; font-size: .95rem; font-variant-numeric: tabular-nums;
+            white-space: nowrap; }
+      .bar__track { position: relative; height: 14px; border-radius: 8px;
+            background: #0e141d; border: 1px solid #1b2735; overflow: hidden; }
+      .bar__fill { display: block; height: 100%; width: 0; border-radius: 8px;
+            background: linear-gradient(90deg, #2c4a66, #6fa8df);
+            transition: width 1.15s cubic-bezier(.2,.7,.2,1); }
+      /* grow when the chart scrolls in (reuses the .reveal → .in observer) */
+      .speed__chart.in .bar__fill { width: var(--w); }
+      .speed__chart .bar:nth-child(1) .bar__fill { transition-delay: .05s; }
+      .speed__chart .bar:nth-child(2) .bar__fill { transition-delay: .18s; }
+      .speed__chart .bar:nth-child(3) .bar__fill { transition-delay: .31s; }
+      .bar--hot .bar__name { color: #e8eef5; font-weight: 600; }
+      .bar--hot .bar__val { color: #8fd0ff;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 30px rgba(143,208,255,.30); }
+      .bar--hot .bar__track { border-color: #2b4763; }
+      .bar--hot .bar__fill { background: linear-gradient(90deg, #3a6ea5, #8fd0ff);
+            box-shadow: 0 0 18px rgba(143,208,255,.45), inset 0 0 10px rgba(255,255,255,.15);
+            animation: barPulse 3.2s ease-in-out 1.6s infinite; }
+      @keyframes barPulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.18); } }
+      .speed__foot { margin: 22px 0 0; color: #6fa8df; font-size: .78rem;
+            text-transform: uppercase; letter-spacing: .12em; }
+      @media (prefers-reduced-motion: reduce) {
+            .bar__fill { transition: none; } .bar--hot .bar__fill { animation: none; } }
+      @media (max-width: 760px) { .speed { grid-template-columns: 1fr; gap: 28px; } }
 
       .replay { max-width: 980px; margin: 0 auto; padding: 64px 20px;
             display: grid; grid-template-columns: 1.05fr .95fr; gap: 44px; align-items: center; }
