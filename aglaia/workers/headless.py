@@ -58,12 +58,34 @@ from aglaia.storage.repo import PipelineRepo, ProjectRepo, ScanRepo, OcrRepo
 DEFAULT_TIMEOUT_S = 60 * 60
 
 
+def _warn_workers_ram(raw_workers) -> None:
+    """Print a swap-risk warning when a MANUAL --workers count won't fit in RAM
+    (auto is already RAM-capped). Respects the GUI 'don't warn again' flag."""
+    try:
+        from aglaia.worker_count import resolve_workers, ram_warning
+        count, is_auto = resolve_workers(raw_workers)
+        if is_auto:
+            return
+        msg = ram_warning(count)
+        if not msg:
+            return
+        from aglaia.app_data import db as cfg
+        with cfg.session() as conn:
+            if bool(cfg.get(conn, cfg.KEY_WORKERS_RAM_WARN_DISMISSED, False)):
+                return
+        print(f"WARN: {msg}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
 def _build_initialize_argv(cfg: CliConfig, project_dir: Path) -> list[str]:
     """Synthesise sys.argv for `initialize()`. The Initializer parser
     expects a positional workspace dir + recognises a handful of
     capture-mode flags."""
     argv = ["aglaia", str(project_dir)]
-    argv += ["--workers", str(effective_workers(cfg.workers))]
+    _w = effective_workers(cfg.workers)
+    argv += ["--workers", str(_w)]
+    _warn_workers_ram(_w)
     if cfg.input_dpi is not None:
         argv += ["--input-dpi", str(cfg.input_dpi)]
     if cfg.camera_id is not None:
