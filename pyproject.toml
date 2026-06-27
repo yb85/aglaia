@@ -190,4 +190,13 @@ torch = { index = "pytorch-cpu" }
 override-dependencies = [
     "transformers>=5.5,<5.10",
     "huggingface-hub>=1.5",
+    # page-dewarp requires a bare `opencv-python` (GUI build) while aglaia
+    # pins `opencv-python-headless`. Both distributions install into the SAME
+    # `cv2/` directory, so when they resolve to DIFFERENT versions (headless
+    # held at 4.11 by our numpy<2.1 pin; full floated to 4.13) a reinstall
+    # leaves a half-written, broken `cv2/` (missing __init__/.so → `cv2 has
+    # no attribute 'imdecode'`), and PyInstaller bundles whichever payload
+    # wins non-deterministically. Pinning the GUI build to the same version
+    # as headless keeps the shared `cv2/` a single consistent payload.
+    "opencv-python==4.11.0.86",
 ]
