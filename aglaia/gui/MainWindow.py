@@ -298,8 +298,13 @@ class MainWindow(QMainWindow):
                 self._session_theme = str(
                     _cfg.get(_conn, _cfg.KEY_THEME, "system") or "system"
                 )
+                # Worker count is fixed when the chain starts (from args, set at
+                # startup), so a change needs a restart — stash the value the
+                # session is running with to detect that.
+                self._session_workers = _cfg.get(_conn, _cfg.KEY_WORKERS, 0)
         except Exception:
             self._session_theme = "system"
+            self._session_workers = 0
         self.processing_queue = processing_queue
         self.log_queue = log_queue
         self.slug_name = slug_name
@@ -4409,10 +4414,17 @@ class MainWindow(QMainWindow):
             theme = str(cfg.get(conn, cfg.KEY_THEME, "system") or "system")
             thumb = int(cfg.get(conn, cfg.KEY_THUMB_SIZE, 150))
             ocr_defaults = cfg.get(conn, cfg.KEY_OCR_DEFAULTS, {}) or {}
+            workers = cfg.get(conn, cfg.KEY_WORKERS, 0)
         # Compare against the theme this session was started with —
         # ``_session_theme`` is stashed at MainWindow construction.
         if theme != getattr(self, "_session_theme", theme):
             self._prompt_theme_restart()
+        # Worker count is baked into the running chain at startup; a change only
+        # takes effect on restart (not on reprocess).
+        if workers != getattr(self, "_session_workers", workers):
+            QMessageBox.information(
+                self, self.tr("Worker processes"),
+                self.tr("The new worker count will apply on next startup."))
         if hasattr(self, "_thumb_slider"):
             self._thumb_slider.setValue(thumb)
         if hasattr(self, "ocr_frame"):
@@ -4422,12 +4434,9 @@ class MainWindow(QMainWindow):
                 self.ocr_frame.lang_input.set_tags(langs)
             if engine:
                 self.ocr_frame.engine_group.set_current_key(engine)
-        # Worker count change shows in the sidebar immediately; it takes
-        # effect on the next chain start (reprocess), like other chain config.
-        try:
-            self._pipeline_tab._backends.refresh_workers()
-        except Exception:
-            pass
+        # NB: the sidebar "NN workers" label is NOT refreshed here — it reflects
+        # the count the chain is actually RUNNING with, which doesn't change
+        # until restart. Refreshing it to the new setting would be a lie.
 
     def _prompt_theme_restart(self) -> None:
         """Tell the user the new theme will fully apply on next startup."""
