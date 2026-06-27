@@ -233,7 +233,7 @@ const powers = [
           <p>Aglaïa uses the latest GPU acceleration where it matters. Automatic
             batching delivers <span>2.5× speed on NVIDIA GPUs</span>.</p>
         </div>
-        <div class="speed__chart reveal" data-parallax="0.05">
+        <div class="speed__chart reveal">
           <ul class="bars">
             <li class="bar">
               <div class="bar__head">
@@ -436,9 +436,15 @@ aglaia ~/scans/my-book              # launch</code></pre>
                 <a role="menuitem" data-os="linux-gpu" href={DOWNLOADS['linux-gpu'].url}><b>Linux (NVIDIA&nbsp;GPU)</b><span>{DOWNLOADS['linux-gpu'].sub}</span></a>
               </div>
             </div>
-            <a class="btn btn--ghost btn--lg" href={GITHUB}>Star on GitHub</a>
+            <a class="btn btn--ghost btn--lg btn--stack btn--star" href={GITHUB}>
+              <span class="dl__label">Star on GitHub</span>
+              <span class="dl__sub star-sub" data-gh-stars hidden>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="m12 17.27 6.18 3.73-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                <span class="nav-gh__n"></span>&nbsp;stars
+              </span>
+            </a>
           </div>
-          <p class="cta__note">CUDA GPU acceleration available via <a href="#install">CLI install</a> on Linux / WSL2.</p>
+          <p class="cta__note">Linux NVIDIA users get a ready-to-run CUDA AppImage. On Windows, CUDA acceleration is available only via <a href="#install">CLI install</a> on WSL2.</p>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
         </div>
       </section>
@@ -736,6 +742,9 @@ aglaia ~/scans/my-book              # launch</code></pre>
         background: #0e141d; }
       .nav-gh__stars svg { color: #ffc857; }
       .nav-gh:hover .nav-gh__stars { border-color: #2e4a66; }
+      /* star count under the "Star on GitHub" CTA */
+      .star-sub { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+      .star-sub svg { color: #ffc857; }
 
       .btn {
         --bg: linear-gradient(180deg, #5aa9e6, #3d7fc4);
