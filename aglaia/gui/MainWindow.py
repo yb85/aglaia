@@ -4425,6 +4425,12 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, self.tr("Worker processes"),
                 self.tr("The new worker count will apply on next startup."))
+        # Swap-risk warning when a MANUAL count won't fit in RAM (auto is already
+        # RAM-capped). Dismissable via a 'don't warn again' checkbox.
+        try:
+            self._maybe_warn_workers_ram(int(workers or 0))
+        except Exception:
+            pass
         if hasattr(self, "_thumb_slider"):
             self._thumb_slider.setValue(thumb)
         if hasattr(self, "ocr_frame"):
@@ -4444,6 +4450,31 @@ class MainWindow(QMainWindow):
             self, self.tr("Theme"),
             self.tr("Will apply on next startup."),
         )
+
+    def _maybe_warn_workers_ram(self, workers: int) -> None:
+        """Warn (dismissably) when a MANUAL worker count won't fit in RAM.
+        Auto is already RAM-capped, so 0 (auto) never warns."""
+        if workers <= 0:
+            return
+        from aglaia.app_data import db as cfg
+        from aglaia.worker_count import ram_warning
+        msg = ram_warning(workers)
+        if not msg:
+            return
+        with cfg.session() as conn:
+            if bool(cfg.get(conn, cfg.KEY_WORKERS_RAM_WARN_DISMISSED, False)):
+                return
+        from PySide6.QtWidgets import QCheckBox
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(self.tr("Worker processes"))
+        box.setText(msg)
+        cb = QCheckBox(self.tr("Don't warn again"))
+        box.setCheckBox(cb)
+        box.exec()
+        if cb.isChecked():
+            with cfg.session() as conn:
+                cfg.set(conn, cfg.KEY_WORKERS_RAM_WARN_DISMISSED, True)
 
     def _open_log_tab(self):
         """Open or focus the closable Log tab. Seeded with the rolling
