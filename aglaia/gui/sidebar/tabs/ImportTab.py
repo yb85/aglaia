@@ -377,6 +377,7 @@ class ImportTab(QWidget):
 
     import_requested = Signal(list, float)  # [(Path, kind)], dpi
     cleared = Signal()
+    receive_requested = Signal()             # "Receive from phone" (aglaia-bridge)
 
     DEFAULT_DPI = 300.0
 
@@ -390,6 +391,22 @@ class ImportTab(QWidget):
         title = QLabel(self.tr("Import"))
         title.setObjectName("SectionTitle")
         outer.addWidget(title)
+
+        self.btn_receive = QPushButton(self.tr("Receive from phone…"))
+        self.btn_receive.setToolTip(
+            self.tr("Receive a capture from aglaia-bridge on your phone "
+                    "(scan the QR shown on screen).")
+        )
+        self.btn_receive.setStyleSheet(
+            f"QPushButton {{"
+            f"  background: transparent; color: {COLOR_FONT_PLACEHOLDER};"
+            f"  border: 1px solid {COLOR_OUTLINE_BUTTON_STRONG}; border-radius: 6px;"
+            f"  padding: 5px 10px;"
+            f"}}"
+            f"QPushButton:hover {{ color: {COLOR_FONT_INVERSE}; border-color: {COLOR_FONT_PLACEHOLDER}; }}"
+        )
+        self.btn_receive.clicked.connect(self.receive_requested)
+        outer.addWidget(self.btn_receive)
 
         self.drop_zone = _DropZone(self)
         self.drop_zone.files_dropped.connect(self.add_paths)
