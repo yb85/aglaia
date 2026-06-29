@@ -12,6 +12,10 @@ from pathlib import Path
 
 import pytest
 
+# The bridge receiver needs `cryptography` (in the `gui` extra), which a base /
+# headless CI install doesn't have — skip there rather than error at collection.
+pytest.importorskip("cryptography")
+
 from aglaia.workers.bridge_bundle import read_bundle
 from aglaia.workers.bridge_server import BridgeReceiver
 from aglaia.workers.bridge_tls import generate_ephemeral_cert

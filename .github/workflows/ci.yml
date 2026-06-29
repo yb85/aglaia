@@ -25,7 +25,7 @@ jobs:
           enable-cache: true
 
       - name: Sync deps (macOS extras)
-        run: uv sync --extra macos --extra dev
+        run: uv sync --extra macos --extra dev --extra server
 
       - name: Tests
         run: uv run pytest -q
