@@ -31,18 +31,14 @@ Weights ship via the standard model downloader as
 
 from __future__ import annotations
 
-import atexit
 import os
-import shutil
-import socket
-import subprocess
-import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any, List, Optional
 
 import numpy as np
+
+from aglaia.workers.vlm import LocalVlmServer, MlxBackend
 
 from .engine import (
     OcrEngine, OcrResult, OcrLine, register,
@@ -94,233 +90,6 @@ def _python_deps_present() -> bool:
         return False
 
 
-# ── mlx-vlm server lifecycle (class-level, one per process) ────────────
-
-class _MlxVlmServer:
-    """Singleton wrapper around ``python -m mlx_vlm.server``.
-
-    Lazy spawn on first ``ensure()`` call; persists until process exit
-    (registered via ``atexit``). Re-spawn if the previous process dies."""
-
-    proc: Optional[subprocess.Popen] = None
-    port: Optional[int] = None
-    model_path: Optional[str] = None
-    log_path: Optional[Path] = None
-    _tail_thread: Optional[threading.Thread] = None
-    _tail_stop: Optional[threading.Event] = None
-
-    @classmethod
-    def _free_port(cls, start: int = 8111) -> int:
-        p = start
-        while p < start + 100:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                try:
-                    s.bind(("127.0.0.1", p))
-                    return p
-                except OSError:
-                    p += 1
-        raise RuntimeError("no free port in 8111..8210")
-
-    @classmethod
-    def _wait_health(cls, port: int, timeout: float = 240.0) -> bool:
-        import urllib.request
-        deadline = time.time() + timeout
-        url = f"http://127.0.0.1:{port}/v1/models"
-        while time.time() < deadline:
-            try:
-                with urllib.request.urlopen(url, timeout=2) as r:
-                    if r.status == 200:
-                        return True
-            except Exception:
-                pass
-            time.sleep(1)
-        return False
-
-    @classmethod
-    def ensure(cls) -> str:
-        """Idempotent: return the base URL of a running server, spawning
-        it the first time round. Raises on failure to come up."""
-        if cls.proc is not None and cls.proc.poll() is None and cls.port:
-            return f"http://127.0.0.1:{cls.port}/"
-
-        # Resolve weights folder — pass the local path directly so
-        # mlx_vlm.server doesn't try to re-download.
-        d = _paddle_weights_dir()
-        if d is None or not d.is_dir():
-            raise RuntimeError(
-                "Paddle weights folder missing — download "
-                "PaddleOCR-VL-1.5-4bit first."
-            )
-        cls.model_path = str(d)
-        cls.port = cls._free_port()
-
-        # Log next to the cache so users can inspect crashes.
-        try:
-            from aglaia.app_data import app_data_dir
-            log_dir = app_data_dir() / "logs"
-        except Exception:
-            log_dir = Path.home() / ".cache" / "aglaia" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        cls.log_path = log_dir / "paddle_mlx_vlm_server.log"
-
-        # ``--trust-remote-code`` is required: PaddleOCR-VL ships its
-        # own processor class (``processing_paddleocr_vl.py``) loaded
-        # via transformers' Auto-class custom code path. Without it
-        # mlx_vlm.server fails with "Unrecognized processing class"
-        # and the server exits before serving a single request.
-        #
-        # Log level: WARNING is the right default. DEBUG choked decode
-        # throughput (60+ s/page at 100 DPI vs 6 s in the bench) because
-        # mlx_vlm emits a line per *token*, and writing that many lines
-        # through the subprocess pipe stalls the server event loop.
-        # ``AGLAIA_MLX_VLM_LOG_LEVEL=DEBUG`` overrides for one-shot
-        # debugging when something goes wrong.
-        log_level = os.environ.get(
-            "AGLAIA_MLX_VLM_LOG_LEVEL", "WARNING"
-        ).upper()
-        cmd = [
-            sys.executable, "-m", "mlx_vlm.server",
-            "--host", "127.0.0.1",
-            "--port", str(cls.port),
-            "--model", cls.model_path,
-            "--trust-remote-code",
-            "--max-tokens", "4096",
-            "--log-level", log_level,
-        ]
-        # Force the env-var path too — newer mlx_vlm.server reads
-        # MLX_TRUST_REMOTE_CODE at startup, and the CLI flag's side
-        # effect (write to env) raced against the server import in at
-        # least one installed version. Setting it here is unambiguous.
-        proc_env = os.environ.copy()
-        proc_env["MLX_TRUST_REMOTE_CODE"] = "true"
-        _log(f"[paddle_vl] spawn: {' '.join(cmd)}")
-        log_fp = open(cls.log_path, "wb")
-        cls.proc = subprocess.Popen(
-            cmd, stdout=log_fp, stderr=subprocess.STDOUT,
-            start_new_session=True,
-            env=proc_env,
-        )
-        # Daemon tailer forwards every new log line through ``_log()`` so
-        # the GUI Log tab gets the same view as the on-disk file. Without
-        # this the subprocess's stderr (e.g. "Unrecognized processing
-        # class") never reaches the user.
-        cls._start_log_tail()
-        atexit.register(cls.stop)
-
-        if not cls._wait_health(cls.port):
-            # Tail the mlx_vlm log into the GUI log channel so the user
-            # sees WHY the server died — the log path alone hides the
-            # detail under .app bundles where stdout = /dev/null.
-            try:
-                with open(cls.log_path, "rb") as fp:
-                    fp.seek(0, 2)
-                    fp.seek(max(0, fp.tell() - 16384))
-                    tail = fp.read().decode("utf-8", errors="replace")
-                for line in tail.splitlines()[-40:]:
-                    _log(f"[paddle_vl/mlx] {line}", level="error")
-            except Exception:
-                pass
-            cls.stop()
-            raise RuntimeError(
-                f"mlx_vlm.server failed to come up — see {cls.log_path}"
-            )
-        return f"http://127.0.0.1:{cls.port}/"
-
-    @classmethod
-    def stop(cls) -> None:
-        # Tell the tailer to stop first so it doesn't keep firing while
-        # we tear the server down.
-        if cls._tail_stop is not None:
-            cls._tail_stop.set()
-        cls._tail_thread = None
-        cls._tail_stop = None
-        proc = cls.proc
-        cls.proc = None
-        if proc is None:
-            return
-        try:
-            os.killpg(os.getpgid(proc.pid), 15)
-            proc.wait(timeout=10)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-
-    @classmethod
-    def _start_log_tail(cls) -> None:
-        """Spawn a daemon thread that reads new bytes from
-        ``cls.log_path`` and forwards each line through ``_log()``.
-
-        Crude but effective — we don't want a real ``tail -f`` dep, and
-        polling at 200 ms is plenty for status-bar latency. Closes when
-        the server proc dies or ``cls._tail_stop`` is set."""
-        if cls.log_path is None:
-            return
-        stop_evt = threading.Event()
-        log_path = cls.log_path
-
-        def _tail() -> None:
-            try:
-                while not log_path.exists():
-                    if stop_evt.wait(0.1):
-                        return
-                with open(log_path, "rb") as fp:
-                    buf = b""
-                    while not stop_evt.is_set():
-                        chunk = fp.read(65536)
-                        if not chunk:
-                            # No new bytes — poll. Bail if the
-                            # subprocess has died (no more writes
-                            # coming).
-                            proc = cls.proc
-                            if proc is not None and proc.poll() is not None:
-                                # Flush any final bytes the subprocess
-                                # wrote before dying.
-                                chunk = fp.read(65536)
-                                if chunk:
-                                    buf += chunk
-                                break
-                            time.sleep(0.2)
-                            continue
-                        buf += chunk
-                        while b"\n" in buf:
-                            line, buf = buf.split(b"\n", 1)
-                            try:
-                                txt = line.decode(
-                                    "utf-8", errors="replace"
-                                ).rstrip()
-                            except Exception:
-                                continue
-                            if not txt:
-                                continue
-                            lvl = "error" if (
-                                "ERROR" in txt or "Traceback" in txt
-                                or "Exception" in txt
-                            ) else (
-                                "warn" if "WARNING" in txt or "Warning" in txt
-                                else "info"
-                            )
-                            _log(f"[mlx-vlm] {txt}", level=lvl)
-                    # Final flush of any partial line buffered up.
-                    if buf:
-                        try:
-                            txt = buf.decode("utf-8", errors="replace").rstrip()
-                        except Exception:
-                            txt = ""
-                        if txt:
-                            _log(f"[mlx-vlm] {txt}")
-            except Exception:
-                # Tailer crashing must not take down OCR.
-                pass
-
-        t = threading.Thread(target=_tail, daemon=True,
-                              name="mlx-vlm-tail")
-        t.start()
-        cls._tail_thread = t
-        cls._tail_stop = stop_evt
-
-
 # ── engine ────────────────────────────────────────────────────────────
 
 @register
@@ -361,20 +130,20 @@ class PaddleVlEngine(OcrEngine):
         # before the mlx_vlm server tries to load them.
         _patch_paddle_model_files(_paddle_weights_dir())
 
-        base_url = _MlxVlmServer.ensure()
+        # PaddleOCR-VL ships MLX-only 4-bit weights, so pin the MLX backend
+        # (the generic picker would otherwise prefer vLLM on a CUDA box, which
+        # can't load these weights). The shared LocalVlmServer handles spawn /
+        # health / teardown; we route its log through the OCR log channel.
+        model_name = str(_paddle_weights_dir())
+        base_url = LocalVlmServer.ensure(
+            model_name, backend=MlxBackend(), log=_log, log_stem="paddle",
+        )
         from paddleocr import PaddleOCRVL
-        # ``vl_rec_api_model_name`` must match the model the server has
-        # PRELOADED for us — not whatever happens to be first in
-        # ``/v1/models``. mlx_vlm.server keeps a cache of every model it
-        # has ever loaded in this process, and an earlier session that
-        # touched Falcon-OCR (e.g. the bench script) leaks into that
-        # list. Querying ``data[0].id`` then handed paddleocr a stale
-        # ``tiiuae/Falcon-OCR`` name → server obediently HOT-SWAPPED to
-        # Falcon → Falcon crashed on the Paddle-shaped vision tokens.
-        # Pin to the canonical local path the server was spawned with.
-        # ``cls`` here is PaddleVlEngine, not _MlxVlmServer — the
-        # path the server was spawned with lives on the latter.
-        model_name = _MlxVlmServer.model_path or str(_paddle_weights_dir())
+        # ``vl_rec_api_model_name`` must match the model the server PRELOADED —
+        # not whatever is first in ``/v1/models`` (the server leaks every model
+        # it ever cached, e.g. a stale Falcon-OCR from a prior bench run, which
+        # would trigger a hot-swap → crash on Paddle-shaped vision tokens). Pin
+        # to the local path the server was spawned with.
         # ``vl_rec_max_concurrency=1`` is mandatory with the
         # mlx-vlm-server backend: paddleocr fans out one HTTP request
         # per layout region, and mlx-vlm-server's continuous batcher
@@ -526,7 +295,7 @@ def _predict_with_timeout(pipeline: Any, image: np.ndarray) -> Any:
             level="error",
         )
         try:
-            _MlxVlmServer.stop()
+            LocalVlmServer.stop(str(_paddle_weights_dir()))
         except Exception:
             pass
         raise TimeoutError(
