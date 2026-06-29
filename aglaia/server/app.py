@@ -25,7 +25,6 @@ from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -138,7 +137,9 @@ def create_app(
         payload = await file.read()
         with sdb.session(db_file) as conn:
             key = _require_key(conn, api_key)
-            job_id = uuid4().hex
+            # Cryptographically-random, unguessable id (≈128 bits, URL/path safe).
+            # Access is still gated by API key / download token — the id is not a secret.
+            job_id = secrets.token_urlsafe(16)
             jobdir = data_root / job_id
             jobdir.mkdir(parents=True, exist_ok=True)
             (jobdir / ("input.zip" if kind == "bundle" else "input.pdf")).write_bytes(payload)
