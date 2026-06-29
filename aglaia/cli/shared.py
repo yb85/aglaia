@@ -23,15 +23,24 @@ import typer
 # Shared across `gui` and `run`.
 PipelineOpt = Annotated[
     Optional[str],
-    typer.Option("--pipeline", "-p", help="Pipeline name (e.g. 'book_curved_x2') or a .yaml path."),
+    typer.Option(
+        "--pipeline",
+        "-p",
+        help="Pipeline name (e.g. 'book_curved_x2') or a .yaml path.",
+    ),
 ]
 WorkersOpt = Annotated[
     Optional[int],
-    typer.Option("--workers", help="Pipeline worker processes (overrides config). 0 = auto."),
+    typer.Option(
+        "--workers", help="Pipeline worker processes (overrides config). 0 = auto."
+    ),
 ]
 ForceProcOpt = Annotated[
     bool,
-    typer.Option("--force-proc", help="Reprocess every active scan on open (wipe branches/intermediates)."),
+    typer.Option(
+        "--force-proc",
+        help="Reprocess every active scan on open (wipe branches/intermediates).",
+    ),
 ]
 
 
@@ -57,6 +66,45 @@ def gui_config(
     return cfg
 
 
+def ocr_config(
+    paths: list[Path],
+    ocr: Optional[str],
+    ocr_lang: str,
+    export: Optional[str],
+    md_refine: Optional[str],
+    project_name: Optional[str],
+    parent_dir: Optional[Path],
+    input_dpi: Optional[str],
+    check_ocr: bool,
+) -> "object":
+    """Build a CliConfig for `aglaia ocr` — like `run` but with no pipeline /
+    workers / force-proc (there is no processing chain). OCR is the point, so a
+    bare `ocr` defaults the engine to 'auto'."""
+    from aglaia.workers.cli import (
+        CliConfig,
+        build_ocr_fields,
+        classify_inputs,
+        _parse_export_arg,
+        _parse_input_dpi,
+    )
+
+    dpi, dpi_force = _parse_input_dpi(input_dpi)
+    cfg = CliConfig(
+        paths=[Path(p).expanduser() for p in paths],
+        input_dpi=dpi,
+        input_dpi_force=dpi_force,
+        exports=_parse_export_arg(export),
+        md_refine=md_refine,
+        project_name=project_name,
+        parent_dir=Path(parent_dir).expanduser() if parent_dir else None,
+        check_ocr=check_ocr,
+        headless=True,
+        **build_ocr_fields(ocr or "auto", ocr_lang),
+    )
+    classify_inputs(cfg)
+    return cfg
+
+
 def run_config(
     paths: list[Path],
     pipeline: Optional[str],
@@ -72,8 +120,11 @@ def run_config(
     check_ocr: bool,
 ) -> "object":
     from aglaia.workers.cli import (
-        CliConfig, build_ocr_fields, classify_inputs,
-        _parse_export_arg, _parse_input_dpi,
+        CliConfig,
+        build_ocr_fields,
+        classify_inputs,
+        _parse_export_arg,
+        _parse_input_dpi,
     )
 
     dpi, dpi_force = _parse_input_dpi(input_dpi)

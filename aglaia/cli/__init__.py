@@ -23,13 +23,14 @@ import typer
 
 from aglaia.cli.commands import gui as _gui
 from aglaia.cli.commands import list_cmd as _list
+from aglaia.cli.commands import ocr as _ocr
 from aglaia.cli.commands import run as _run
 from aglaia.cli.commands import server as _server
 from aglaia.cli.commands import setup as _setup
 from aglaia.cli.commands import version as _version
 
 #: First-token names that are real commands (not the default `gui`).
-KNOWN_COMMANDS = {"gui", "run", "setup", "server", "list", "version"}
+KNOWN_COMMANDS = {"gui", "run", "ocr", "setup", "server", "list", "version"}
 
 
 def _version_callback(value: bool) -> None:
@@ -60,6 +61,7 @@ def _root(
 
 app.command("gui")(_gui.gui)
 app.command("run")(_run.run)
+app.command("ocr")(_ocr.ocr)
 app.command("setup")(_setup.setup)
 app.command("server")(_server.server)
 app.command("list")(_list.list_)

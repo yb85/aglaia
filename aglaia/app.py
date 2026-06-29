@@ -65,6 +65,14 @@ def _run_headless(cfg: CliConfig) -> int:
     return run(cfg)
 
 
+def _run_ocr_only(cfg: CliConfig) -> int:
+    """`aglaia ocr` handler — OCR without the processing chain. No setup gate:
+    OCR (esp. Apple Vision) needs no detection model / seeded pipeline."""
+    signal.signal(signal.SIGTERM, _sigterm)
+    from aglaia.workers.headless import run_ocr_only
+    return run_ocr_only(cfg)
+
+
 # ── GUI path ─────────────────────────────────────────────────────────
 
 def _maybe_ui_shot(app, window) -> None:

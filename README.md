@@ -205,6 +205,9 @@ uv run aglaia gui --camera-id 1      # explicit form
 # Headless batch — same chain, no Qt
 uv run aglaia run ~/scans/*.jpg --ocr auto --export pdf:g4+md
 uv run aglaia run ~/scans/my-book.agl -p book_curved_x2 --ocr surya:lang=fr-FR
+
+# OCR a clean PDF/scan with NO processing (no dewarp/binarize)
+uv run aglaia ocr ~/scans/clean.pdf --export pdf:g4+md
 ```
 
 Commands:
@@ -213,6 +216,7 @@ Commands:
 |---|---|
 | `gui [PROJECT]` | Capture GUI (default). `--camera-id N`, `--diagnose-memory`. |
 | `run PATHS…` | Headless batch over images, PDFs, or one `.agl`. `--ocr ENGINE[:opt…]` (now needs a value — use `--ocr auto`), `--ocr-lang`, `--export`, `--md-refine`, `--project-name`, `--parent-dir`, `--input-dpi [force:]N`, `--check-ocr`. |
+| `ocr PATHS…` | OCR PDFs/images (or re-OCR a `.agl`) with **no** processing chain — for already-clean docs. Same OCR/export options as `run`, minus `--pipeline`/`--workers`/`--force-proc`. Engine defaults to `auto`. |
 | `setup` | Interactive first-run setup (choose/download models, seed config). |
 | `list pipelines\|ocr\|exports` | Introspect available pipelines, OCR engines, exporters. |
 | `server` | HTTP job server (see below). |

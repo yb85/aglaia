@@ -14,8 +14,8 @@ aglaia                 # → aglaia gui            (start window)
 aglaia ~/book.agl      # → aglaia gui ~/book.agl (open that project)
 ```
 
-Commands: [`gui`](#gui), [`run`](#run), [`setup`](#setup), [`list`](#list),
-[`server`](#server), [`version`](#version). `aglaia --help` and
+Commands: [`gui`](#gui), [`run`](#run), [`ocr`](#ocr), [`setup`](#setup),
+[`list`](#list), [`server`](#server), [`version`](#version). `aglaia --help` and
 `aglaia <command> --help` print the live usage.
 
 > `aglaia` is a console script (`pip install aglaia`); from source use
@@ -102,6 +102,36 @@ pairs are params (e.g. `apple:lang=fr-FR`). OCR engines receive params via
 `OcrEngine.configure(params)`; for PDF the profile is the first token (or
 `profile=`); `md:refine=apple_fm` mirrors `--md-refine`. See [ocr.md](ocr.md) and
 [export.md](export.md).
+
+## `ocr`
+
+```
+aglaia ocr PATHS… [options]
+```
+
+OCR documents that **don't need processing** — born-digital PDFs, flat scans —
+without the geometric pipeline (no dewarp / binarize / page-split). Each page is
+ingested as the raw colour image and OCR'd directly, then exported. Headless, no
+Qt, no processing chain. `PATHS` is one or more PDFs/images to OCR into a new
+project, **or** one `.agl` to re-OCR an existing project (or, with `--check-ocr`,
+poll its pending Mistral batch jobs).
+
+Same options as `run` **minus** `-p/--pipeline`, `--workers`, `--force-proc`
+(there is nothing to process): `--ocr` (defaults to `auto` if omitted — OCR is
+the point), `--ocr-lang`, `--export`, `--md-refine`, `--project-name`,
+`--parent-dir`, `--input-dpi`, `--check-ocr`.
+
+```bash
+# OCR a clean PDF straight to a searchable PDF + Markdown
+aglaia ocr ~/scans/clean.pdf --project-name clean --export pdf:g4+md
+
+# OCR a folder of page images with a specific engine + language
+aglaia ocr ~/pages/*.png --ocr surya --ocr-lang fr-FR --export md
+```
+
+When to use `ocr` vs `run`: reach for `run` when the photos need straightening,
+page-splitting, or binarizing; reach for `ocr` when the input is already a clean
+page and you only want text out.
 
 ## `setup`
 
