@@ -32,6 +32,8 @@ STATUS_FAILED = "failed"
 STATUS_CANCELLED = "cancelled"
 
 CONFIG_ADMIN_SECRET = "admin_secret"
+CONFIG_BASE_URL = "base_url"      # public URL for download links in emails
+CONFIG_SMTP = "smtp"              # {"host","port","user","password","from","tls"}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS api_keys (
@@ -56,6 +58,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     error          TEXT,
     pdf_path       TEXT,
     md_path        TEXT,
+    download_token TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -90,6 +93,11 @@ def open_db(path: Path | str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    # Lazy migration for DBs created before download_token existed.
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN download_token TEXT")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -167,13 +175,34 @@ def create_job(
     ocr_spec: Optional[str],
     email_notif: bool,
     dpi: Optional[float],
-) -> None:
+) -> str:
+    """Create a pending job. Returns its download token (for email links)."""
     now = _now()
+    token = secrets.token_urlsafe(18)
     conn.execute(
         "INSERT INTO jobs (id, api_key_id, status, kind, ocr_spec, email_notif, dpi, "
-        "attempt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
-        (job_id, api_key_id, STATUS_PENDING, kind, ocr_spec, int(email_notif), dpi, now, now),
+        "attempt, download_token, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+        (job_id, api_key_id, STATUS_PENDING, kind, ocr_spec, int(email_notif), dpi, token, now, now),
     )
+    return token
+
+
+def revoke_api_key(conn: sqlite3.Connection, key_id: int) -> None:
+    conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?", (key_id,))
+
+
+def due_ocr_jobs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """OCR-pending jobs whose next backoff check is due."""
+    return list(conn.execute(
+        "SELECT * FROM jobs WHERE status = ? AND (next_check_at IS NULL OR next_check_at <= ?)",
+        (STATUS_OCR_PENDING, _now()),
+    ))
+
+
+def email_for_job(conn: sqlite3.Connection, job: sqlite3.Row) -> Optional[str]:
+    row = conn.execute("SELECT email FROM api_keys WHERE id = ?", (job["api_key_id"],)).fetchone()
+    return row["email"] if row else None
 
 
 def get_job(conn: sqlite3.Connection, job_id: str) -> Optional[sqlite3.Row]:

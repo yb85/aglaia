@@ -23,7 +23,7 @@ def env(tmp_path):
     with sdb.session(db_path) as conn:
         key = sdb.create_api_key(conn, "user@example.com")
         admin = sdb.ensure_admin_secret(conn)
-    client = TestClient(create_app(db_path=db_path, data_dir=data_dir))
+    client = TestClient(create_app(db_path=db_path, data_dir=data_dir, start_worker=False))
     return client, key, admin, db_path, data_dir
 
 
@@ -77,7 +77,7 @@ def test_get_and_delete(env):
 
     got = client.get(f"/get/{job_id}", params={"api_key": key})
     assert got.status_code == 200
-    assert got.json()["pdf_available"] is False and got.json()["md_available"] is False
+    assert got.json()["pdf_url"] is None and got.json()["md_url"] is None
 
     dele = client.post(f"/delete/{job_id}", data={"api_key": key})
     assert dele.status_code == 200
