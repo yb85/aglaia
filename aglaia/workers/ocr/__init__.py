@@ -18,6 +18,8 @@ from . import apple_vision as _apple_vision  # noqa: F401
 from . import apple_docs as _apple_docs       # noqa: F401
 from . import surya as _surya                 # noqa: F401
 from . import paddle_vl as _paddle_vl         # noqa: F401
+from . import glm_ocr as _glm_ocr             # noqa: F401
+from . import unlimited_ocr as _unlimited_ocr  # noqa: F401
 from . import mistral_cloud as _mistral_cloud  # noqa: F401
 
 # User drop-in OCR plugins (<APP_DATA>/plugins/ocr). Each plugin module

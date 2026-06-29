@@ -10,26 +10,24 @@ config-DB lifecycle state reconciled against disk (no Qt)."""
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 
 @pytest.fixture()
 def reg(tmp_path, monkeypatch):
-    """Isolate APP_DATA (config DB + models dir) per test and hand back a fresh
-    `downloads` module with the core targets registered."""
+    """Isolate APP_DATA (config DB + models dir) per test via the env override —
+    app_data paths read it live, so no module reload is needed. Snapshot/restore
+    the in-memory catalogue so a test's registrations don't leak (and so we do
+    NOT wipe targets registered by other modules, e.g. the OCR engines)."""
     monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path))
-    import aglaia.app_data as _ad
-
-    importlib.reload(_ad)
-    from aglaia.app_data import db as _db
-
-    importlib.reload(_db)
     from aglaia.app_data import downloads as _dl
 
-    importlib.reload(_dl)  # re-runs _register_core_targets() against the temp dir
-    return _dl
+    saved = dict(_dl._REGISTRY)
+    try:
+        yield _dl
+    finally:
+        _dl._REGISTRY.clear()
+        _dl._REGISTRY.update(saved)
 
 
 def _materialise(dl, key):
@@ -61,7 +59,6 @@ def test_core_targets_registered(reg):
 def test_shim_aliases_resolve(reg):
     from aglaia.app_data import models as M
 
-    importlib.reload(M)
     assert M.ModelSpec is reg.DownloadTarget
     assert {s.key for s in M._load_model_specs()} == {t.key for t in reg.registry()}
     assert M.is_model_installed("paddle_vl") is False

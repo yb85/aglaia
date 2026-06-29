@@ -56,6 +56,12 @@ paddle = [
     "paddlepaddle>=3.2.1",
     "mlx-vlm>=0.6.0",
 ]
+# NOTE: the vLLM serving backend (for the `glm` / `unlimited` OCR engines on
+# CUDA/Linux) is intentionally NOT a managed extra. vLLM hard-pins an exact
+# torch/CUDA build and conflicts with every other OCR stack here, so it must be
+# installed per-box to match the local CUDA (e.g. `uv pip install vllm`). The
+# VllmBackend only needs `vllm` importable. Apple Silicon needs nothing extra —
+# those engines serve via the `mlx-vlm` already in the `paddle` extra.
 # Cross-platform GUI (PySide6 + theme). Decoupled from `macos` so a
 # CLI-only / headless install (the base dependencies) stays slim — no
 # Qt download. The capture GUI on macOS needs `gui` + `macos` together.
