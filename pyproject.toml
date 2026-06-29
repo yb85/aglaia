@@ -63,6 +63,10 @@ paddle = [
 gui = [
     "pyside6-essentials>=6.7.0",
     "pyqtdarktheme>=2.1.0",
+    # aglaia-bridge receiver (#47): self-signed TLS cert for the QR-pinned
+    # LAN transfer, and a pure-Python QR encoder (no C deps, bundle-friendly).
+    "cryptography>=42.0",
+    "segno>=1.6.0",
 ]
 # Cross-platform offline voice control (Linux/Windows; macOS uses Apple
 # Speech). Constrained Vosk + a small downloaded model. Optional.

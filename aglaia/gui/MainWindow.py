@@ -1365,6 +1365,7 @@ class MainWindow(QMainWindow):
 
         # ── Import-tab wiring ──────────────────────────────────────
         self._import_tab.import_requested.connect(self._on_sidebar_import_requested)
+        self._import_tab.receive_requested.connect(self._receive_from_phone)
 
         # ── Assemble panel ────────────────────────────────────────
         self.sidebar = SidebarPanel(self)
@@ -1716,6 +1717,32 @@ class MainWindow(QMainWindow):
                 )
         finally:
             self._import_tab.clear_queue()
+
+    def _receive_from_phone(self) -> None:
+        """Open the aglaia-bridge listening-mode dialog; ingest the pushed
+        ``.aglbundle`` through the same import path as loose images (#47)."""
+        from pathlib import Path as _P
+
+        from aglaia.gui.bridge_receive import BridgeReceiveDialog
+        from aglaia.workers.bridge_bundle import read_bundle
+        from aglaia.workers.ImportHelpers import enqueue_image_files
+
+        def ingest(zip_path: str) -> int:
+            tmp = _P(zip_path)
+            bundle = read_bundle(tmp, extract_dir=tmp.parent / "extract")
+            slug = slugify(_P(self.db_path).stem) or "scan"
+            enqueue_image_files(
+                db_path=self.db_path,
+                pipeline_version_id=self.pipeline_version_id,
+                slug=slug, chain=self.chain,
+                image_paths=bundle.image_paths,
+                default_dpi=float(bundle.dpi or 120.0),
+                force_dpi=bundle.dpi is not None,
+                log_queue=self.log_queue,
+            )
+            return len(bundle.pages)
+
+        BridgeReceiveDialog(ingest, parent=self).exec()
 
     def _on_export_clicked(self):
         """Single Export button — dispatch by currently selected format
