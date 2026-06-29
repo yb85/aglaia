@@ -25,7 +25,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterator
 
 import yaml
 
@@ -168,6 +168,14 @@ CREATE TABLE IF NOT EXISTS plugins (
     status     TEXT NOT NULL,      -- "accepted" (only accepted rows persist)
     added_at   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS downloads (
+    key        TEXT PRIMARY KEY,   -- DownloadTarget.key (core or plugin asset)
+    status     TEXT NOT NULL,      -- "downloading" | "downloaded" | "failed"
+    sha        TEXT,               -- optional content hash recorded on completion
+    size_bytes INTEGER,            -- optional fetched size
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -309,6 +317,42 @@ def acknowledge_plugin(conn: sqlite3.Connection, kind: str,
 def forget_plugin(conn: sqlite3.Connection, path: Path | str) -> None:
     conn.execute("DELETE FROM plugins WHERE path = ?",
                  (str(Path(path).resolve()),))
+
+
+# ── download lifecycle state ─────────────────────────────────────────
+#
+# Persistent status for registered download targets (the catalogue itself
+# lives in-memory in `aglaia/app_data/downloads.py`). Absence of a row means
+# "never fetched", same convention as the plugins table. Disk remains ground
+# truth; `downloads.download_status()` reconciles this table against it.
+
+def set_download_status(conn: sqlite3.Connection, key: str, status: str,
+                        *, sha: str | None = None,
+                        size_bytes: int | None = None) -> None:
+    conn.execute(
+        "INSERT INTO downloads (key, status, sha, size_bytes, updated_at) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET status = excluded.status, "
+        "sha = excluded.sha, size_bytes = excluded.size_bytes, "
+        "updated_at = excluded.updated_at",
+        (key, status, sha, size_bytes, _now()),
+    )
+
+
+def get_download_status(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute(
+        "SELECT status FROM downloads WHERE key = ?", (key,)).fetchone()
+    return row["status"] if row is not None else None
+
+
+def clear_download_status(conn: sqlite3.Connection, key: str) -> None:
+    conn.execute("DELETE FROM downloads WHERE key = ?", (key,))
+
+
+def download_statuses(conn: sqlite3.Connection) -> dict[str, str]:
+    """`{key: status}` for every recorded download."""
+    return {r["key"]: r["status"]
+            for r in conn.execute("SELECT key, status FROM downloads").fetchall()}
 
 
 # ── bootstrap ───────────────────────────────────────────────────────

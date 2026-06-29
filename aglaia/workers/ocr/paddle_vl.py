@@ -56,8 +56,8 @@ from .engine import (
 def _paddle_weights_dir() -> Optional[Path]:
     """Folder where the model downloader plants the MLX snapshot.
 
-    Mirrors Surya's resolution but points at the Paddle subdir name from
-    ``model-list.json``."""
+    Mirrors Surya's resolution but points at the Paddle subdir name from the
+    ``paddle_vl`` download target (see ``aglaia/app_data/downloads.py``)."""
     try:
         from aglaia.app_data import models_dir
         return models_dir() / "PaddleOCR-VL-1.5-4bit"
@@ -66,7 +66,8 @@ def _paddle_weights_dir() -> Optional[Path]:
 
 
 # Files the downloader is required to land before we report the engine
-# as available. Keep in sync with ``required_files`` in model-list.json.
+# as available. Keep in sync with the ``paddle_vl`` target's ``required_files``
+# in ``aglaia/app_data/downloads.py``.
 _REQUIRED_FILES = (
     "model.safetensors",
     "processor_config.json",
