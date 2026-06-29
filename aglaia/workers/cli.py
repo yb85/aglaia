@@ -34,7 +34,6 @@ The positional arguments are auto-classified:
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -120,123 +119,24 @@ class CliConfig:
         return self.source != "none"
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="aglaia",
-        description="Aglaïa scanner / page extraction pipeline.",
-        allow_abbrev=False,
-    )
-    p.add_argument(
-        "paths", nargs="*", type=Path,
-        help="One .agl project file, OR one or more PDFs, OR one or more image files.",
-    )
-    p.add_argument("--workers", type=int, default=None,
-                   help="Number of pipeline worker processes (overrides config). 0 = auto (sized to the CPU).")
-    p.add_argument("-p", "--pipeline", type=str, default=None,
-                   help="Pipeline name (e.g. 'book_curved_x2') or path to a .yaml file.")
-    p.add_argument(
-        "--ocr", nargs="?", const="auto", default=None, metavar="ENGINE[:opt…]",
-        help="Run OCR after the pipeline. Engine spec follows the standard "
-             "name[:token|key=value] format: 'auto' (default, Apple Vision → "
-             "Surya), 'apple', 'surya', or a registered engine, with optional "
-             "params, e.g. 'surya:lang=fr-FR:beam=4'.",
-    )
-    p.add_argument(
-        "--ocr-lang", type=str, default="auto",
-        help="'+' joined ISO/BCP-47 language codes (e.g. 'fr-FR+en-US'). "
-             "'auto' lets the engine decide. (Shorthand: a 'lang=' param in "
-             "--ocr.)",
-    )
-    p.add_argument(
-        "--export", type=str, default=None,
-        help="'+' joined export specs in the standard name[:token|key=value] "
-             "format: pdf, pdf:g4 (or pdf:profile=g4; auto|g4|jbig2|native), "
-             "md, md:refine=apple_fm. E.g. 'pdf:g4+md'.",
-    )
-    p.add_argument(
-        "--md-refine", type=str, default=None, metavar="BACKEND",
-        help="Post-process the Markdown export with an on-device LLM "
-             "(e.g. 'apple_fm' — Apple Foundation Models, macOS 26+). "
-             "No-op when unavailable.",
-    )
-    p.add_argument("--headless", action="store_true",
-                   help="Run end-to-end on the CLI without showing the UI.")
-    p.add_argument("--check-ocr", action="store_true", dest="check_ocr",
-                   help="Poll + import any pending Mistral batch OCR job(s) "
-                        "for the given project, then exit. Pair with the "
-                        "project path: aglaia --headless --check-ocr proj.agl")
-    p.add_argument("--project-name", type=str, default=None,
-                   help="Name for new projects (default: derive from input filename).")
-    p.add_argument("--parent-dir", type=Path, default=None,
-                   help="Parent folder for new projects (default: input file's parent).")
-    p.add_argument(
-        "--input-dpi", type=str, default=None, metavar="[force:]N",
-        help="Input DPI for imported images. Bare 'N' fills only images "
-             "with no embedded DPI metadata; 'force:N' overrides every "
-             "input. (PDFs estimate DPI from page size regardless.)")
-    p.add_argument("--camera-id", type=int, default=None)
-    p.add_argument("--diagnose-memory", action="store_true",
-                   help="Enable tracemalloc snapshots in the GUI process.")
-    p.add_argument("--force-proc", action="store_true",
-                   help="Reprocess every active scan on project open (wipes "
-                        "branches + intermediate nodes, re-enqueues raws). "
-                        "Without it, only scans whose objective is missing "
-                        "from the DB are caught up.")
-    p.add_argument("--pipeline-list", action="store_true",
-                   help="List available pipelines and exit.")
-    p.add_argument("--ocr-list", action="store_true",
-                   help="List available OCR engines and exit.")
-    p.add_argument("--export-list", action="store_true",
-                   help="List available export formats and exit.")
-    p.add_argument("--setup", action="store_true",
-                   help="Interactive first-run setup (language, models, config) "
-                        "for CLI-only installs; then exit.")
-    from aglaia.version import get_version
-    p.add_argument("--version", action="version",
-                   version=f"Aglaïa {get_version()}",
-                   help="Print the version and exit.")
-    return p
-
-
-def parse_argv(argv: list[str]) -> CliConfig:
-    parser = build_parser()
-    ns = parser.parse_args(argv)
-    input_dpi, input_dpi_force = _parse_input_dpi(ns.input_dpi)
-    ocr_spec = parse_spec(ns.ocr) if ns.ocr is not None else None
-    ocr_languages = _parse_lang_arg(ns.ocr_lang)
+def build_ocr_fields(ocr: Optional[str], ocr_lang: str) -> dict[str, object]:
+    """Translate the `--ocr ENGINE[:opt…]` + `--ocr-lang` pair into the
+    CliConfig OCR fields. Shared by the `run` and `ocr` commands (and any
+    other surface that takes an engine spec)."""
+    ocr_spec = parse_spec(ocr) if ocr is not None else None
+    ocr_languages = _parse_lang_arg(ocr_lang)
     if not ocr_languages and ocr_spec and "lang" in ocr_spec.params:
         # `--ocr surya:lang=fr-FR+en-US` is shorthand for `--ocr-lang`.
         ocr_languages = _parse_lang_arg(ocr_spec.params["lang"])
-    cfg = CliConfig(
-        paths=[Path(p).expanduser() for p in (ns.paths or [])],
-        pipeline=ns.pipeline,
-        workers=ns.workers,
-        input_dpi=input_dpi,
-        input_dpi_force=input_dpi_force,
-        camera_id=ns.camera_id,
-        do_ocr=ocr_spec is not None,
-        ocr_engine=ocr_spec.name if ocr_spec else "auto",
-        ocr_languages=ocr_languages,
-        ocr_params={k: v for k, v in (ocr_spec.params.items() if ocr_spec else ())
-                    if k != "lang"},
-        # `mistral:batch` (token) submits a batch job; `mistral:stream` (or no
-        # token) is the synchronous default.
-        ocr_batch=bool(ocr_spec and "batch" in ocr_spec.tokens),
-        check_ocr=bool(getattr(ns, "check_ocr", False)),
-        exports=_parse_export_arg(ns.export),
-        md_refine=ns.md_refine,
-        headless=bool(ns.headless),
-        project_name=ns.project_name,
-        parent_dir=Path(ns.parent_dir).expanduser() if ns.parent_dir else None,
-        diagnose_memory=bool(ns.diagnose_memory),
-        force_proc=bool(ns.force_proc),
-        list_pipelines=bool(ns.pipeline_list),
-        list_ocr=bool(ns.ocr_list),
-        list_exports=bool(ns.export_list),
-        setup=bool(getattr(ns, "setup", False)),
-    )
-    classify_inputs(cfg)
-    return cfg
+    return {
+        "do_ocr": ocr_spec is not None,
+        "ocr_engine": ocr_spec.name if ocr_spec else "auto",
+        "ocr_languages": ocr_languages,
+        "ocr_params": {k: v for k, v in (ocr_spec.params.items() if ocr_spec else ())
+                       if k != "lang"},
+        # `mistral:batch` (token) submits a batch job; `:stream`/none is sync.
+        "ocr_batch": bool(ocr_spec and "batch" in ocr_spec.tokens),
+    }
 
 
 def run_list_commands(cfg: "CliConfig") -> bool:

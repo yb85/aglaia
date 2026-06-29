@@ -23,6 +23,10 @@ dependencies = [
     "questionary>=2.1.1",
     "rich>=13.0.0",
     "scipy>=1.11.0",
+    # Subcommand CLI (gui/run/setup/…). Lightweight pure-Python (Click + the
+    # already-present rich); the CLI is the primary user surface, so this one
+    # dep earns a place in base. See docs/subcommand-cli.md.
+    "typer>=0.12",
 ]
 # NOTE: the OCR engines (surya, paddle-VL) are NOT base dependencies. They
 # are heavy and — critically — mutually exclusive: surya-ocr pins

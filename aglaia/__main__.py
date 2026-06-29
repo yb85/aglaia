@@ -49,13 +49,14 @@ def _ensure_std_streams() -> None:
 
 _ensure_std_streams()
 
-from aglaia.app import main
-
 
 def run() -> int:
     multiprocessing.freeze_support()
     multiprocessing.set_start_method("spawn", force=True)
-    return main()
+    # Imported lazily (after the spawn wiring) so a spawned worker re-running
+    # this module doesn't pull the CLI/app graph before doing its task.
+    from aglaia.cli import run as cli_run
+    return cli_run()
 
 
 if __name__ == "__main__":

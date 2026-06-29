@@ -39,8 +39,8 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)
 
 from aglaia.workers.cli import (
-    CliConfig, ExportTask, default_parent_dir, default_project_name,
-    effective_workers, parse_argv, resolve_pipeline_path,
+    CliConfig, default_parent_dir, default_project_name,
+    effective_workers, resolve_pipeline_path,
 )
 
 
@@ -51,6 +51,7 @@ def _sigterm(_sig, _frame):
 # ── headless path ─────────────────────────────────────────────────────
 
 def _run_headless(cfg: CliConfig) -> int:
+    signal.signal(signal.SIGTERM, _sigterm)
     # CLI-only first-run gate: processing assumes a configured install (a
     # detection model, seeded pipelines, defaults). If nothing's set up yet,
     # point the user at `aglaia --setup` instead of failing deep in the chain.
@@ -1045,48 +1046,32 @@ def _trace(msg: str) -> None:
         pass
 
 
-def main(argv: list[str] | None = None) -> int:
-    _trace("main: enter")
+def launch_gui(cfg: CliConfig) -> int:
+    """Launch the capture GUI — the `gui` command and the default action.
+
+    Falls back to the headless pipeline when PySide6 isn't installed but the
+    user passed inputs (a `pip install aglaia` base install has no Qt)."""
+    _trace("launch_gui: enter")
     signal.signal(signal.SIGTERM, _sigterm)
-    cfg = parse_argv(list(argv if argv is not None else sys.argv[1:]))
-    _trace(f"main: parsed argv, headless={cfg.headless} has_inputs={cfg.has_inputs()}")
 
-    from aglaia.workers.cli import run_list_commands
-    if run_list_commands(cfg):
-        return 0
-
-    if cfg.setup:
-        from aglaia.workers.setup_cli import run_setup
-        return run_setup()
-
-    if cfg.headless:
-        if not cfg.has_inputs():
-            print("--headless requires positional inputs.", file=sys.stderr)
-            return 2
-        return _run_headless(cfg)
-
-    # No-GUI install (`aglaia-cli --without-gui`, `pip install aglaia` base):
-    # PySide6 isn't present, so there's no GUI to launch. Fall back to the
-    # headless pipeline automatically — the user shouldn't have to pass
-    # --headless when the GUI simply isn't installed.
+    # No-GUI install: PySide6 absent → run headless if there are inputs.
     if not _qt_available():
         if cfg.has_inputs():
-            _trace("main: PySide6 absent → auto headless")
+            _trace("launch_gui: PySide6 absent → auto headless")
             print("No GUI (PySide6 not installed) — running headless.",
                   file=sys.stderr)
             return _run_headless(cfg)
         print("No GUI: PySide6 is not installed and no inputs were given.\n"
-              "Pass image / PDF / .agl paths to run the headless pipeline, or\n"
-              "install the GUI: pip install \"aglaia[gui,macos]\".",
+              "Pass image / PDF / .agl paths to run the headless pipeline (or the\n"
+              "`run` command), or install the GUI: pip install \"aglaia[gui,macos]\".",
               file=sys.stderr)
         return 2
 
-    # GUI path.
-    _trace("main: building QApplication")
+    _trace("launch_gui: building QApplication")
     app = _qt_app()
     if app.property("aglaia_abort_launch"):
         return 0  # first-run setup was closed before completion — exit.
-    _trace("main: QApplication built")
+    _trace("launch_gui: QApplication built")
 
     # Optional tracemalloc loop for GUI debugging.
     if cfg.diagnose_memory:
@@ -1153,6 +1138,14 @@ def main(argv: list[str] | None = None) -> int:
         if not restart_action:
             return 0
         _trace(f"main: restart requested → {restart_action}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Back-compat shim. The process entry point is now :func:`aglaia.cli.run`
+    (the Typer subcommand app); this just delegates so older callers and
+    `python -c "from aglaia.app import main"` keep working."""
+    from aglaia.cli import run
+    return run(argv)
 
 
 def _spawn_memory_dump_loop() -> None:
