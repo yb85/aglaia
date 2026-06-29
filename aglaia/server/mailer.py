@@ -22,9 +22,10 @@ from typing import Optional
 from aglaia.server import db as sdb
 
 
-def download_url(base_url: Optional[str], job_id: str, which: str, token: str) -> str:
+def download_url(base_url: Optional[str], job_id: str, which: str) -> str:
+    # Capability URL — the unguessable job_id is the secret (no token needed).
     base = (base_url or "").rstrip("/")
-    return f"{base}/download/{job_id}/{which}?token={token}"
+    return f"{base}/download/{job_id}/{which}"
 
 
 def send_completion(db_file: Path, *, to: str, job, base_url: Optional[str]) -> bool:
@@ -34,12 +35,12 @@ def send_completion(db_file: Path, *, to: str, job, base_url: Optional[str]) -> 
     if not smtp or not smtp.get("host"):
         return False
 
-    job_id, token = job["id"], job["download_token"]
+    job_id = job["id"]
     links = []
     if job["pdf_path"]:
-        links.append(("PDF", download_url(base_url, job_id, "pdf", token)))
+        links.append(("PDF", download_url(base_url, job_id, "pdf")))
     if job["md_path"]:
-        links.append(("Markdown", download_url(base_url, job_id, "md", token)))
+        links.append(("Markdown", download_url(base_url, job_id, "md")))
     body = "Your Aglaïa scan is ready.\n\n" + "\n".join(f"{label}: {url}" for label, url in links)
 
     msg = EmailMessage()

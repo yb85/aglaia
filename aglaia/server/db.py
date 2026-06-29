@@ -58,7 +58,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     error          TEXT,
     pdf_path       TEXT,
     md_path        TEXT,
-    download_token TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -93,11 +92,6 @@ def open_db(path: Path | str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
-    # Lazy migration for DBs created before download_token existed.
-    try:
-        conn.execute("ALTER TABLE jobs ADD COLUMN download_token TEXT")
-    except sqlite3.OperationalError:
-        pass
     return conn
 
 
@@ -175,17 +169,15 @@ def create_job(
     ocr_spec: Optional[str],
     email_notif: bool,
     dpi: Optional[float],
-) -> str:
-    """Create a pending job. Returns its download token (for email links)."""
+) -> None:
+    """Create a pending job. The (unguessable, CSPRNG) ``job_id`` is itself the
+    download capability — there's no separate token."""
     now = _now()
-    token = secrets.token_urlsafe(18)
     conn.execute(
         "INSERT INTO jobs (id, api_key_id, status, kind, ocr_spec, email_notif, dpi, "
-        "attempt, download_token, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-        (job_id, api_key_id, STATUS_PENDING, kind, ocr_spec, int(email_notif), dpi, token, now, now),
+        "attempt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+        (job_id, api_key_id, STATUS_PENDING, kind, ocr_spec, int(email_notif), dpi, now, now),
     )
-    return token
 
 
 def revoke_api_key(conn: sqlite3.Connection, key_id: int) -> None:

@@ -115,8 +115,8 @@ def create_app(
     def _result(conn: sqlite3.Connection, job: sqlite3.Row) -> dict:
         out = _job_public(job)
         base = sdb.get_config(conn, sdb.CONFIG_BASE_URL)
-        out["pdf_url"] = download_url(base, job["id"], "pdf", job["download_token"]) if job["pdf_path"] else None
-        out["md_url"] = download_url(base, job["id"], "md", job["download_token"]) if job["md_path"] else None
+        out["pdf_url"] = download_url(base, job["id"], "pdf") if job["pdf_path"] else None
+        out["md_url"] = download_url(base, job["id"], "md") if job["md_path"] else None
         return out
 
     @app.get("/health")
@@ -176,22 +176,16 @@ def create_app(
             return _result(conn, sdb.get_job(conn, job_id))
 
     @app.get("/download/{job_id}/{which}")
-    def download(job_id: str, which: str, api_key: Optional[str] = Query(None),
-                 token: Optional[str] = Query(None)) -> FileResponse:
+    def download(job_id: str, which: str) -> FileResponse:
+        # Capability URL: the unguessable (128-bit CSPRNG) job_id IS the secret,
+        # so the email's download links work directly — no API key needed here.
+        # (All *other* endpoints still require the API key.)
         if which not in ("pdf", "md"):
             raise HTTPException(status_code=400, detail="which must be 'pdf' or 'md'")
         with sdb.session(db_file) as conn:
             job = sdb.get_job(conn, job_id)
             if job is None:
                 raise HTTPException(status_code=404, detail="job not found")
-            ok = False
-            if token and job["download_token"] and secrets.compare_digest(token, job["download_token"]):
-                ok = True
-            elif api_key:
-                key = sdb.api_key_row(conn, api_key)
-                ok = key is not None and key["id"] == job["api_key_id"]
-            if not ok:
-                raise HTTPException(status_code=403, detail="forbidden")
             path = job["pdf_path"] if which == "pdf" else job["md_path"]
         if not path or not Path(path).is_file():
             raise HTTPException(status_code=404, detail=f"{which} not available")

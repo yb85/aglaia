@@ -67,7 +67,7 @@ def test_process_pdf_no_ocr_makes_pdf_only(tmp_path, monkeypatch):
     assert Path(job["pdf_path"]).is_file()
     assert job["md_path"] is None
     assert not (data_dir / job_id / "proj").exists()          # transient .agl discarded
-    assert client.get(f"/download/{job_id}/pdf", params={"api_key": key}).status_code == 200
+    assert client.get(f"/download/{job_id}/pdf").status_code == 200
 
 
 def test_process_with_ocr_makes_pdf_and_md(tmp_path, monkeypatch):
@@ -143,14 +143,15 @@ def test_delete_cancels_pending_batch(tmp_path, monkeypatch):
     assert "called" in cancelled
 
 
-def test_download_by_token(tmp_path, monkeypatch):
-    client, key, _a, db_path, _d, p = _setup(tmp_path)
+def test_download_is_capability_url(tmp_path, monkeypatch):
+    # The unguessable job_id alone is the download capability (for email links) —
+    # no API key, no token. Other endpoints still require the key.
+    client, key, _a, _db, _d, p = _setup(tmp_path)
     monkeypatch.setattr(proc, "run_pipeline", _fake_run())
     job_id = _submit(client, key)
     p.process_job(job_id)
-    token = _job(db_path, job_id)["download_token"]
-    assert client.get(f"/download/{job_id}/pdf", params={"token": token}).status_code == 200
-    assert client.get(f"/download/{job_id}/pdf", params={"token": "wrong"}).status_code == 403
+    assert client.get(f"/download/{job_id}/pdf").status_code == 200       # secret id is enough
+    assert client.get("/download/guess-this-id/pdf").status_code == 404   # unknown id
 
 
 def test_admin_create_and_revoke_key(tmp_path):
