@@ -27,6 +27,7 @@ const SKIP = new Set([
   'landing-page-arch.md',  // landing-page copy spec, not a reference doc
   'development.md',    // dev setup — not user-facing public reference
   'distribution.md',   // release/CI internals — not user-facing reference
+  'subcommand-cli.md', // internal CLI-redesign plan, not user reference
 ]);
 
 function titleFrom(md, fallback) {

@@ -5,6 +5,8 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | Doc | Topic |
 |---|---|
 | [quickstart.md](./quickstart.md) | **Start here** — install → capture/import → process → OCR → export, GUI + headless |
+| [cli.md](./cli.md) | CLI reference — subcommands (`gui` / `run` / `setup` / `list` / `server` / `version`), shared options, the `--ocr`/`--export` spec format, migration from the old flat flags |
+| [server.md](./server.md) | `aglaia server` HTTP job API — endpoints, auth, job lifecycle, Mistral-batch backoff, capability download URLs, completion email, admin panel, storage layout |
 | [architecture.md](./architecture.md) | Process tree, IntegratedProcessingChain, log_queue protocol |
 | [pipeline.md](./pipeline.md) | YAML pipeline schema, template substitution, default pipeline annotated |
 | [processors.md](./processors.md) | DPIfixer, SkewFinder, PageDetector, Binarizer, PageDewarper — options, behavior, extension points, **drop-in user plugins** |

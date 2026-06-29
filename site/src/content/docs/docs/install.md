@@ -40,15 +40,20 @@ Cask. Add `--without-gui` for the lean headless-only build (no PySide6).
 
 ## Install via pip
 
-Aglaïa is a pip-installable package exposing an `aglaia` command. The base
-install is lean and GUI-free — running `aglaia <inputs>` then auto-selects
-the headless pipeline (no `--headless` needed):
+Aglaïa is a pip-installable package exposing an `aglaia` command built from
+subcommands: `aglaia` (or `aglaia ~/book.agl`) opens the GUI, while
+`aglaia run PATHS…` batches headlessly. The base install is lean and
+GUI-free:
 
 ```bash
 pip install aglaia                  # lean base: headless batch pipeline, no Qt
 pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
-aglaia ~/scans/my-book              # GUI if installed, else headless
+pip install "aglaia[server]"        # the HTTP job API — `aglaia server`
+aglaia run ~/scans/*.jpg --ocr auto --export pdf:g4+md   # headless batch
 ```
+
+See the [CLI reference](/docs/reference/cli) for every subcommand and flag,
+and the [Server](/docs/concepts/server) page for the job API.
 
 OCR engines: **`pip` can't install both** — `surya-ocr` pins
 `huggingface-hub<1`, `mlx-vlm` (paddle) needs `>=1.5`, so a loose pip

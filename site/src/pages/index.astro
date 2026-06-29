@@ -345,8 +345,9 @@ uv sync                             # headless: CLI pipeline, no Qt
 #   --extra voice    # offline voice control (Vosk, cross-platform)
 #   --extra cloud    # Mistral cloud OCR
 #   --extra cuda     # NVIDIA GPU dewarp (Linux)
+#   --extra server   # HTTP job API (`aglaia server`)
 
-uv run aglaia ~/scans/my-book</code></pre>
+uv run aglaia ~/scans/my-book       # GUI; `aglaia run …` to batch headlessly</code></pre>
           <pre class="code__panel" data-panel="pip"><code># from PyPI — installs the `aglaia` command
 pip install aglaia                  # lean base: headless pipeline, no Qt
 pip install "aglaia[gui]"           # Windows / Linux GUI (Qt)
@@ -357,8 +358,10 @@ pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
 #   pip install "aglaia[surya]"     # Surya OCR (cross-platform)
 #   pip install "aglaia[paddle]"    # PaddleOCR-VL
 # Apple Vision OCR needs no extra — it ships with [macos].
+# pip install "aglaia[server]"      # HTTP job API (`aglaia server`)
 
-aglaia ~/scans/my-book              # launch</code></pre>
+aglaia ~/scans/my-book              # opens the GUI
+aglaia run ~/scans/*.jpg            # headless batch</code></pre>
         </div>
       </section>
 

@@ -29,8 +29,8 @@ enqueued into the processing chain. Images are content-hashed, so
 re-importing an identical file does not duplicate the blob.
 
 In the GUI, imported pages appear in the scans column immediately and
-begin processing; in headless mode the positional arguments to
-`aglaia.py` are the import set.
+begin processing; in headless mode the positional `PATHS…` arguments to
+`aglaia run` are the import set.
 
 ## Use cases
 

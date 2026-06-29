@@ -104,7 +104,7 @@ options:
   merge_gap_norm_cap: 0.15 # cap on the normalized inter-box gap
 ```
 
-The default `auto` backend resolves **dbnet → apple_vision (macOS) → east**. The projection-profile `heuristic` is no longer an `auto` fallback — `auto` raises `LayoutModelUnavailable` if no ML model is installed (download one with `aglaia --setup` or the in-app downloader); pick `heuristic` explicitly to use it.
+The default `auto` backend resolves **dbnet → apple_vision (macOS) → east**. The projection-profile `heuristic` is no longer an `auto` fallback — `auto` raises `LayoutModelUnavailable` if no ML model is installed (download one with `aglaia setup` or the in-app downloader); pick `heuristic` explicitly to use it.
 
 ## Binarizer (`aglaia/processors/Binarizer.py`)
 

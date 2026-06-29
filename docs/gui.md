@@ -1,6 +1,8 @@
 # GUI (aglaia)
 
-PySide6 desktop app. Entry: `uv run aglaia <workspace_dir>`.
+PySide6 desktop app. Entry: `uv run aglaia gui [PROJECT]` — `gui` is the
+default command, so `uv run aglaia` and `uv run aglaia ~/book.agl` open it too.
+See the [CLI reference](./cli.md).
 
 ## Layout
 

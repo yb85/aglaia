@@ -14,6 +14,9 @@ pipeline.
 ## Where to go next
 
 - **[Install](/docs/install)** — download the app or build from source.
+- **[CLI](/docs/reference/cli)** — the `aglaia` subcommands (`run`, `setup`,
+  `list`, `server`).
+- **[Server](/docs/concepts/server)** — run Aglaïa as an HTTP job API.
 - **[Architecture](/docs/reference/architecture)** — how the chain runs.
 - **[Pipeline](/docs/reference/pipeline)** — the YAML step schema.
 - **[Processors](/docs/reference/processors)** — the built-in steps and how

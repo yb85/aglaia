@@ -37,7 +37,7 @@ the backend is unavailable.
 
 ## How to run it
 
-| | Capture GUI | Headless CLI |
+| | Capture GUI | Headless CLI (`aglaia run`) |
 |---|---|---|
 | PDF | Export tab → PDF | `--export pdf` (or `pdf:g4`, `pdf:jbig2`, …) |
 | Markdown | Export tab → Markdown | `--export md` |
@@ -48,8 +48,9 @@ Exports are written next to the project as `<slug>.pdf` / `<slug>.md`.
 Each `--export` entry uses Aglaïa's standard option-spec format —
 `name[:token|key=value]` — so `pdf:g4` (token) and `pdf:profile=g4` (param)
 are equivalent, and Markdown refinement is `md:refine=apple_fm`. The same
-format drives `--do-ocr` (e.g. `apple:lang=fr-FR`); `:` and `=` are
-reserved, quote a value to use them literally.
+format drives `--ocr` (e.g. `--ocr apple:lang=fr-FR`; use `--ocr auto` for
+the default engine); `:` and `=` are reserved, quote a value to use them
+literally.
 
 ## Related resources
 

@@ -54,11 +54,15 @@ identical results.
 
 | | Capture GUI | Headless CLI |
 |---|---|---|
-| Entry | `aglaia.py <dir>` | `aglaia.py <inputs> --headless` |
+| Entry | `aglaia [PROJECT]` (the default command) | `aglaia run PATHS…` |
 | Import | live webcam + import panel | image / PDF / `.agl` arguments |
 | Processing | identical `IntegratedProcessingChain` | identical |
-| OCR / export | tabs + buttons | `--do-ocr` / `--export` flags |
+| OCR / export | tabs + buttons | `--ocr` / `--export` flags |
 | Use when | scanning interactively | batching, automation |
+
+> The CLI is organised into subcommands — `aglaia run` (batch),
+> `aglaia setup`, `aglaia list`, `aglaia server`, `aglaia version`. Running
+> `aglaia` (or `aglaia ~/book.agl`) with no subcommand opens the GUI.
 
 ## Related resources
 

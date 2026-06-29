@@ -9,8 +9,9 @@ Install: download **Aglaïa** for macOS (Apple Silicon) from
 [aglaia.bibli.cc](https://aglaia.bibli.cc), open the `.dmg`, and drag the app
 to your Applications folder.
 
-> There's also a cross-platform headless command-line mode for power users —
-> see the [CLI reference](./configuration.md). This guide stays in the app.
+> There's also a cross-platform command-line mode for power users (`aglaia run`
+> for batch processing, `aglaia server` for an HTTP job API) — see the
+> [CLI reference](./cli.md). This guide stays in the app.
 
 ---
 

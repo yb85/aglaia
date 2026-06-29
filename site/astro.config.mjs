@@ -50,6 +50,7 @@ export default defineConfig({
             { label: 'Pipeline processing', slug: 'docs/concepts/pipeline-processing' },
             { label: 'OCR engines', slug: 'docs/concepts/ocr-engines' },
             { label: 'Export', slug: 'docs/concepts/export' },
+            { label: 'Server', slug: 'docs/concepts/server' },
             { label: 'The .AGL project file', slug: 'docs/concepts/agl-project-file' },
           ],
         },
@@ -63,6 +64,8 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
+            { label: 'CLI', slug: 'docs/reference/cli' },
+            { label: 'Server API', slug: 'docs/reference/server' },
             { label: 'Architecture', slug: 'docs/reference/architecture' },
             { label: 'The capture GUI', slug: 'docs/reference/gui' },
             { label: 'Pipeline', slug: 'docs/reference/pipeline' },

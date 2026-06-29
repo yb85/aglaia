@@ -156,6 +156,7 @@ CLI-only or scripted setups (any platform) install via **uv** or **pip**:
 pip install aglaia                  # lean base: headless pipeline, no Qt
 pip install "aglaia[gui]"           # Windows / Linux GUI (Qt)
 pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
+pip install "aglaia[server]"        # HTTP job server (FastAPI + uvicorn)
 ```
 
 ```sh
@@ -167,18 +168,19 @@ uv sync                             # headless: CLI pipeline, no Qt
 ```
 
 Optional extras: `--extra surya` / `--extra paddle` (OCR engines),
-`--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra cuda` (NVIDIA
-GPU dewarp on Linux).
+`--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra server`
+(FastAPI + uvicorn HTTP job server), `--extra cuda` (NVIDIA GPU dewarp
+on Linux).
 
 **First run (CLI-only installs):** run the one-time setup to pick and download
 the offline models, seed the default pipelines, and bootstrap the config:
 
 ```sh
-aglaia --setup        # interactive: choose models (DBnet, EAST, Surya…), download, configure
+aglaia setup        # interactive: choose models (DBnet, EAST, Surya…), download, configure
 ```
 
 This is the terminal equivalent of the GUI's first-run wizard. A headless batch
-run refuses to start until the install is configured (`--setup` or the GUI).
+run refuses to start until the install is configured (`aglaia setup` or the GUI).
 The GUI installs run the wizard automatically on first launch.
 
 >[!WARNING] Build with the right options
@@ -190,20 +192,70 @@ The GUI installs run the wizard automatically on first launch.
 <!-- USAGE -->
 ## Usage
 
-```sh
-# Capture GUI (webcam + processing chain + voice control)
-uv run aglaia ~/scans/my-book        # or just `aglaia …` once installed
+Aglaïa is a subcommand CLI — `aglaia <command> [options]`. `gui` is the
+default command, so a bare invocation (or one with a project path) opens the
+capture GUI. From source, prefix with `uv run`.
 
-# Headless CLI batch — same chain, no Qt
-uv run aglaia ~/scans/my-book.agl --headless -p aglaia/config/pipelines/book_curved_x2.yaml
+```sh
+# Capture GUI (webcam + processing chain + voice control) — `gui` is the default
+uv run aglaia                        # or just `aglaia` once installed
+uv run aglaia ~/scans/my-book        # open/create a project in the GUI
+uv run aglaia gui --camera-id 1      # explicit form
+
+# Headless batch — same chain, no Qt
+uv run aglaia run ~/scans/*.jpg --ocr auto --export pdf:g4+md
+uv run aglaia run ~/scans/my-book.agl -p book_curved_x2 --ocr surya:lang=fr-FR
 ```
 
-Key flags: `--setup` (first-run config), `-c/--config`, `-p/--pipeline`,
-`--workers`, `--export`, `--ocr`, `--input-dpi`, `--headless`,
-`--camera-id`. The import panel accepts multiple images and PDFs (per-page
-extract or render). Page detection defaults to **DBnet** (`auto` resolves
-DBnet → Apple Vision on macOS → EAST); `aglaia --setup` and the in-app
-downloader fetch the models, or drop them into `./model/` / `./models/`.
+Commands:
+
+| Command | What it does |
+|---|---|
+| `gui [PROJECT]` | Capture GUI (default). `--camera-id N`, `--diagnose-memory`. |
+| `run PATHS…` | Headless batch over images, PDFs, or one `.agl`. `--ocr ENGINE[:opt…]` (now needs a value — use `--ocr auto`), `--ocr-lang`, `--export`, `--md-refine`, `--project-name`, `--parent-dir`, `--input-dpi [force:]N`, `--check-ocr`. |
+| `setup` | Interactive first-run setup (choose/download models, seed config). |
+| `list pipelines\|ocr\|exports` | Introspect available pipelines, OCR engines, exporters. |
+| `server` | HTTP job server (see below). |
+| `version` | Print the version (`--version` also works). |
+
+Shared options (on `gui` and `run`): `-p/--pipeline NAME|PATH`
+(`book_curved_x2` resolves to the bundled pipeline, or pass a `.yaml`),
+`--workers N` (0 = auto), `--force-proc`.
+
+The import panel / `run` accept multiple images and PDFs (per-page extract or
+render). Page detection defaults to **DBnet** (`auto` resolves DBnet → Apple
+Vision on macOS → EAST); `aglaia setup` and the in-app downloader fetch the
+models, or drop them into `./model/` / `./models/`.
+
+> **Migrating from the flat CLI:** the old flags are gone (clean break,
+> pre-1.0). `--headless` → `run`, `--setup` → `setup`,
+> `--pipeline-list`/`--ocr-list`/`--export-list` → `list …`, and a bare
+> `--ocr` now needs a value (`--ocr auto`).
+
+### Server
+
+`aglaia server` (needs the `server` extra) runs a long-running HTTP job API on
+port **4674**. Submit a captured **bundle** (from the aglaia-bridge iOS app) or
+a **PDF** and get back a searchable PDF — plus Markdown when OCR is on; the
+transient `.agl` is never kept.
+
+```sh
+uv run aglaia server --host 0.0.0.0 --port 4674 --public-url https://scan.example.com
+```
+
+Endpoints include `POST /run` (API key; upload + `email_notif`, `ocr`, `dpi`),
+`GET /list`, `GET /check/{id}`, `GET /get/{id}`,
+`GET /download/{id}/{pdf|md}` (capability URL — the unguessable `job_id` is
+the secret, so email links need no key), `POST /delete/{id}`, an admin console
+(`GET /admin` + `POST /admin/keys` / `…/revoke`, keys tied to emails), and
+`GET /health`. Mistral OCR runs as a batch with exponential-backoff polling;
+a completion email (when requested) carries the download links.
+
+### Receive from phone
+
+The iOS companion app **aglaia-bridge** (separate repo) captures book pages on
+your phone and pushes them to the desktop over the LAN — QR-bootstrapped,
+TLS-pinned. Use the Import tab's **Receive from phone** button to pair.
 
 _For the full guide, see the [documentation](https://aglaia.bibli.cc/docs)._
 

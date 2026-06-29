@@ -38,6 +38,14 @@ re-reads the low-confidence lines.
 A unified **OCR DPI** knob downsamples the page to a sweet spot
 (≈150 dpi) before inference, regardless of engine.
 
+## Choosing an engine
+
+In the GUI, pick the engine in the OCR tab. From the headless CLI, pass
+`--ocr` to `aglaia run` — `--ocr auto` for the default (Apple Vision →
+Surya), or a named engine with options, e.g. `--ocr apple:lang=fr-FR` or
+`--ocr surya`. Add `--ocr-lang fr-FR+en-US` to set languages. List what's
+available with `aglaia list ocr`.
+
 ## Related resources
 
 - [Processors](/docs/reference/processors) — add a drop-in OCR engine plugin

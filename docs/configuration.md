@@ -1,10 +1,13 @@
 # Configuration
 
-The user-facing CLI is `aglaia/workers/cli.py` (`build_parser` → `parse_argv`),
-shared by `aglaia` and the headless runner. Per-invocation choices are
-flags; runtime *preferences* (default engine, thumb size, theme, worker
-count) live in the per-user config DB (`aglaia/app_data/db.py`). See
-[gui.md](gui.md) for the app-data store.
+The user-facing CLI is the Typer app in `aglaia/cli/` (subcommands `gui` /
+`run` / `setup` / `list` / `server` / `version`) — see the [CLI reference](cli.md).
+This page documents the **internal** config layer those commands feed:
+`aglaia/workers/cli.py` (`CliConfig` + the `--ocr`/`--export` spec parsers),
+shared by the GUI and the headless runner. Per-invocation choices are flags;
+runtime *preferences* (default engine, thumb size, theme, worker count) live in
+the per-user config DB (`aglaia/app_data/db.py`). See [gui.md](gui.md) for the
+app-data store.
 
 The `DEFAULT_CONFIG` / `DEFAULT_ARGS` + `-c path.yml` YAML layer (below)
 lives in `aglaia/workers/Initializer.py` and is fed a synthetic argv by the
@@ -112,7 +115,7 @@ After `initialize`, `aglaia` overwrites `args.options["calibration"]["camera_mat
 ## Example: headless run
 
 ```bash
-uv run aglaia ~/scans/book.agl --headless \
+uv run aglaia run ~/scans/book.agl \
   -p full \
   --ocr auto --ocr-lang fr-FR+en-US \
   --export pdf:g4+md
