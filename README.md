@@ -167,10 +167,16 @@ uv sync --extra gui                 # Windows / Linux GUI
 uv sync                             # headless: CLI pipeline, no Qt
 ```
 
-Optional extras: `--extra surya` / `--extra paddle` (OCR engines),
-`--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra server`
-(FastAPI + uvicorn HTTP job server), `--extra cuda` (NVIDIA GPU dewarp
-on Linux).
+Optional extras: `--extra cloud` (Mistral OCR), `--extra surya` (Surya OCR),
+`--extra paddle` (PaddleOCR-VL — needs `--extra macos` too), `--extra voice`
+(Vosk), `--extra server` (FastAPI + uvicorn HTTP job server).
+
+**Local VLM OCR** (`--ocr glm` / `--ocr unlimited`, also PaddleOCR-VL) serves
+through a bundled-by-platform backend: `--extra macos` ships the MLX backend
+(Apple Silicon), `--extra cuda` ships vLLM (Linux, GPU or CPU). So on a Mac the
+GUI install (`--extra gui --extra macos`) already includes local VLM OCR; on a
+Linux GPU box use `--extra cuda`. (`surya` and `cuda` are mutually exclusive —
+incompatible torch/openai pins.)
 
 **First run (CLI-only installs):** run the one-time setup to pick and download
 the offline models, seed the default pipelines, and bootstrap the config:

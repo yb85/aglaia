@@ -195,8 +195,9 @@ class OpenAiCompatVlmOcr(OcrEngine):
         be = self._backend()
         if be is None:
             raise RuntimeError(
-                f"{self.name}: no local VLM backend available — install "
-                "`mlx-vlm` (Apple Silicon) or `vllm` (CUDA)."
+                f"{self.name}: no local VLM backend available — install one: "
+                "`--extra macos` (Apple Silicon / mlx-vlm) or "
+                "`--extra cuda` (Linux / vLLM)."
             )
         key = self._target_key_for(be)
         if not key or not is_downloaded(key):

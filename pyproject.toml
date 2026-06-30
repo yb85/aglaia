@@ -48,13 +48,13 @@ surya = [
     # out of the Linux bundle; Surya OCR runs through llama-server, not torch.
     "torch>=2.7.0,<3",
 ]
-# OCR engine: PaddleOCR-VL — the paddleocr orchestrator + CPU paddlepaddle +
-# the MLX vision-language model. Needs huggingface-hub>=1.5 (via mlx-vlm),
-# so it conflicts with `surya` in a loose resolve. `pip install "aglaia[paddle]"`.
+# OCR engine: PaddleOCR-VL — just the paddleocr layout orchestrator + CPU
+# paddlepaddle. The VLM serving backend (mlx-vlm) lives in the `macos` extra, so
+# PaddleOCR-VL needs `--extra macos --extra paddle` — it is Apple-Silicon-only
+# (its pipeline drives the mlx-vlm server). `pip install "aglaia[macos,paddle]"`.
 paddle = [
     "paddleocr[doc-parser]>=3.6.0",
     "paddlepaddle>=3.2.1",
-    "mlx-vlm>=0.6.0",
 ]
 # NOTE: the vLLM serving backend (for the `glm` / `unlimited` OCR engines on
 # CUDA/Linux) is intentionally NOT a managed extra. vLLM hard-pins an exact
@@ -96,6 +96,12 @@ macos = [
     # JAX-CPU host-pool leak (workers ballooning to 14–58 GB during
     # cubic-sheet optimisation). Disabled outside arm64 by the marker.
     "mlx>=0.20; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # MLX VLM serving backend (mlx_vlm.server). The local OCR VLM engines
+    # (`glm` / `unlimited` / `paddle_vl`) serve through it on Apple Silicon, so
+    # `--extra macos` gives a working local VLM backend out of the box. Disjoint
+    # from the `cuda` extra's vLLM by platform marker (avoids their llguidance
+    # clash). arm64-only.
+    "mlx-vlm>=0.6.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -118,6 +124,12 @@ cuda = [
     # aglaia/processors/dewarp_batcher.py + #28). Pure Python on JAX; the batched
     # solver imports it lazily and the CPU per-page path never needs it.
     "optax>=0.2.0",
+    # vLLM serving backend for the local OCR VLM engines (`glm` / `unlimited`) on
+    # Linux — so `--extra cuda` gives a working local VLM backend. GPU when a CUDA
+    # torch is present; CPU otherwise (the bundled torch is the CPU build via the
+    # pytorch-cpu index — the "worst case" path). Disjoint from `macos`'s mlx-vlm
+    # by platform marker. Conflicts with `surya` (declared in [tool.uv]).
+    "vllm>=0.6.0; sys_platform == 'linux'",
 ]
 jbig2 = [
     # Native JBIG2 encoder for PDF export. Build the wheel locally with
@@ -222,4 +234,13 @@ override-dependencies = [
     # wins non-deterministically. Pinning the GUI build to the same version
     # as headless keeps the shared `cv2/` a single consistent payload.
     "opencv-python==4.11.0.86",
+    "opencv-python-headless==4.11.0.86",
+]
+# vLLM (bundled in `cuda`) hard-pins torch + openai>=2 + its own llguidance,
+# which can't coexist with surya-ocr's torch>=2.7 / openai<2. Declaring the
+# conflict lets uv resolve them in separate splits instead of failing to find
+# one combined lock. (macOS's mlx-vlm and Linux's vLLM are already disjoint via
+# platform markers, so those two never clash.)
+conflicts = [
+    [{ extra = "surya" }, { extra = "cuda" }],
 ]

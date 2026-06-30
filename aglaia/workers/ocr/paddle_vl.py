@@ -120,10 +120,11 @@ class PaddleVlEngine(OcrEngine):
             return cls._pipeline
         if not _python_deps_present():
             raise RuntimeError(
-                "Paddle Python deps missing. Install with:\n"
-                "  uv pip install paddlepaddle==3.2.1 "
-                "--index-url=https://www.paddlepaddle.org.cn/packages/stable/cpu/\n"
-                "  uv pip install 'paddleocr[doc-parser]' 'mlx-vlm>=0.3.11'"
+                "PaddleOCR-VL deps missing. PaddleOCR-VL is Apple-Silicon-only "
+                "and needs both extras:\n"
+                "  uv sync --extra macos --extra paddle\n"
+                "(`macos` provides the mlx-vlm backend, `paddle` the paddleocr "
+                "layout orchestrator)."
             )
 
         # Patch known incompatibilities in the downloaded model files

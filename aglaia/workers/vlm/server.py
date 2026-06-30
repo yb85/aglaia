@@ -114,8 +114,9 @@ class LocalVlmServer:
         be = backend or pick_backend()
         if be is None:
             raise RuntimeError(
-                "No local VLM backend available — install `mlx-vlm` (Apple "
-                "Silicon) or `vllm` (CUDA), or set AGLAIA_VLM_BACKEND."
+                "No local VLM backend available — install one: `--extra macos` "
+                "(Apple Silicon / mlx-vlm) or `--extra cuda` (Linux / vLLM), or "
+                "set AGLAIA_VLM_BACKEND."
             )
         srv = cls(key, be)
         srv._spawn(
