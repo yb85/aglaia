@@ -235,6 +235,10 @@ override-dependencies = [
     # as headless keeps the shared `cv2/` a single consistent payload.
     "opencv-python==4.11.0.86",
     "opencv-python-headless==4.11.0.86",
+    # paddleocr pulls opencv-contrib-python — a THIRD distribution writing the
+    # same cv2/ dir. Pin it to the same version too, else it clobbers cv2/ to
+    # its own release (e.g. 4.10) and the shared dir goes half-written/skewed.
+    "opencv-contrib-python==4.11.0.86",
 ]
 # vLLM (bundled in `cuda`) hard-pins torch + openai>=2 + its own llguidance,
 # which can't coexist with surya-ocr's torch>=2.7 / openai<2. Declaring the
