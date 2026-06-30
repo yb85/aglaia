@@ -489,9 +489,13 @@ class PipelineProgressBar(QWidget):
         final state, so reconcile the label to 100 %."""
         if self._imported <= 0:
             return
+        # OCR ("tick") mode owns the bar — the pipeline-idle reconciliation must
+        # NOT snap an in-flight (or partial) OCR pass to 100%. The chain is idle
+        # for the whole OCR run, so this watchdog would otherwise jump the OCR
+        # bar straight to N/N on the first batch. OCR drives its own completion
+        # via mark_tick / _on_ocr_finished.
         if self._tick_mode:
-            # OCR mode: the displayed count is _tick_count — snap it up.
-            self._tick_count = max(self._tick_count, self._imported)
+            return
         pad = self._imported - len(self._done_snaps)
         if pad > 0:
             # Sentinels well clear of real scan_ids (positive) and mark_tick's

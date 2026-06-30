@@ -40,6 +40,30 @@ def test_ocr_ticks_isolated_from_pipeline_mark_done(_qapp):
     assert "12/322" in bar._build_label()
 
 
+def test_force_complete_noop_during_ocr(_qapp):
+    # The pipeline-idle watchdog calls force_complete() while the chain sits
+    # idle — but during an OCR pass that must NOT snap the bar to 100%.
+    bar = PipelineProgressBar()
+    bar.reset()
+    bar.set_imported(322)
+    bar.mark_tick()
+    bar.mark_tick()                 # OCR mid-pass: 2 of 322
+    bar.force_complete()            # chain-idle reconciliation fires
+    assert bar._done_count() == 2   # not snapped to 322
+    assert not bar.is_finished()
+
+
+def test_force_complete_snaps_pipeline(_qapp):
+    # In pipeline mode it still reconciles to 100% (its original purpose).
+    bar = PipelineProgressBar()
+    bar.reset()
+    bar.set_imported(10)
+    bar.mark_done(1)
+    bar.mark_done(2)
+    bar.force_complete()
+    assert bar.is_finished()
+
+
 def test_new_ocr_run_restarts_from_zero(_qapp):
     bar = PipelineProgressBar()
     bar.reset()
