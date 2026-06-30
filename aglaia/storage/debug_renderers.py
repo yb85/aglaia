@@ -713,6 +713,27 @@ def _walk_chain(conn: sqlite3.Connection, leaf_node_id: int) -> list[dict]:
     return chain
 
 
+def _resolve_renderer(proc: str):
+    """Renderer for a node's ``processor_name``.
+
+    Renderers are keyed by processor CLASS name, but a node stores the
+    CONFIGURED step name — a pipeline may name its PageDetector step
+    "LayoutDetector". Try the name directly, then map it through the registry
+    to its class name; only then fall back to ``_default_renderer``. Without
+    the alias step its overlay (e.g. the layout page bboxes) silently shows
+    "no debug renderer for this step"."""
+    renderer = _RENDERERS.get(proc)
+    if renderer is None and proc:
+        try:
+            from aglaia.processors.registry import get_processor
+            info = get_processor(proc)
+            if info is not None:
+                renderer = _RENDERERS.get(info.processor_cls.__name__)
+        except Exception:
+            renderer = None
+    return renderer or _default_renderer
+
+
 def _render_one(conn: sqlite3.Connection, node: dict) -> list[dict]:
     img_row = ImageRepo(conn).get(node["image_id"])
     if img_row is None:
@@ -728,7 +749,7 @@ def _render_one(conn: sqlite3.Connection, node: dict) -> list[dict]:
         except Exception:
             meta = {}
     proc = node.get("processor_name") or ""
-    renderer = _RENDERERS.get(proc, _default_renderer)
+    renderer = _resolve_renderer(proc)
     try:
         try:
             images = renderer(img, parent_img, meta, siblings=siblings)
