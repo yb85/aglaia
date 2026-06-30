@@ -3419,10 +3419,11 @@ class MainWindow(QMainWindow):
         bar.set_label_prefix(self.tr("OCR"))
         bar.reset()
         bar.set_imported(total)
-        # No per-page ticks until the first result lands (whole-doc Cloud
-        # OCR, or the slow first Surya/Paddle batch) — show an activity
-        # animation instead of a stuck 0%. The first tick flips it off.
-        bar.set_indeterminate(True, self.tr("OCR · working…"))
+        # No per-page ticks until the first result lands — for a local VLM
+        # this window is the model spinning up on first run; for Cloud it's
+        # the whole-doc round-trip. "loading…" is more precise than "working"
+        # and matches the worker's first-run log. The first tick flips it off.
+        bar.set_indeterminate(True, self.tr("OCR · loading…"))
 
     def _on_ocr_progress(self, scan_id: int):
         # OCR completes per (scan, branch). The progress tick is cheap (keep it
