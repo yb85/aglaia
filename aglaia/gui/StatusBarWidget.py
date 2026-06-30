@@ -35,7 +35,7 @@ from PySide6.QtGui import (
     QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap, QTextOption,
 )
 from PySide6.QtWidgets import (
-    QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy,
+    QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QSizePolicy,
     QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -46,7 +46,6 @@ from aglaia.gui.colors import (
     COLOR_ERROR,
     COLOR_ERROR_STRONG,
     COLOR_FONT_DIM,
-    COLOR_FONT_INVERSE,
     COLOR_FONT_LINK_HOVER,
     COLOR_FONT_MUTED,
     COLOR_FONT_ON_TOAST,
@@ -339,6 +338,11 @@ class PipelineProgressBar(QWidget):
         self._done_times: deque[float] = deque(maxlen=self._ETA_WINDOW)
         self._label_prefix = self.tr("Pipeline")
         self._tick_count = 0
+        # OCR ("tick") mode: the done-count comes from the private monotonic
+        # `_tick_count`, NOT len(_done_snaps), so a concurrent pipeline
+        # `mark_done` (branch_ready) can't inflate an active OCR pass (the
+        # "334/322" over-count). Set by mark_tick, cleared by reset.
+        self._tick_mode = False
         # Indeterminate ("activity") mode for progress with no per-item ticks.
         self._indeterminate = False
         self._indet_phase = 0.0
@@ -383,9 +387,15 @@ class PipelineProgressBar(QWidget):
         self._done_t = None
         self._done_times.clear()
         self._tick_count = 0
+        self._tick_mode = False
         self._indeterminate = False
         if self._indet_timer.isActive():
             self._indet_timer.stop()
+
+    def _done_count(self) -> int:
+        """The displayed done-count: the isolated OCR tick counter in tick
+        mode, else the deduped pipeline set."""
+        return self._tick_count if self._tick_mode else len(self._done_snaps)
         self.update()
 
     def set_imported(self, n: int):
@@ -434,14 +444,16 @@ class PipelineProgressBar(QWidget):
         scan_id; OCR mode counts per branch (a multi-branch scan should
         tick twice). This path bypasses the set, using a private
         monotonic counter so the two modes don't collide."""
+        self._tick_mode = True
         self._tick_count += 1
-        # Mirror into `_done_snaps` so `_ratio` / final-state stamping
-        # keep working without splitting their plumbing.
+        # Mirror into `_done_snaps` too (harmless), but the displayed count in
+        # tick mode is `_tick_count` (see _done_count) — isolated from any
+        # concurrent pipeline `mark_done`.
         self._done_snaps.add(-self._tick_count)
         self._stamp_start_if_needed()
         self._done_times.append(time.monotonic())
         if (self._imported > 0
-                and len(self._done_snaps) >= self._imported
+                and self._done_count() >= self._imported
                 and self._done_t is None):
             self._done_t = time.monotonic()
         self.update()
@@ -457,7 +469,7 @@ class PipelineProgressBar(QWidget):
         self._done_times.append(time.monotonic())
         # Freeze the total-elapsed timestamp once we hit 100 %.
         if (self._imported > 0
-                and len(self._done_snaps) >= self._imported
+                and self._done_count() >= self._imported
                 and self._done_t is None):
             self._done_t = time.monotonic()
         self.update()
@@ -465,7 +477,7 @@ class PipelineProgressBar(QWidget):
     def is_finished(self) -> bool:
         """True once the bar has reached (or been snapped to) 100 %."""
         return (self._imported > 0
-                and len(self._done_snaps) >= self._imported
+                and self._done_count() >= self._imported
                 and self._done_t is not None)
 
     def force_complete(self) -> None:
@@ -477,6 +489,9 @@ class PipelineProgressBar(QWidget):
         final state, so reconcile the label to 100 %."""
         if self._imported <= 0:
             return
+        if self._tick_mode:
+            # OCR mode: the displayed count is _tick_count — snap it up.
+            self._tick_count = max(self._tick_count, self._imported)
         pad = self._imported - len(self._done_snaps)
         if pad > 0:
             # Sentinels well clear of real scan_ids (positive) and mark_tick's
@@ -502,7 +517,7 @@ class PipelineProgressBar(QWidget):
     def _ratio(self) -> float:
         if self._imported <= 0:
             return 0.0
-        return min(1.0, len(self._done_snaps) / self._imported)
+        return min(1.0, self._done_count() / self._imported)
 
     @staticmethod
     def _fmt_duration(seconds: float) -> str:
@@ -528,7 +543,7 @@ class PipelineProgressBar(QWidget):
         return sum(deltas) / len(deltas)
 
     def _build_label(self) -> str:
-        done = len(self._done_snaps)
+        done = self._done_count()
         total = self._imported
         pct = self._ratio() * 100.0
         head = f"{self._label_prefix} · {done}/{total}  ({pct:.0f}%)"
