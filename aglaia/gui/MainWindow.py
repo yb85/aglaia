@@ -2978,6 +2978,13 @@ class MainWindow(QMainWindow):
         # A multi-branch scan reaches branch_ready once per branch, but
         # `set_processing(False)` is idempotent so extra fires are cheap.
         if scan_id is not None:
+            # A (re)processed scan has FRESH node ids. cell_disable_states is
+            # memoised per scan and keyed by node id, so drop this scan's entry
+            # — otherwise the stale map misses every new node, every round
+            # stage-toggle resolves to (toggleable=False) and locks, and since a
+            # locked button can't fire set_step_disabled the cache never clears:
+            # the per-page disable stays dead after any processing/reprocess.
+            self.__dict__.get("_cell_disable_cache", {}).pop(int(scan_id), None)
             w = self.scan_widgets_by_scan.get(int(scan_id))
             if w is not None:
                 w.set_processing(False)   # per-scan spinner clear — immediate
