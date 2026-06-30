@@ -228,10 +228,16 @@ def _run_ocr(
             node_id = int(r["chosen_node_id"])
             image_id = int(r["image_id"])
             blob_row = conn.execute(
-                "SELECT blob FROM images WHERE id = ?", (image_id,)
+                "SELECT blob, dpi FROM images WHERE id = ?", (image_id,)
             ).fetchone()
             if blob_row is None:
                 continue
+            # Pass the page's true DPI so the engine downsamples to the
+            # configured ocr_dpi. Without it the engine sees src_dpi=0 and
+            # falls back to a coarse longest-edge budget that barely shrinks
+            # a 300-dpi page → it OCRs ~2× the pixels (≈2× slower) at the
+            # wrong resolution, unlike the GUI which passes src_dpi.
+            src_dpi = float(blob_row["dpi"] or 0)
             run_id = ocr.start(
                 scan_id=scan_id,
                 node_id=node_id,
@@ -243,7 +249,7 @@ def _run_ocr(
                 pil = Image.open(io.BytesIO(blob_row["blob"])).convert("RGB")
                 arr = np.array(pil, dtype=np.uint8)
                 _t0 = time.perf_counter()
-                result = engine.recognize(arr, languages)
+                result = engine.recognize(arr, languages, src_dpi=src_dpi)
                 _ms = (time.perf_counter() - _t0) * 1000.0
                 ocr.finish(run_id, result)
                 done += 1
