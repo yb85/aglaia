@@ -58,6 +58,7 @@ import numpy as np
 from .engine import (
     OcrEngine, OcrResult, register, engine_log, get_engine,
     resolve_ocr_dpi, downsample_to_dpi, resolve_confidence_gate,
+    direct_block_engines,
 )
 
 _AVAILABLE: Optional[bool] = None
@@ -75,7 +76,10 @@ DEFAULT_CONFIDENCE_GATE = 0.7
 # little breathing room around the glyphs).
 _CROP_PAD_FRAC = 0.15
 
-_VALID_COMPLEMENTS = ("surya", "paddle_vl", "none")
+# Valid complements = any registered DirectBlockOCR engine (+ "none"), resolved
+# dynamically so a new qualifying engine is eligible with no edit here.
+def _valid_complements() -> set[str]:
+    return set(direct_block_engines()) | {"none"}
 
 
 def _check() -> bool:
@@ -97,13 +101,19 @@ def _check() -> bool:
 
 
 def resolve_complement(explicit: str | None = None) -> str:
-    """Pick the complement engine: explicit arg → env → ``surya``."""
+    """Pick the complement engine: explicit arg → env → default. Validated
+    against the registered DirectBlockOCR engines (+ ``none``). Default is
+    ``surya`` when eligible, else the first registered direct-block engine,
+    else ``none``."""
+    valid = _valid_complements()
     for cand in (explicit, os.environ.get("AGLAIA_OCR_COMPLEMENT")):
         if cand:
             c = str(cand).strip().lower()
-            if c in _VALID_COMPLEMENTS:
+            if c in valid:
                 return c
-    return "surya"
+    if "surya" in valid:
+        return "surya"
+    return next(iter(direct_block_engines()), "none")
 
 
 @register

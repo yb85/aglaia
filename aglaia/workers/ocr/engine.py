@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import abc
 import warnings
-from typing import Callable, Optional, TypedDict
+from typing import TypedDict
 
 
 class OcrLine(TypedDict, total=False):
@@ -59,6 +59,9 @@ class OcrEngine(abc.ABC):
                                     # the batch toggle + Jobs UI on the card
     price_per_page_usd: float = 0.0       # list price for the cost estimate
     price_per_page_usd_batch: float = 0.0  # batch list price (0 = no batch)
+    direct_block: bool = False      # can OCR a cropped text block directly (no
+                                    # layout pass) → eligible as an apple_docs
+                                    # complement; the OCR tab lists these.
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -118,12 +121,29 @@ class BatchableOCR(CloudOCR):
     price_per_page_usd_batch: float = 0.0
 
 
+class DirectBlockOCR:
+    """Trait: the engine recognises text in a *cropped block image* directly —
+    no separate layout-detection pass — so it can serve as an apple_docs
+    **complement** (re-OCR of regions Vision can't read, e.g. Greek). Compose it
+    onto recognisers that take an arbitrary image and return its text (the local
+    VLMs, Surya). The OCR tab lists every available DirectBlockOCR engine in the
+    complement picker, so a new qualifying engine shows up with no UI change."""
+    direct_block = True
+
+
 ENGINE_REGISTRY: dict[str, type[OcrEngine]] = {}
 
 
 def register(cls: type[OcrEngine]) -> type[OcrEngine]:
     ENGINE_REGISTRY[cls.name] = cls
     return cls
+
+
+def direct_block_engines() -> list[str]:
+    """Registered engine names usable as a complement (DirectBlockOCR), in
+    registry order. Availability (weights/deps) is the caller's concern."""
+    return [name for name, cls in ENGINE_REGISTRY.items()
+            if getattr(cls, "direct_block", False)]
 
 
 def get_engine(name: str) -> OcrEngine:

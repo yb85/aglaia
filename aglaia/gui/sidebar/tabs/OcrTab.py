@@ -398,12 +398,6 @@ class OcrTab(QWidget):
         "paddle_vl": "ocr",
         "mistral_cloud": "mistral",
     }
-    # Complement choices offered inside the Apple Document card.
-    _COMPLEMENT_CHOICES = (
-        ("surya", "Surya (default)"),
-        ("paddle_vl", "Paddle"),
-        ("none", "None"),
-    )
 
     def _populate_engines(self) -> None:
         from aglaia.workers.ocr import ENGINE_REGISTRY
@@ -586,9 +580,18 @@ class OcrTab(QWidget):
                 return bool(get_engine(k).available)
             except Exception:
                 return False
-        for key, label in self._COMPLEMENT_CHOICES:
+        # Offer every AVAILABLE DirectBlockOCR engine (recognisers that read a
+        # cropped block directly) + None — resolved from the registry, so a new
+        # qualifying engine appears here with no edit.
+        from aglaia.workers.ocr.engine import direct_block_engines
+
+        for key in direct_block_engines():
             if _avail(key):
-                combo.addItem(self.tr(label), key)
+                try:
+                    combo.addItem(get_engine(key).display, key)
+                except Exception:
+                    combo.addItem(key, key)
+        combo.addItem(self.tr("None"), "none")
         try:
             with _cfg.session() as _conn:
                 defaults = _cfg.get(_conn, _cfg.KEY_OCR_DEFAULTS, {}) or {}

@@ -41,6 +41,7 @@ from aglaia.app_data.downloads import is_downloaded, target_for
 from aglaia.workers.vlm import LocalVlmServer, pick_backend
 
 from .engine import (
+    DirectBlockOCR,
     OcrEngine,
     OcrLine,
     OcrResult,
@@ -132,8 +133,11 @@ def parse_grounded_markdown(
     return markdown, lines
 
 
-class OpenAiCompatVlmOcr(OcrEngine):
-    """Base for whole-page VLM OCR over a locally-served OpenAI endpoint."""
+class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
+    """Base for whole-page VLM OCR over a locally-served OpenAI endpoint.
+
+    DirectBlockOCR: these VLMs transcribe whatever image they're given, so they
+    work on a cropped block too → eligible as an apple_docs complement."""
 
     # Abstract base — concrete engines override `name`. The "abstract" sentinel
     # keeps OcrEngine.__init_subclass__ from warning about a missing name here.

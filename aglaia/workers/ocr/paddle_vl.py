@@ -41,7 +41,7 @@ import numpy as np
 from aglaia.workers.vlm import LocalVlmServer, MlxBackend
 
 from .engine import (
-    OcrEngine, OcrResult, OcrLine, register,
+    DirectBlockOCR, OcrEngine, OcrResult, OcrLine, register,
     resolve_ocr_dpi as _target_dpi, downsample_to_dpi as _downsample,
     engine_log as _log,
 )
@@ -93,8 +93,11 @@ def _python_deps_present() -> bool:
 # ── engine ────────────────────────────────────────────────────────────
 
 @register
-class PaddleVlEngine(OcrEngine):
-    """PaddleOCR-VL — VLM + PP-DocLayout pipeline producing native MD."""
+class PaddleVlEngine(DirectBlockOCR, OcrEngine):
+    """PaddleOCR-VL — VLM + PP-DocLayout pipeline producing native MD.
+
+    DirectBlockOCR: usable as an apple_docs complement (recognises a block crop;
+    its layout pass just no-ops on a single region)."""
 
     name = "paddle_vl"
     display = "PaddleOCR-VL"
