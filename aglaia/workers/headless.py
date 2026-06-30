@@ -168,6 +168,58 @@ def _run_ocr(
             print(f"OCR: warmup failed: {e}", file=sys.stderr, flush=True)
         load_s = time.perf_counter() - _tl0
         print(f"OCR: model load {load_s:.1f}s", flush=True)
+
+        # Cloud WHOLE-DOCUMENT engines (Mistral) OCR the entire project in ONE
+        # request — all pages assembled into a single PDF, one API call. The
+        # per-page loop below would upload one PDF per page (24 calls, billed,
+        # and not how the engine is meant to run); route them through the same
+        # recognize_rows() the GUI's OcrWorker uses. (CLI/GUI still have two OCR
+        # drivers — that divergence needs an audit; see issue note.)
+        if callable(getattr(engine, "recognize_rows", None)):
+            img_rows: list[dict] = []
+            handles: list[tuple[int, int, str]] = []  # (run_id, scan_id, bp)
+            for r in rows:
+                irow = conn.execute(
+                    "SELECT blob, dpi, type, format, width, height "
+                    "FROM images WHERE id = ?", (int(r["image_id"]),)
+                ).fetchone()
+                if irow is None:
+                    continue
+                run_id = ocr.start(
+                    scan_id=int(r["scan_id"]), node_id=int(r["chosen_node_id"]),
+                    branch_path=r["branch_path"] or "",
+                    engine=engine_canonical, languages=languages,
+                )
+                img_rows.append(dict(irow))
+                handles.append((run_id, int(r["scan_id"]), r["branch_path"] or ""))
+            if not img_rows:
+                return 1
+            print(f"OCR: 1 whole-document request → {len(img_rows)} page(s)…",
+                  flush=True)
+            _t0 = time.perf_counter()
+            try:
+                results = engine.recognize_rows(img_rows, languages)
+            except Exception as e:  # noqa: BLE001
+                for run_id, _, _ in handles:
+                    ocr.fail(run_id, f"{type(e).__name__}: {e}")
+                print(f"OCR: ERROR {e}", file=sys.stderr, flush=True)
+                return 1
+            req_s = time.perf_counter() - _t0
+            done = 0
+            for (run_id, _sid, _bp), result in zip(handles, results):
+                try:
+                    ocr.finish(run_id, result)
+                    done += 1
+                except Exception as e:  # noqa: BLE001
+                    ocr.fail(run_id, f"{type(e).__name__}: {e}")
+            print(
+                f"OCR: {done} page(s) processed in {req_s:.1f}s "
+                f"(mean {req_s / max(done, 1):.2f}s/page amortized, "
+                f"one whole-document request) + {load_s:.1f}s model load",
+                flush=True,
+            )
+            return 0 if done > 0 else 1
+
         done = 0
         page_ms: list[float] = []
         for r in rows:
