@@ -185,6 +185,36 @@ def test_recognize_batch_per_page_failure_is_isolated(monkeypatch):
     assert res["lines"] == [] and res["meta"]["markdown"] == ""  # empty, not crash
 
 
+def test_recognize_batch_concurrent_preserves_order(monkeypatch):
+    import time
+
+    import aglaia.workers.ocr.openai_compat as OC
+
+    monkeypatch.setattr(OC, "pick_backend", lambda *a, **k: _FakeBackend("mlx"))
+    monkeypatch.setattr(OC, "is_downloaded", lambda key: True)
+    monkeypatch.setattr(
+        OC.LocalVlmServer,
+        "ensure",
+        classmethod(lambda cls, *a, **k: "http://127.0.0.1:9/"),
+    )
+    monkeypatch.setattr(
+        OC.LocalVlmServer, "served_model_name", classmethod(lambda cls, *a, **k: "glm")
+    )
+
+    g = get_engine("glm")
+    g._concurrency = 4
+
+    def fake_chat(url, model, img):
+        time.sleep(0.01)  # force threads to interleave
+        return f"PAGE{int(img[0, 0, 0])}"  # echo the page's marker pixel
+
+    monkeypatch.setattr(g, "_chat_completion", fake_chat)
+    imgs = [np.full((4, 4, 3), i, np.uint8) for i in range(8)]
+    res = g.recognize_batch(imgs, [])
+    # Concurrency must preserve input order despite interleaved completion.
+    assert [r["meta"]["markdown"] for r in res] == [f"PAGE{i}" for i in range(8)]
+
+
 def test_base_is_not_registered():
     # The abstract base must never end up resolvable as an engine.
     assert OpenAiCompatVlmOcr.name == "abstract"
