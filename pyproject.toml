@@ -37,17 +37,10 @@ dependencies = [
 # pick ONE engine extra. Apple Vision (macos extra) needs no Python OCR dep.
 
 [project.optional-dependencies]
-# OCR engine: Surya (cross-platform, GPU-optional). Pins huggingface-hub<1,
-# so it CANNOT be installed alongside the `paddle` extra in a loose pip
-# resolve — pick one. `pip install "aglaia[surya]"`.
-surya = [
-    "surya-ocr>=0.20.0",
-    # Declared directly (not just transitively via surya-ocr) so the
-    # [tool.uv.sources] pytorch-cpu pin actually applies — uv ignores sources
-    # for purely-transitive deps. Keeps the CUDA nvidia-cu12-* libs (~2-3 GB)
-    # out of the Linux bundle; Surya OCR runs through llama-server, not torch.
-    "torch>=2.7.0,<3",
-]
+# NOTE: Surya 2 OCR no longer has its own extra. It's a Qwen3.5-VL model now
+# served through the shared local VLM backend (mlx-vlm in `macos`, vLLM in
+# `cuda`) like glm/unlimited — so `--ocr surya` needs no Surya-specific deps,
+# and the old surya-ocr/torch/llama-server/GGUF stack (+ its conflicts) is gone.
 # OCR engine: PaddleOCR-VL — just the paddleocr layout orchestrator + CPU
 # paddlepaddle. The VLM serving backend (mlx-vlm) lives in the `macos` extra, so
 # PaddleOCR-VL needs `--extra macos --extra paddle` — it is Apple-Silicon-only
@@ -239,12 +232,4 @@ override-dependencies = [
     # same cv2/ dir. Pin it to the same version too, else it clobbers cv2/ to
     # its own release (e.g. 4.10) and the shared dir goes half-written/skewed.
     "opencv-contrib-python==4.11.0.86",
-]
-# vLLM (bundled in `cuda`) hard-pins torch + openai>=2 + its own llguidance,
-# which can't coexist with surya-ocr's torch>=2.7 / openai<2. Declaring the
-# conflict lets uv resolve them in separate splits instead of failing to find
-# one combined lock. (macOS's mlx-vlm and Linux's vLLM are already disjoint via
-# platform markers, so those two never clash.)
-conflicts = [
-    [{ extra = "surya" }, { extra = "cuda" }],
 ]

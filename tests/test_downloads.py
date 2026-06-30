@@ -50,7 +50,7 @@ def _materialise(dl, key):
 
 def test_core_targets_registered(reg):
     keys = {t.key for t in reg.registry()}
-    assert {"vosk_en", "east", "surya", "paddle_vl", "dbnet"} <= keys
+    assert {"vosk_en", "east", "surya_mlx", "paddle_vl", "dbnet"} <= keys
     paddle = reg.target_for("paddle_vl")
     assert paddle.platform == "darwin-arm64"
     assert len(paddle.required_files) == 4
@@ -84,8 +84,8 @@ def test_plugin_can_register(reg):
 
 
 def test_not_downloaded_initially(reg):
-    assert reg.is_downloaded("surya") is False
-    assert reg.download_status("surya") == reg.STATUS_NONE
+    assert reg.is_downloaded("surya_mlx") is False
+    assert reg.download_status("surya_mlx") == reg.STATUS_NONE
 
 
 def test_presence_marks_downloaded_in_db(reg):
@@ -115,17 +115,17 @@ def test_deleting_files_reconciles_status_down(reg):
 
 
 def test_failed_status_persists_without_disk(reg):
-    reg.record_status("surya", reg.STATUS_FAILED)
-    assert reg.download_status("surya") == reg.STATUS_FAILED
+    reg.record_status("surya_mlx", reg.STATUS_FAILED)
+    assert reg.download_status("surya_mlx") == reg.STATUS_FAILED
 
 
 def test_truncated_snapshot_is_not_downloaded(reg):
     # A required file present but well under its recorded size = incomplete pull.
     from aglaia.app_data import models_dir
 
-    t = reg.target_for("surya")
+    t = reg.target_for("surya_mlx")
     dest = models_dir() / t.filename
     dest.mkdir(parents=True, exist_ok=True)
     for rel, _size in t.required_files:
         (dest / rel).write_bytes(b"truncated")
-    assert reg.is_downloaded("surya") is False
+    assert reg.is_downloaded("surya_mlx") is False

@@ -64,6 +64,7 @@ class DownloadTarget:
     # New in the registry refactor:
     platform: str = "any"  # "any" | "darwin-arm64" | "cuda" — for filtering
     registered_by: str = "core"  # "core" or the plugin module that registered it
+    revision: str = "main"  # HF git ref to fetch — pin a commit sha for immutability
 
 
 # ── catalogue (in-memory, rebuilt each process) ───────────────────────
@@ -192,9 +193,9 @@ def download_status(key: str) -> str:
 ProgressCb = Callable[[int, int], None]  # (bytes_done, bytes_total)
 
 
-def _hf_list_files(repo: str) -> list[tuple[str, int]]:
+def _hf_list_files(repo: str, revision: str = "main") -> list[tuple[str, int]]:
     """[(rfilename, size_bytes)] for a HuggingFace repo via the tree API."""
-    url = f"https://huggingface.co/api/models/{repo}/tree/main?recursive=true"
+    url = f"https://huggingface.co/api/models/{repo}/tree/{revision}?recursive=true"
     req = urllib.request.Request(url)
     req.add_header("User-Agent", _USER_AGENT)
     req.add_header("Accept", "application/json")
@@ -244,7 +245,7 @@ def download_model(
     try:
         if target.kind == "hf-snapshot":
             dest_dir = _dest(target)
-            files = _hf_list_files(target.url)
+            files = _hf_list_files(target.url, target.revision)
             total = (
                 sum(sz for _, sz in files) or (target.approx_size_mb * 1024 * 1024) or 1
             )
@@ -258,7 +259,7 @@ def download_model(
 
             for rfn, _sz in files:
                 _stream_to(
-                    f"https://huggingface.co/{target.url}/resolve/main/{rfn}",
+                    f"https://huggingface.co/{target.url}/resolve/{target.revision}/{rfn}",
                     dest_dir / rfn,
                     bump,
                 )
@@ -309,21 +310,37 @@ def _register_core_targets() -> None:
             sha1="fffabf5ac36f37bddf68e34e84b45f5c4247ed06",
         )
     )
+    # Surya 2 served as a VLM (Qwen3.5-VL) — MLX on Apple Silicon, vLLM on CUDA.
+    # Pinned to an immutable commit so a later edit can't slip in (the MLX repo
+    # is plain safetensors + configs, no executable code).
     register_download(
         DownloadTarget(
-            key="surya",
-            title="Surya 2 — Q4_K_M (GGUF)",
-            filename="surya-ocr-2-Q4_K_M-gguf",
-            url="aglaia-models/surya-ocr-2-Q4_K_M-gguf",
-            approx_size_mb=610,
+            key="surya_mlx",
+            title="Surya 2 (MLX)",
+            filename="surya-ocr-2-mlx",
+            url="aglaia-models/surya-ocr-2-mlx",
+            revision="dd513812189b8d9bfbe76f32e84f7a496c31fac1",
+            approx_size_mb=820,
             kind="hf-snapshot",
             section="recommended",
             purpose="OCR",
-            project="aglaia-models/surya-ocr-2-Q4_K_M-gguf",
-            required_files=(
-                ("surya-2-Q4_K_M.gguf", 403585152),
-                ("surya-2-mmproj.gguf", 204986688),
-            ),
+            project="datalab-to/surya-ocr-2",
+            platform="darwin-arm64",
+            required_files=(("model.safetensors", 802186634),),
+        )
+    )
+    register_download(
+        DownloadTarget(
+            key="surya_vllm",
+            title="Surya 2 (vLLM)",
+            filename="surya-ocr-2",
+            url="datalab-to/surya-ocr-2",
+            approx_size_mb=1200,
+            kind="hf-snapshot",
+            section="other",
+            purpose="OCR",
+            project="datalab-to/surya-ocr-2",
+            platform="cuda",
         )
     )
     register_download(

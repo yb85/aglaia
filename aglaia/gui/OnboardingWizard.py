@@ -102,16 +102,16 @@ _MODEL_COPY = {
               "Small (~5 MB), fast, and the default detector."),
     "vosk_en": ("Vosk — voice control",
                 "Hands-free page capture by voice, fully offline."),
-    "surya": ("Surya — neural OCR",
-              "Higher-quality OCR for difficult scans (large download)."),
+    "surya_mlx": ("Surya 2 — neural OCR",
+                  "Higher-quality OCR for difficult scans (large download)."),
 }
-_MODEL_ORDER = ["dbnet", "vosk_en", "surya"]
+_MODEL_ORDER = ["dbnet", "vosk_en", "surya_mlx"]
 
 # Models with a built-in macOS equivalent → (availability-kind, product, role).
 # Shown as a green ✓ / amber / red ✗ caption on macOS.
 _MODEL_ALT = {
     "dbnet": ("vision", "Apple Vision", "page detection"),
-    "surya": ("docs", "Apple Documents", "local OCR"),
+    "surya_mlx": ("docs", "Apple Documents", "local OCR"),
 }
 
 
