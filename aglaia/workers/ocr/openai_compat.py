@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import urllib.request
 from typing import List, Optional
@@ -51,15 +50,6 @@ from .engine import (
 )
 
 _HTTP_TIMEOUT_S = 600.0
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        v = int(os.environ.get(name, "") or default)
-        return v if v >= 1 else default
-    except ValueError:
-        return default
-
 
 # Grounding grammar shared across the lineage: <|ref|>TEXT<|/ref|> followed by
 # <|det|>[[x0,y0,x1,y1]]<|/det|> with coords normalised to 0–(coord_scale-1).
@@ -166,11 +156,6 @@ class OpenAiCompatVlmOcr(OcrEngine):
     def __init__(self) -> None:
         self._max_tokens = 8192
         self._backend_override: Optional[str] = None
-        # Pages sent to the server in parallel. The local model isn't CPU-bound
-        # and a small VLM rarely saturates the GPU, so 2–3 concurrent requests
-        # can ~2× throughput. Default 1 (safe — one server, serialized). Tune via
-        # AGLAIA_VLM_CONCURRENCY or `--ocr <engine>:concurrency=N`.
-        self._concurrency = _env_int("AGLAIA_VLM_CONCURRENCY", 1)
         self.available = self._weights_ready()
 
     # ── backend / weights resolution ─────────────────────────────────
@@ -189,18 +174,12 @@ class OpenAiCompatVlmOcr(OcrEngine):
 
     def configure(self, params: dict[str, str]) -> None:
         """Spec options: ``backend=mlx|vllm`` forces a backend (if available);
-        ``max_tokens=N`` raises the per-page generation budget;
-        ``concurrency=N`` sends N pages to the server in parallel."""
+        ``max_tokens=N`` raises the per-page generation budget."""
         if "backend" in params:
             self._backend_override = params["backend"] or None
         if "max_tokens" in params:
             try:
                 self._max_tokens = int(params["max_tokens"])
-            except ValueError:
-                pass
-        if "concurrency" in params:
-            try:
-                self._concurrency = max(1, int(params["concurrency"]))
             except ValueError:
                 pass
 
@@ -271,57 +250,32 @@ class OpenAiCompatVlmOcr(OcrEngine):
         target_dpi = _target_dpi()
         if src_dpis is None:
             src_dpis = [0.0] * len(images_rgb)
-        work = list(zip(images_rgb, src_dpis))
-
-        def _one(item):
-            img, dpi = item
-            return self._recognize_one(
-                base_url, model_name, be.name, target_dpi, img, dpi
+        out: list[OcrResult] = []
+        for img, dpi in zip(images_rgb, src_dpis):
+            scaled = _downsample(img, dpi or 0, target_dpi)
+            h, w = scaled.shape[:2]
+            try:
+                raw = self._chat_completion(base_url, model_name, scaled)
+                markdown, lines = self.parse_output(raw, w, h)
+            except Exception as e:  # noqa: BLE001 — surface, don't crash the run
+                _log(f"[{self.name}] page {w}x{h} failed: {e}", level="error")
+                out.append(self._empty(w, h))
+                continue
+            out.append(
+                {
+                    "engine": self.name,
+                    "languages": [],
+                    "page_w": int(w),
+                    "page_h": int(h),
+                    "lines": lines,
+                    "meta": {
+                        "markdown": markdown,
+                        "ocr_dpi": int(target_dpi or 0),
+                        "backend": be.name,
+                    },
+                }
             )
-
-        conc = min(self._concurrency, len(work))
-        if conc <= 1:
-            return [_one(it) for it in work]
-        # Dispatch pages concurrently to the server — the local model isn't
-        # CPU-bound and a small VLM rarely saturates the GPU, so N in-flight
-        # requests can ~N× throughput. urllib releases the GIL on the socket
-        # read, so threads overlap. ThreadPoolExecutor.map preserves order.
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(
-            max_workers=conc, thread_name_prefix=f"{self.name}-ocr"
-        ) as ex:
-            return list(ex.map(_one, work))
-
-    def _recognize_one(
-        self,
-        base_url: str,
-        model_name: str,
-        backend_name: str,
-        target_dpi: int,
-        img: np.ndarray,
-        dpi: float,
-    ) -> OcrResult:
-        scaled = _downsample(img, dpi or 0, target_dpi)
-        h, w = scaled.shape[:2]
-        try:
-            raw = self._chat_completion(base_url, model_name, scaled)
-            markdown, lines = self.parse_output(raw, w, h)
-        except Exception as e:  # noqa: BLE001 — surface, don't crash the run
-            _log(f"[{self.name}] page {w}x{h} failed: {e}", level="error")
-            return self._empty(w, h)
-        return {
-            "engine": self.name,
-            "languages": [],
-            "page_w": int(w),
-            "page_h": int(h),
-            "lines": lines,
-            "meta": {
-                "markdown": markdown,
-                "ocr_dpi": int(target_dpi or 0),
-                "backend": backend_name,
-            },
-        }
+        return out
 
     # ── HTTP ─────────────────────────────────────────────────────────
     def _chat_completion(
