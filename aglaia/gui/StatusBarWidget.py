@@ -551,13 +551,17 @@ class PipelineProgressBar(QWidget):
         total = self._imported
         pct = self._ratio() * 100.0
         head = f"{self._label_prefix} · {done}/{total}  ({pct:.0f}%)"
-        # Final state — replace ETA with actual elapsed + s/scan.
+        # Final state — replace ETA with actual elapsed + s/unit. OCR counts per
+        # page (one branch ≈ one page; a 2-up photo is 1 scan but 2 OCR units),
+        # so label it "page" in tick mode; the pipeline counts whole scans.
         if (total > 0 and done >= total and self._start_t is not None
                 and self._done_t is not None):
             elapsed = self._done_t - self._start_t
-            per_scan = elapsed / total if total > 0 else 0.0
-            return self.tr("{head}  ·  {elapsed} · {per_scan:.1f}s/scan").format(
-                head=head, elapsed=self._fmt_duration(elapsed), per_scan=per_scan,
+            per_unit = elapsed / total if total > 0 else 0.0
+            unit = self.tr("page") if self._tick_mode else self.tr("scan")
+            return self.tr("{head}  ·  {elapsed} · {per_unit:.1f}s/{unit}").format(
+                head=head, elapsed=self._fmt_duration(elapsed),
+                per_unit=per_unit, unit=unit,
             )
         # Running — show ETA from moving-average dt.
         avg_dt = self._moving_avg_dt()

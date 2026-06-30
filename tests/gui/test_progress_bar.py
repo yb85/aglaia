@@ -64,6 +64,22 @@ def test_force_complete_snaps_pipeline(_qapp):
     assert bar.is_finished()
 
 
+def test_final_label_unit_is_page_for_ocr_scan_for_pipeline(_qapp):
+    ocr = PipelineProgressBar()
+    ocr.reset()
+    ocr.set_imported(2)
+    ocr.mark_tick()
+    ocr.mark_tick()                      # done == total → final state
+    assert "s/page" in ocr._build_label()   # OCR counts pages, not scans
+
+    pipe = PipelineProgressBar()
+    pipe.reset()
+    pipe.set_imported(2)
+    pipe.mark_done(1)
+    pipe.mark_done(2)
+    assert "s/scan" in pipe._build_label()  # pipeline counts whole scans
+
+
 def test_new_ocr_run_restarts_from_zero(_qapp):
     bar = PipelineProgressBar()
     bar.reset()
