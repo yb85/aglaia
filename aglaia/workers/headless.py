@@ -147,7 +147,10 @@ def _run_ocr(
     conn = open_db(db_path)
     try:
         ocr = OcrRepo(conn)
-        rows = ocr.branches_needing_ocr(include_stale=True)
+        # Per-engine: a branch needs OCR for THIS engine even if another engine
+        # already ran it → re-running a different engine adds its layer instead
+        # of being a no-op, keeping the existing engine's layer.
+        rows = ocr.branches_needing_ocr(include_stale=True, engine=engine_canonical)
         if not rows:
             print("OCR: nothing to do.")
             return 0
@@ -238,7 +241,7 @@ def _submit_batch_ocr(db_path: str, *, engine_name: str, languages: list[str]) -
     try:
         ocr = OcrRepo(conn)
         repo = MistralBatchRepo(conn)
-        rows = ocr.branches_needing_ocr(include_stale=True)
+        rows = ocr.branches_needing_ocr(include_stale=True, engine=canonical)
         if not rows:
             print("OCR: nothing to do.")
             return 0
@@ -352,6 +355,22 @@ def _check_ocr(db_path: str) -> int:
         conn.close()
 
 
+def _ocr_layer_available(conn, engine: str) -> bool:
+    """True if `engine` has a done OCR layer; else print the available layers
+    (latest-generated first) so the user can pick a valid one."""
+    layers = OcrRepo(conn).available_ocr_layers()
+    if any(r["engine"] == engine for r in layers):
+        return True
+    avail = (
+        ", ".join(f"{r['engine']} ({r['n_branches']} pp)" for r in layers) or "none"
+    )
+    print(
+        f"  ! OCR layer '{engine}' not found. Available (latest first): {avail}",
+        file=sys.stderr,
+    )
+    return False
+
+
 def _run_exports(
     db_path: str,
     project_dir: Path,
@@ -364,19 +383,26 @@ def _run_exports(
     task failed."""
     fail = 0
     for task in exports:
+        # `pdf:ocr=surya` / `md:ocr=apple` select which OCR layer to export
+        # (default = the latest layer regardless of engine). Aliases honoured.
+        raw_eng = task.params.get("ocr")
+        ocr_engine = _OCR_CANON.get(raw_eng, raw_eng) if raw_eng else None
+        tag = f" [OCR layer: {ocr_engine}]" if ocr_engine else ""
         if task.kind == "pdf":
             out = project_dir / f"{slug}.pdf"
-            print(f"Export PDF ({task.profile}) → {out}")
-            with open_db(db_path) as _:  # noqa: F841 — just to surface DB errors early
-                pass
             conn = open_db(db_path)
             try:
+                if ocr_engine and not _ocr_layer_available(conn, ocr_engine):
+                    fail += 1
+                    continue
+                print(f"Export PDF ({task.profile}) → {out}{tag}")
                 ok = create_pdf_from_db(
                     conn,
                     out,
                     step_name=None,
                     compression=task.profile or "auto",
                     add_ocr_layer=ocr_layer,
+                    engine=ocr_engine,
                 )
             finally:
                 conn.close()
@@ -387,13 +413,16 @@ def _run_exports(
             out = project_dir / f"{slug}.md"
             # `--export md:refine=apple_fm` overrides the global --md-refine.
             refine = task.params.get("refine", md_refine)
-            print(
-                f"Export Markdown → {out}"
-                + (f" (LLM refine: {refine})" if refine else "")
-            )
             conn = open_db(db_path)
             try:
-                ok = write_markdown(conn, out, refine=refine)
+                if ocr_engine and not _ocr_layer_available(conn, ocr_engine):
+                    fail += 1
+                    continue
+                print(
+                    f"Export Markdown → {out}{tag}"
+                    + (f" (LLM refine: {refine})" if refine else "")
+                )
+                ok = write_markdown(conn, out, refine=refine, engine=ocr_engine)
             finally:
                 conn.close()
             if not ok:

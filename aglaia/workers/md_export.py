@@ -54,6 +54,7 @@ import re
 import sqlite3
 import statistics
 from pathlib import Path
+from typing import Optional
 
 
 # ── Surya layout-label → Markdown ──────────────────────────────────
@@ -261,10 +262,11 @@ _ENGINE_SUFFIXES = {
 }
 
 
-def ocr_engine_suffix(conn: sqlite3.Connection) -> str:
+def ocr_engine_suffix(conn: sqlite3.Connection, engine: Optional[str] = None) -> str:
     """Return a filename suffix matching the engine + DPI that
     produced the currently visible OCR text in this project, e.g.
-    ``_paddleOCR_150dpi``.
+    ``_paddleOCR_150dpi``. When ``engine`` is given (an explicit export-layer
+    selection) the suffix is that engine, not the project's dominant one.
 
     Counts only the LATEST done run per (scan, branch) tuple — the
     earlier "dominant engine" heuristic ignored the freshness of the
@@ -274,6 +276,9 @@ def ocr_engine_suffix(conn: sqlite3.Connection) -> str:
     ``write_markdown`` actually exports, then picks the engine most
     used across those latest rows. Returns an empty string when no
     OCR data is present."""
+    if engine:
+        tag = _ENGINE_SUFFIXES.get(engine, f"_{engine}OCR")
+        return f"{tag}{_dominant_ocr_dpi_tag(conn, engine)}"
     row = conn.execute("""
         SELECT engine, COUNT(*) AS n
           FROM ocr_runs o
@@ -963,11 +968,15 @@ def _render_block(b: dict) -> list[str]:
 
 def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
                    refine: Optional[str] = None,
-                   refine_mode: str = "cleanup") -> bool:
+                   refine_mode: str = "cleanup",
+                   engine: Optional[str] = None) -> bool:
     """Dump every scan's OCR text into a Markdown file.
 
     Scan + branch markers go into HTML comments so the rendered text
     stays free-flowing. Returns False when no OCR data exists.
+
+    ``engine`` selects which OCR layer to export (the latest run of that engine
+    per branch); ``None`` keeps the latest run regardless of engine.
 
     ``refine`` optionally names an on-device LLM backend (e.g.
     ``"apple_fm"``) that post-processes the heuristic Markdown page-by-page
@@ -975,7 +984,8 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
     is unavailable (default, or pre-macOS-26) the heuristic output is kept
     verbatim, so this is always safe to pass."""
     output_path = Path(output_path)
-    rows = conn.execute("""
+    eng_clause = " AND engine = ?" if engine else ""
+    rows = conn.execute(f"""
         SELECT s.id AS scan_id, s.idx AS scan_idx,
                b.branch_path AS branch_path,
                o.result_json AS result_json
@@ -986,7 +996,7 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
                 FROM ocr_runs o
                 JOIN (
                     SELECT scan_id, branch_path, MAX(version) AS v
-                      FROM ocr_runs WHERE status = 'done'
+                      FROM ocr_runs WHERE status = 'done'{eng_clause}
                   GROUP BY scan_id, branch_path
                 ) m ON m.scan_id = o.scan_id
                    AND m.branch_path = o.branch_path
@@ -995,7 +1005,7 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
          WHERE s.deleted_at IS NULL
            AND b.trashed_at IS NULL
          ORDER BY s.page_order ASC, s.idx ASC, b.branch_path ASC
-    """).fetchall()
+    """, (engine,) if engine else ()).fetchall()
     if not rows:
         return False
 

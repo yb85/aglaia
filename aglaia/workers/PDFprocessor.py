@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import io
 import json
-import statistics
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 from PIL import Image
@@ -114,10 +112,12 @@ def _select_export_rows(conn, step_name: str | None):
     return conn.execute(q).fetchall()
 
 
-def _ocr_results_for_rows(conn, rows):
+def _ocr_results_for_rows(conn, rows, engine: str | None = None):
     """For each row, return the latest OCR result_json (parsed) for the
-    matching (scan_id, branch_path). Entries are `None` when no completed
-    run exists."""
+    matching (scan_id, branch_path). With ``engine`` given, the latest run of
+    that engine; otherwise the latest run regardless of engine. Entries are
+    `None` when no completed run exists."""
+    eng_clause = " AND engine = ?" if engine else ""
     out: list[dict | None] = []
     for r in rows:
         try:
@@ -128,9 +128,9 @@ def _ocr_results_for_rows(conn, rows):
             continue
         row = conn.execute(
             "SELECT result_json FROM ocr_runs "
-            "WHERE scan_id = ? AND branch_path = ? AND status = 'done' "
+            f"WHERE scan_id = ? AND branch_path = ? AND status = 'done'{eng_clause} "
             "ORDER BY version DESC LIMIT 1",
-            (scan_id, branch_path),
+            (scan_id, branch_path, engine) if engine else (scan_id, branch_path),
         ).fetchone()
         if row is None or row["result_json"] is None:
             out.append(None)
@@ -147,6 +147,7 @@ def _ocr_results_for_rows(conn, rows):
 def create_pdf_from_db(
     conn, output_path, *, step_name: str | None = None,
     compression: str = "auto", add_ocr_layer: bool = False,
+    engine: str | None = None,
 ) -> bool:
     """Build a PDF from project SQLite rows.
 
@@ -161,7 +162,8 @@ def create_pdf_from_db(
 
     `add_ocr_layer`: when True and a matching OCR run exists for the
     export set, an invisible text layer (Helvetica/WinAnsi, render mode
-    3) is added on top of each page so the PDF stays selectable.
+    3) is added on top of each page so the PDF stays selectable. `engine`
+    selects which OCR layer (default: the latest run regardless of engine).
     """
     output_path = Path(output_path)
     rows = _select_export_rows(conn, step_name)
@@ -174,15 +176,15 @@ def create_pdf_from_db(
     ok: bool
     if compression in ("jbig2", "g4") or (compression == "auto" and all_bw):
         from aglaia.workers.pdf_export import build_bitonal_pdf
-        engine = "jbig2" if compression in ("auto", "jbig2") else "g4"
-        ok = build_bitonal_pdf(rows, output_path, engine=engine)
+        bw_engine = "jbig2" if compression in ("auto", "jbig2") else "g4"
+        ok = build_bitonal_pdf(rows, output_path, engine=bw_engine)
     else:
         from aglaia.workers.pdf_export import build_native_pdf
         ok = build_native_pdf(rows, output_path)
 
     if ok and add_ocr_layer:
         from aglaia.workers.pdf_export import inject_ocr_layer
-        inject_ocr_layer(output_path, _ocr_results_for_rows(conn, rows))
+        inject_ocr_layer(output_path, _ocr_results_for_rows(conn, rows, engine))
     return ok
 
 

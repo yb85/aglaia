@@ -100,6 +100,7 @@ def html_to_markdown(html: str) -> str:
         conv = html2text.HTML2Text()
         conv.body_width = 0  # don't hard-wrap lines
         conv.ignore_emphasis = False
+        conv.pad_tables = True  # canonical GFM tables (| a | b |\n| --- | --- |)
         return conv.handle(html).strip()
     except Exception:
         text = re.sub(r"(?i)</(p|div|tr|h[1-6]|li|table)>", "\n", html)

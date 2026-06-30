@@ -97,9 +97,11 @@ class OcrWorker(QThread):
             if self._mode == self.MODE_FORCE:
                 rows = ocr_repo.all_branches()
             elif self._mode == self.MODE_MISSING:
-                rows = ocr_repo.branches_needing_ocr(include_stale=False)
+                rows = ocr_repo.branches_needing_ocr(
+                    include_stale=False, engine=self._engine_name)
             else:
-                rows = ocr_repo.branches_needing_ocr(include_stale=True)
+                rows = ocr_repo.branches_needing_ocr(
+                    include_stale=True, engine=self._engine_name)
 
             total = len(rows)
             if total == 0:
