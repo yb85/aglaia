@@ -32,3 +32,4 @@ class SuryaEngine(OpenAiCompatVlmOcr):
     mlx_target_key = "surya_mlx"
     vllm_target_key = "surya_vllm"
     prompt = "Convert this document image to Markdown."
+    output_html = True  # Surya emits HTML (<p>/<table>) → converted to Markdown

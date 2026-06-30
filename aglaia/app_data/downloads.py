@@ -32,6 +32,7 @@ safe without the heavy engine deps (registration is metadata only).
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -215,25 +216,53 @@ def _hf_list_files(repo: str, revision: str = "main") -> list[tuple[str, int]]:
     return out
 
 
+_MAX_DL_RETRIES = 6
+
+
 def _stream_to(url: str, dest: Path, on_chunk: Callable[[int], None]) -> int:
+    """Stream ``url`` → ``dest``, **resumable** via HTTP Range.
+
+    A stalled read on a slow/flaky network times out (60 s) — instead of
+    restarting the whole file, we keep the partial ``.partialdl`` and resume from
+    its byte offset (``Range: bytes=N-``), retrying up to ``_MAX_DL_RETRIES``
+    times. This mirrors the GUI downloader and fixes the "times out at 300 MB on
+    slow Wi-Fi, loses everything" failure on big VLM weights."""
     if not url.startswith("https://"):
         raise ValueError(f"refusing non-HTTPS download: {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url)
-    req.add_header("User-Agent", _USER_AGENT)
     tmp = dest.with_name(dest.name + ".partialdl")
-    got = 0
-    with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310 (https only)
-        with open(tmp, "wb") as f:
-            while True:
-                chunk = r.read(_CHUNK)
-                if not chunk:
-                    break
-                f.write(chunk)
-                got += len(chunk)
-                on_chunk(len(chunk))
+    attempt = 0
+    while True:
+        already = tmp.stat().st_size if tmp.exists() else 0
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", _USER_AGENT)
+        if already > 0:
+            req.add_header("Range", f"bytes={already}-")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310 (https)
+                # If we asked to resume but the server ignored Range (200, not
+                # 206), restart from scratch so we don't append onto a partial.
+                resuming = already > 0 and getattr(r, "status", 200) == 206
+                with open(tmp, "ab" if resuming else "wb") as f:
+                    while True:
+                        chunk = r.read(_CHUNK)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        on_chunk(len(chunk))
+            break
+        except urllib.error.HTTPError as e:
+            # 416 = nothing past `already` → the file is already complete.
+            if e.code == 416 and already > 0:
+                break
+            raise
+        except (TimeoutError, OSError):
+            attempt += 1
+            if attempt > _MAX_DL_RETRIES:
+                raise
+            # loop: resume from the bytes already on disk in .partialdl
     tmp.replace(dest)
-    return got
+    return dest.stat().st_size
 
 
 def download_model(

@@ -16,8 +16,32 @@ import pytest
 from aglaia.workers.ocr.engine import ENGINE_REGISTRY, get_engine
 from aglaia.workers.ocr.openai_compat import (
     OpenAiCompatVlmOcr,
+    html_to_markdown,
     parse_grounded_markdown,
 )
+
+
+# ── HTML → Markdown (Surya emits HTML) ───────────────────────────────
+def test_html_to_markdown_paragraphs():
+    real = "<div>\n<p>Line one.</p>\n<p>Line two: 1234567890.</p>\n</div>"
+    md = html_to_markdown(real)
+    assert "Line one." in md and "Line two: 1234567890." in md
+    assert "<" not in md  # no raw HTML left
+
+
+def test_html_to_markdown_table():
+    md = html_to_markdown(
+        "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    )
+    assert "A" in md and "B" in md and "---" in md  # rendered as a Markdown table
+
+
+def test_surya_engine_converts_html_output():
+    e = get_engine("surya")
+    assert e.output_html is True
+    md, lines = e.parse_output("<div><p>Hello world</p></div>", 800, 300)
+    assert md == "Hello world" and len(lines) == 1
+    assert lines[0]["bbox"] == (0, 0, 800, 300)
 
 
 # ── grounding parser ─────────────────────────────────────────────────

@@ -119,6 +119,91 @@ def test_failed_status_persists_without_disk(reg):
     assert reg.download_status("surya_mlx") == reg.STATUS_FAILED
 
 
+class _FakeResp:
+    """Minimal urlopen-style response: a context manager yielding bytes via
+    read(n), optionally raising TimeoutError partway to simulate a stall."""
+
+    def __init__(
+        self, data: bytes, *, status: int = 200, stall_after: int | None = None
+    ):
+        self._data = data
+        self._i = 0
+        self.status = status
+        self._stall_after = stall_after
+
+    def read(self, n: int) -> bytes:
+        if self._stall_after is not None and self._i >= self._stall_after:
+            raise TimeoutError("simulated stall")
+        end = self._i + n
+        if self._stall_after is not None:
+            end = min(end, self._stall_after)  # only yield up to the stall point
+        chunk = self._data[self._i : end]
+        self._i += len(chunk)
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_stream_to_resumes_with_range(tmp_path, monkeypatch):
+    import aglaia.app_data.downloads as D
+
+    dest = tmp_path / "f.bin"
+    (tmp_path / "f.bin.partialdl").write_bytes(b"AAAA")  # 4 bytes already on disk
+    seen = {}
+
+    def fake_urlopen(req, timeout=60):
+        seen["range"] = req.headers.get("Range")
+        return _FakeResp(b"BBBB", status=206)  # server returns the remaining bytes
+
+    monkeypatch.setattr(D.urllib.request, "urlopen", fake_urlopen)
+    counted = []
+    D._stream_to("https://x/f", dest, lambda c: counted.append(c))
+
+    assert seen["range"] == "bytes=4-"  # resumed from the partial offset
+    assert dest.read_bytes() == b"AAAABBBB"  # appended, not restarted
+    assert sum(counted) == 4  # only the NEW bytes were counted
+
+
+def test_stream_to_416_means_already_complete(tmp_path, monkeypatch):
+    import urllib.error
+
+    import aglaia.app_data.downloads as D
+
+    dest = tmp_path / "f.bin"
+    (tmp_path / "f.bin.partialdl").write_bytes(b"DONE")
+
+    def fake_urlopen(req, timeout=60):
+        raise urllib.error.HTTPError("u", 416, "range", {}, None)
+
+    monkeypatch.setattr(D.urllib.request, "urlopen", fake_urlopen)
+    D._stream_to("https://x/f", dest, lambda c: None)
+    assert dest.read_bytes() == b"DONE"  # promoted as-is, no error
+
+
+def test_stream_to_retries_and_resumes_after_timeout(tmp_path, monkeypatch):
+    import aglaia.app_data.downloads as D
+
+    dest = tmp_path / "f.bin"
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=60):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _FakeResp(
+                b"ABXXXX", status=200, stall_after=2
+            )  # writes AB, then stalls
+        assert req.headers.get("Range") == "bytes=2-"  # resume from 2
+        return _FakeResp(b"CDEF", status=206)
+
+    monkeypatch.setattr(D.urllib.request, "urlopen", fake_urlopen)
+    D._stream_to("https://x/f", dest, lambda c: None)
+    assert dest.read_bytes() == b"ABCDEF"  # survived the stall, resumed
+
+
 def test_truncated_snapshot_is_not_downloaded(reg):
     # A required file present but well under its recorded size = incomplete pull.
     from aglaia.app_data import models_dir

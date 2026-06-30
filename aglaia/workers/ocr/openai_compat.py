@@ -86,6 +86,28 @@ def _det_to_pixels(
     return (bx0, by0, bx1, by1)
 
 
+def html_to_markdown(html: str) -> str:
+    """Convert a model's HTML output (Surya emits ``<p>`` / ``<table>`` / ``<h*>``)
+    to clean Markdown — tables become Markdown tables. Uses ``html2text`` when
+    available, falling back to a crude tag-strip that at least preserves block
+    breaks so a ``.md`` never ships raw ``<div>`` soup."""
+    html = (html or "").strip()
+    if not html:
+        return ""
+    try:
+        import html2text
+
+        conv = html2text.HTML2Text()
+        conv.body_width = 0  # don't hard-wrap lines
+        conv.ignore_emphasis = False
+        return conv.handle(html).strip()
+    except Exception:
+        text = re.sub(r"(?i)</(p|div|tr|h[1-6]|li|table)>", "\n", html)
+        text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+        text = re.sub(r"<[^>]+>", "", text)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def parse_grounded_markdown(
     raw: str, w: int, h: int, *, coord_scale: float, fallback_full_page: bool
 ) -> tuple[str, list[OcrLine]]:
@@ -123,6 +145,7 @@ class OpenAiCompatVlmOcr(OcrEngine):
     extra_body: dict = {}  # merged into the chat request (model knobs)
     coord_scale: float = 1000.0  # det-coordinate normalisation
     fallback_full_page: bool = True
+    output_html: bool = False  # model emits HTML (e.g. Surya) → convert to Markdown
 
     # ── UI/capability traits ─────────────────────────────────────────
     default_dpi: int = 150
@@ -161,6 +184,14 @@ class OpenAiCompatVlmOcr(OcrEngine):
 
     # ── parsing hook ─────────────────────────────────────────────────
     def parse_output(self, raw: str, w: int, h: int) -> tuple[str, list[OcrLine]]:
+        if self.output_html:
+            md = html_to_markdown(raw)
+            lines: list[OcrLine] = (
+                [{"text": md, "bbox": (0, 0, int(w), int(h)), "confidence": 1.0}]
+                if md
+                else []
+            )
+            return md, lines
         return parse_grounded_markdown(
             raw,
             w,
