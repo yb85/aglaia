@@ -3425,12 +3425,13 @@ class MainWindow(QMainWindow):
         bar.set_indeterminate(True, self.tr("OCR · working…"))
 
     def _on_ocr_progress(self, scan_id: int):
-        # OCR completes per (scan, branch). Single broadcast → all views
-        # + bottom-bar OCR frame resync from the single source of truth.
+        # OCR completes per (scan, branch). The progress tick is cheap (keep it
+        # immediate); the heavy state fan-out (DB joins + badge repaint across
+        # every scan) is coalesced via the debounce in `_on_ocr_state_changed`,
+        # so a burst of page completions doesn't hitch the UI.
         self.status_bar_widget.progress.set_indeterminate(False)
         self.status_bar_widget.progress.mark_tick()
         self.ocr_state_changed.emit()
-        self._refresh_alt_views_if_visible()
 
     def _on_ocr_finished(self, ok: bool, error_text: str):
         # Leave the label on "OCR" so the user sees "OCR · N/N · 100%"
@@ -3719,16 +3720,27 @@ class MainWindow(QMainWindow):
                 self._left_panel_open_btn.raise_()
 
     def _on_ocr_state_changed(self) -> None:
-        """Single fan-out for any OCR-relevant DB change. Refreshes
-        badges across all views + the bottom-bar OCR frame counts."""
-        try:
-            self._refresh_ocr_ui()
-        except Exception:
-            pass
-        try:
-            self._update_ocr_frame_state()
-        except Exception:
-            pass
+        """Single fan-out for any OCR-relevant DB change. DEBOUNCED: the refresh
+        runs ``branch_status_map`` DB joins + repaints every scan widget's badge,
+        which fired per OCR page made the UI sluggish (OCR runs in its own
+        QThread, but this fan-out is main-thread). Coalesce a burst of
+        completions into one refresh ~350 ms after the last event."""
+        t = getattr(self, "_ocr_refresh_timer", None)
+        if t is None:
+            from PySide6.QtCore import QTimer
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(self._do_ocr_state_refresh)
+            self._ocr_refresh_timer = t
+        t.start(350)
+
+    def _do_ocr_state_refresh(self) -> None:
+        for fn in (self._refresh_ocr_ui, self._update_ocr_frame_state,
+                   self._refresh_alt_views_if_visible):
+            try:
+                fn()
+            except Exception:
+                pass
 
     # ── broadcast subscribers ─────────────────────────────────────
     def _on_step_disabled_changed(self, scan_id: int, branch_path: str,
