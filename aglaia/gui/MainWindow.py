@@ -2349,12 +2349,14 @@ class MainWindow(QMainWindow):
         # Tag the file with the OCR engine used when the user opted to
         # embed a text layer — makes it obvious which Aglaïa run
         # produced the searchable PDF (apple / surya / paddle).
+        # Which OCR layer (engine) to embed — None = the latest layer.
+        ocr_engine = self._export_tab.selected_ocr_engine() if add_ocr_layer else None
         ocr_suffix = ""
         if add_ocr_layer:
             try:
                 from aglaia.workers.md_export import ocr_engine_suffix
                 with db_session(self.db_path) as _conn:
-                    ocr_suffix = ocr_engine_suffix(_conn)
+                    ocr_suffix = ocr_engine_suffix(_conn, ocr_engine)
             except Exception:
                 ocr_suffix = ""
         output_filename = f"{self.slug_name}{suffix}{ocr_suffix}.pdf"
@@ -2369,14 +2371,15 @@ class MainWindow(QMainWindow):
             self.tr("Generating PDF ({src}, {comp})…").format(src=source_type, comp=compression)
         )
         QTimer.singleShot(100, lambda: self._run_pdf_maker(
-            step_filter, output_path, compression, add_ocr_layer))
+            step_filter, output_path, compression, add_ocr_layer, ocr_engine))
 
     def _run_pdf_maker(self, step_name: Optional[str], output_path: Path,
-                       compression: str = "auto", add_ocr_layer: bool = False):
+                       compression: str = "auto", add_ocr_layer: bool = False,
+                       ocr_engine: Optional[str] = None):
         with db_session(self.db_path) as conn:
             success = create_pdf_from_db(
                 conn, output_path, step_name=step_name, compression=compression,
-                add_ocr_layer=add_ocr_layer,
+                add_ocr_layer=add_ocr_layer, engine=ocr_engine,
             )
         if success:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
@@ -2517,9 +2520,10 @@ class MainWindow(QMainWindow):
     def _export_markdown(self):
         from aglaia.workers.md_export import write_markdown, ocr_engine_suffix
         from PySide6.QtWidgets import QFileDialog
+        ocr_engine = self._export_tab.selected_ocr_engine()
         try:
             with db_session(self.db_path) as conn:
-                suffix = ocr_engine_suffix(conn)
+                suffix = ocr_engine_suffix(conn, ocr_engine)
         except Exception:
             suffix = ""
         default = self.args.workspace_dir / f"{self.slug_name}{suffix}.md"
@@ -2540,7 +2544,7 @@ class MainWindow(QMainWindow):
             else self.tr("Writing Markdown…"))
         try:
             with db_session(self.db_path) as conn:
-                ok = write_markdown(conn, output_path, refine=refine)
+                ok = write_markdown(conn, output_path, refine=refine, engine=ocr_engine)
         except Exception as e:
             self._on_log_line("error", f"Markdown export failed: {e}")
             self.status_label.setText(self.tr("Markdown export failed."))
@@ -3503,6 +3507,16 @@ class MainWindow(QMainWindow):
             return
         has_any = bool(getattr(self, "_ocr_has_any", False))
         self._export_tab.set_ocr_layer_available(has_any)
+        # Populate the OCR-layer (engine) selector — latest-generated first.
+        layers = []
+        if has_any:
+            try:
+                from aglaia.storage.repo import OcrRepo
+                with db_session(self.db_path) as conn:
+                    layers = OcrRepo(conn).available_ocr_layers()
+            except Exception:
+                layers = []
+        self._export_tab.set_ocr_layers(layers)
 
     def _clamp_to_screen(self):
         """Force the window back to maximised inside the current screen's

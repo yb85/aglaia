@@ -33,6 +33,8 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
@@ -142,6 +144,24 @@ class ExportTab(QWidget):
 
         self.format_group.set_current_key("pdf")
 
+        # ── OCR-layer selector — which engine's OCR to export ──────
+        # Applies to BOTH the PDF text layer and Markdown. Hidden until at
+        # least one OCR layer exists; "Latest" = the most recent layer (the
+        # back-compat default). MainWindow fills it via `set_ocr_layers`.
+        self._ocr_layer_row = QWidget()
+        _ocr_row = QHBoxLayout(self._ocr_layer_row)
+        _ocr_row.setContentsMargins(0, 4, 0, 0)
+        _ocr_row.setSpacing(6)
+        _ocr_row.addWidget(self._field_label(self.tr("OCR layer")))
+        self.combo_ocr_layer = QComboBox()
+        self.combo_ocr_layer.setToolTip(self.tr(
+            "Which engine's OCR layer to export (PDF text layer + Markdown). "
+            "'Latest' uses the most recently generated layer."
+        ))
+        _ocr_row.addWidget(self.combo_ocr_layer, 1)
+        self._ocr_layer_row.setVisible(False)
+        outer.addWidget(self._ocr_layer_row)
+
         # ── Single Export button ───────────────────────────────────
         self.btn_export = QPushButton(self.tr("Export"))
         self.btn_export.setStyleSheet(_PRIMARY_BTN_QSS)
@@ -189,6 +209,28 @@ class ExportTab(QWidget):
             self.chk_ocr_layer.setChecked(False)
         elif not was_enabled:
             self.chk_ocr_layer.setChecked(True)
+
+    def set_ocr_layers(self, layers) -> None:
+        """Populate the OCR-layer selector from `OcrRepo.available_ocr_layers()`
+        rows (latest-generated first). Hidden when there are none. Preserves the
+        current selection if that engine is still present."""
+        prev = self.combo_ocr_layer.currentData()
+        self.combo_ocr_layer.blockSignals(True)
+        self.combo_ocr_layer.clear()
+        self.combo_ocr_layer.addItem(self.tr("Latest layer"), None)
+        for r in layers or []:
+            eng = r["engine"]
+            self.combo_ocr_layer.addItem(f"{eng} ({r['n_branches']})", eng)
+        if prev is not None:
+            i = self.combo_ocr_layer.findData(prev)
+            if i >= 0:
+                self.combo_ocr_layer.setCurrentIndex(i)
+        self.combo_ocr_layer.blockSignals(False)
+        self._ocr_layer_row.setVisible(bool(layers))
+
+    def selected_ocr_engine(self) -> Optional[str]:
+        """The engine whose OCR layer to export, or None for the latest layer."""
+        return self.combo_ocr_layer.currentData()
 
     def current_format(self) -> Optional[str]:
         return self.format_group.current_key()
