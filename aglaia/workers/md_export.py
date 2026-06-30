@@ -277,7 +277,7 @@ def ocr_engine_suffix(conn: sqlite3.Connection, engine: Optional[str] = None) ->
     used across those latest rows. Returns an empty string when no
     OCR data is present."""
     if engine:
-        tag = _ENGINE_SUFFIXES.get(engine, f"_{engine}OCR")
+        tag = _engine_tag(conn, engine)
         return f"{tag}{_dominant_ocr_dpi_tag(conn, engine)}"
     row = conn.execute("""
         SELECT engine, COUNT(*) AS n
@@ -299,9 +299,7 @@ def ocr_engine_suffix(conn: sqlite3.Connection, engine: Optional[str] = None) ->
     """).fetchone()
     if not row:
         return ""
-    engine_tag = _ENGINE_SUFFIXES.get(
-        row["engine"], f"_{row['engine']}OCR"
-    )
+    engine_tag = _engine_tag(conn, row["engine"])
     # DPI: most common ocr_dpi across the latest done runs for that
     # winning engine. Reads meta.ocr_dpi out of result_json. Empty
     # ``_NNNdpi`` segment when no run carries a DPI hint (older runs
@@ -346,6 +344,53 @@ def _dominant_ocr_dpi_tag(conn: sqlite3.Connection, engine: str) -> str:
         return ""
     best = max(counts.items(), key=lambda kv: kv[1])[0]
     return f"_{best}dpi"
+
+
+def _dominant_complement(conn: sqlite3.Connection, engine: str) -> str:
+    """Most common ``meta.complement_used`` across the latest done runs for
+    ``engine``. apple_docs offloads low-confidence regions (e.g. Greek) to a
+    complement OCR; that choice changes the OUTPUT, so it must change the
+    filename too (else apple_docs alone / +surya / +glm collide). Returns the
+    complement engine name (``'surya'``) or ``''`` when none was used."""
+    rows = conn.execute("""
+        SELECT o.result_json
+          FROM ocr_runs o
+          JOIN (
+              SELECT scan_id, branch_path, MAX(version) AS v
+                FROM ocr_runs
+               WHERE status = 'done' AND engine = ?
+            GROUP BY scan_id, branch_path
+          ) m ON m.scan_id = o.scan_id
+             AND m.branch_path = o.branch_path
+             AND m.v = o.version
+         WHERE o.status = 'done' AND o.engine = ?
+    """, (engine, engine)).fetchall()
+    counts: dict[str, int] = {}
+    for r in rows:
+        raw = r["result_json"]
+        if not raw:
+            continue
+        try:
+            d = json.loads(raw)
+        except Exception:
+            continue
+        comp = (d.get("meta") or {}).get("complement_used")
+        if comp and comp != "none":
+            counts[comp] = counts.get(comp, 0) + 1
+    if not counts:
+        return ""
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+def _engine_tag(conn: sqlite3.Connection, engine: str) -> str:
+    """Filename engine tag, with the apple_docs complement folded in:
+    ``_apple_docsOCR`` → ``_apple_docs_suryaOCR`` when surya completed it."""
+    base = _ENGINE_SUFFIXES.get(engine, f"_{engine}OCR")
+    if engine == "apple_docs":
+        comp = _dominant_complement(conn, engine)
+        if comp:
+            base = f"{base[:-3]}_{comp}OCR"   # strip "OCR", insert _comp, re-add
+    return base
 
 
 # ── Text-shape helpers ─────────────────────────────────────────────

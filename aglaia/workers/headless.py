@@ -157,7 +157,19 @@ def _run_ocr(
         print(
             f"OCR: {len(rows)} branch(es), engine={engine_canonical}, langs={languages or '<auto>'}"
         )
+        # Pay the model-load cost up front and time it SEPARATELY, so the
+        # per-page numbers below are steady-state processing — not load +
+        # first-page conflated. No-op (≈0 s) for Apple Vision; spins up the
+        # local server for the VLMs.
+        _tl0 = time.perf_counter()
+        try:
+            engine.warmup(languages)
+        except Exception as e:  # noqa: BLE001 — surface, keep going
+            print(f"OCR: warmup failed: {e}", file=sys.stderr, flush=True)
+        load_s = time.perf_counter() - _tl0
+        print(f"OCR: model load {load_s:.1f}s", flush=True)
         done = 0
+        page_ms: list[float] = []
         for r in rows:
             scan_id = int(r["scan_id"])
             branch_path = r["branch_path"] or ""
@@ -183,6 +195,7 @@ def _run_ocr(
                 _ms = (time.perf_counter() - _t0) * 1000.0
                 ocr.finish(run_id, result)
                 done += 1
+                page_ms.append(_ms)
                 n_lines = len(result.get("lines", []))
                 # Per-page op-log line (parseable by the bench harness for
                 # OCR p5/p50/p95). Mirrors the pipeline op-log shape so the
@@ -205,6 +218,19 @@ def _run_ocr(
             except Exception as e:
                 ocr.fail(run_id, f"{type(e).__name__}: {e}")
                 print(f"  scan {scan_id}: ERROR {e}", file=sys.stderr)
+        # Steady-state page summary, kept separate from the model-load line
+        # above so a benchmark can attribute time correctly.
+        if page_ms:
+            srt = sorted(page_ms)
+            total_s = sum(page_ms) / 1000.0
+            mean_s = total_s / len(page_ms)
+            p50_s = srt[len(srt) // 2] / 1000.0
+            print(
+                f"OCR: {done} page(s) processed in {total_s:.1f}s "
+                f"(mean {mean_s:.2f}s/page, median {p50_s:.2f}s/page) "
+                f"+ {load_s:.1f}s model load",
+                flush=True,
+            )
         return 0 if done > 0 else 1
     finally:
         conn.close()

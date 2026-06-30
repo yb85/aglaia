@@ -82,6 +82,12 @@ class OcrEngine(abc.ABC):
         keys** so the same spec stays forward-compatible across engines.
         Values arrive as strings — coerce as needed."""
 
+    def warmup(self, languages: list[str] | None = None) -> None:
+        """Pay the one-off model-load cost up front (spin up a local server,
+        load weights) so the per-page timing that follows is steady-state.
+        Base implementation is a no-op — engines with no load cost (Apple
+        Vision) need nothing; served VLMs override to ensure their server."""
+
     @abc.abstractmethod
     def recognize(self, image_rgb, languages: list[str],
                    *, src_dpi: float | None = None) -> OcrResult:

@@ -207,6 +207,23 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
         )
 
     # ── public API ───────────────────────────────────────────────────
+    def warmup(self, languages: List[str] | None = None) -> None:
+        """Spin up the local model server (the slow first-run cost: server
+        launch + weight load) so the per-page timing afterwards is
+        steady-state, not model-load + page conflated on the first page.
+        No-op if no backend/weights — recognize_batch raises the clear error."""
+        be = self._backend()
+        if be is None:
+            return
+        key = self._target_key_for(be)
+        if not key or not is_downloaded(key):
+            return
+        model_path = str(models_dir() / target_for(key).filename)
+        LocalVlmServer.ensure(
+            model_path, backend=be, log=_log,
+            log_stem=self.name, max_tokens=self._max_tokens,
+        )
+
     def recognize(
         self,
         image_rgb: np.ndarray,
