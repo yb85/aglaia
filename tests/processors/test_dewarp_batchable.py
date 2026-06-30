@@ -43,10 +43,13 @@ def _dewarper():
 
 
 def test_batched_path_matches_inline_process():
+    # Fresh instances per path: warm-start curl caching is cross-page state
+    # (a solved page seeds the next same-side page), so reusing one instance
+    # would let the inline run's cache warp the batched run's seed. In
+    # production a page takes exactly one path; here we compare both COLD.
+    out_inline = _dewarper().process(_load_buf())
+
     d = _dewarper()
-
-    out_inline = d.process(_load_buf())
-
     buf2 = _load_buf()
     item = d.to_request(buf2)
     assert item is not None, "cylindrical jax page should be batchable"

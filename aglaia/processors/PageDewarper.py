@@ -720,6 +720,23 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                   flush=True)
             self.baseline_source = "bottom"
 
+        # Worker-local warm-start cache: a short ring of recent solved curls
+        # per page side ("left"/"right"/"single"), each (cubic_slopes[2],
+        # spline_extras|None). The cold seed sets cubic_slopes=[0,0]; on some
+        # pages the optimiser early-exits at that flat point (a bad local
+        # optimum → no dewarp). Curl varies slowly across a book, so seeding
+        # from recent same-side fits lifts the optimiser into the right basin.
+        # Seeding from the SINGLE last fit, though, lets a one-off over-curl
+        # compound page-to-page into a runaway; so the seed is the ROBUST
+        # MEDIAN of the last few (componentwise + median magnitude — a single
+        # outlier moves neither) and is finally magnitude-CAPPED, since a seed
+        # that is too curved leads the optimiser into a basin it can't climb
+        # out of. The cap bounds only the seed, not the fit. Worker-local (no
+        # cross-process state); updated as each solve returns, so it survives
+        # batching (which groups pages by shape, not reading order). See
+        # `_seed_warm_curl` / `_remember_warm_curl`.
+        self._warm_curl: dict[str, list] = {}
+
         # Resolve backend (auto / mlx / jax / powell). Env overrides:
         # AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables padded JAX.
         requested = str(getattr(options, "backend", "auto") or "auto").lower()
@@ -1093,6 +1110,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             self.debug_save(res_2, "2_optimized", img_buf)
 
         ctx.params_initial = params_initial
+        self._remember_warm_curl(params, ctx.n_extra, img_buf)
         return self._finish_dewarp(img_buf, params, ctx)
 
     # ── BatchableTrait: split the SOLVE out so the chain can batch it on the
@@ -1152,7 +1170,71 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         """Finish the dewarp from the solved param vector (the remap half),
         returning the output ImageBuffer exactly as inline process() would."""
         ctx = img_buf.meta.pop("_dewarp_ctx")
-        return self._finish_dewarp(img_buf, np.asarray(result), ctx)
+        result = np.asarray(result)
+        self._remember_warm_curl(result, ctx.n_extra, img_buf)
+        return self._finish_dewarp(img_buf, result, ctx)
+
+    # Warm-start cache tunables.
+    _WARM_HIST = 8          # per-side ring length of recent solved curls
+    _WARM_MEDIAN_N = 3      # seed = robust median of the last N fits
+    _WARM_CURL_MAX = 0.5    # hard cap on the SEED |cubic_slopes| (not the fit):
+                            # a too-curved seed leads the optimiser into a basin
+                            # it struggles to climb out of → runaway over-curl.
+
+    @staticmethod
+    def _warm_key(img_buf: ImageBuffer) -> str:
+        return str(img_buf.meta.get("page_side") or "single").lower()
+
+    def _seed_warm_curl(self, params, n_extra: int, img_buf: ImageBuffer):
+        """Seed the curl DOFs from a ROBUST median of recent same-side fits.
+
+        Transfers ONLY the global shape — cubic slopes (params[6:8]) and, for
+        spline models, the coeff/γ tail — leaving pose (rvec/tvec) and the
+        per-span keypoints page-specific. Robustness (vs seeding the single
+        last fit, which lets over-curl compound into a runaway): the seed is
+        the componentwise median of the last N fits scaled to the MEDIAN of
+        their magnitudes (a lone outlier moves neither), then hard-capped in
+        magnitude. No-op until a same-side page has solved on this worker."""
+        hist = self._warm_curl.get(self._warm_key(img_buf))
+        if not hist:
+            return
+        recent = hist[-self._WARM_MEDIAN_N:]
+        cubics = np.asarray([h[0] for h in recent], dtype=np.float64)  # (k, 2)
+        med = np.median(cubics, axis=0)
+        med_mag = float(np.median(np.linalg.norm(cubics, axis=1)))
+        nv = float(np.linalg.norm(med))
+        if nv > 1e-9:
+            med = med * (med_mag / nv)              # robust direction + scale
+        mag = float(np.linalg.norm(med))
+        if mag > self._WARM_CURL_MAX:               # hard runaway cap
+            med = med * (self._WARM_CURL_MAX / mag)
+        if np.all(np.isfinite(med)):
+            params[6:8] = med.astype(np.float32)
+        if n_extra:
+            ex = [h[1] for h in recent
+                  if h[1] is not None and len(h[1]) == n_extra]
+            if ex:
+                med_ex = np.median(np.asarray(ex, dtype=np.float64), axis=0)
+                if np.all(np.isfinite(med_ex)):
+                    params[-n_extra:] = med_ex.astype(np.float32)
+
+    def _remember_warm_curl(self, params, n_extra: int, img_buf: ImageBuffer):
+        """Append the solved curl to this page side's ring (drops non-finite
+        fits so they can't poison the median)."""
+        params = np.asarray(params)
+        if params.size < 8:
+            return
+        cubic = params[6:8].astype(np.float32)
+        if not np.all(np.isfinite(cubic)):
+            return
+        extras = None
+        if n_extra and params.size >= 8 + n_extra \
+                and np.all(np.isfinite(params[-n_extra:])):
+            extras = params[-n_extra:].astype(np.float32).copy()
+        hist = self._warm_curl.setdefault(self._warm_key(img_buf), [])
+        hist.append((cubic.copy(), extras))
+        if len(hist) > self._WARM_HIST:
+            del hist[0]
 
     def _build_dewarp_problem(self, img_buf: ImageBuffer):
         """Build the dewarp optimisation problem: padding, page mask, text
@@ -1414,6 +1496,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             if n_extra:
                 params = np.concatenate(
                     [params, np.zeros(n_extra, dtype=params.dtype)])
+            # Warm-start the curl from the last same-side fit (escapes the
+            # flat-[0,0] local optimum that leaves some pages undewarped).
+            # Done here so BOTH the inline process() and the batched
+            # make-request path (which read ctx.params) get the seed.
+            self._seed_warm_curl(params, n_extra, img_buf)
+            if n_extra:
                 flat_w = flat_penalty_eff * sheet_models.flat_outer_weights(
                     self.spline_modes, self.knot_grading)
                 if self.backend == "mlx":
