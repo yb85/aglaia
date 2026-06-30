@@ -62,6 +62,9 @@ class OcrEngine(abc.ABC):
     direct_block: bool = False      # can OCR a cropped text block directly (no
                                     # layout pass) → eligible as an apple_docs
                                     # complement; the OCR tab lists these.
+    served_vlm: bool = False        # spins up a local model server (slow first
+                                    # load + minutes/dense-page) → drives the
+                                    # OcrWorker "loading…/VLM OCR" progress hint.
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

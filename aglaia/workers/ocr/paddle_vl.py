@@ -108,6 +108,7 @@ class PaddleVlEngine(DirectBlockOCR, OcrEngine):
     # used by the pipeline orchestrator. Surface a default anyway so the
     # OcrTab can render a unified DPI picker.
     default_dpi: int = 150
+    served_vlm = True  # heavy VLM pipeline → slow first load + dense pages
 
     # Class-level so all OcrEngine instances share the loaded pipeline.
     _pipeline = None

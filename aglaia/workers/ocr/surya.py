@@ -31,5 +31,14 @@ class SuryaEngine(OpenAiCompatVlmOcr):
     description = "Local Surya 2 doc VLM (MLX/vLLM); Markdown, tables, 90+ scripts."
     mlx_target_key = "surya_mlx"
     vllm_target_key = "surya_vllm"
-    prompt = "Convert this document image to Markdown."
-    output_html = True  # Surya emits HTML (<p>/<table>) → converted to Markdown
+    # Surya 2 is trained to emit EITHER layout JSON OR full-page OCR HTML,
+    # selected by the prompt. This is its exact whole-page OCR prompt
+    # (HIGH_ACCURACY_BBOX_PROMPT in datalab's surya/inference/prompts.py) — a
+    # generic "convert to Markdown" instead triggered the layout task (the
+    # [{"label","bbox","count"}] JSON we were exporting as garbage .md). Output
+    # is <div data-label=… data-bbox=…>text</div> blocks.
+    prompt = (
+        "OCR this image to HTML. Each block is a div with data-label and "
+        "data-bbox (x0 y0 x1 y1, normalized 0-1000)."
+    )
+    output_html = True  # <div> blocks → Markdown via html_to_markdown

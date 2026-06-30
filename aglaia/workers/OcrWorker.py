@@ -212,9 +212,14 @@ class OcrWorker(QThread):
                 lo = chunk_start + 1
                 hi = min(chunk_start + len(pending), total)
                 span = f"page {lo}" if lo == hi else f"pages {lo}–{hi}"
-                hint = (" — loading the model on first run, please wait…"
-                        if chunk_start == 0 else
-                        " — VLM OCR; dense pages can take a few minutes")
+                # Only the locally-served VLMs are slow to spin up / per dense
+                # page; Apple Vision et al. are fast, so don't promise minutes.
+                if getattr(engine, "served_vlm", False):
+                    hint = (" — loading the model on first run, please wait…"
+                            if chunk_start == 0 else
+                            " — VLM OCR; dense pages can take a few minutes")
+                else:
+                    hint = ""
                 self.log_line.emit(
                     "info", f"OCR: {span} of {total}{hint}")
 

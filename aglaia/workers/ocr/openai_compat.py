@@ -156,6 +156,7 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
     default_dpi: int = 150
     supports_live = False  # a server round-trip per frame is wasteful
     cloud = False  # self-hosted (local GPU / Apple Silicon)
+    served_vlm = True  # local model server → slow first load + dense pages
 
     def __init__(self) -> None:
         self._max_tokens = 8192

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 from typing import Any, Optional
 
@@ -575,6 +576,24 @@ def _union_bbox(lines: list[dict]) -> list[int]:
     return [xs0, ys0, xs1, ys1]
 
 
+# A recognition-only VLM (Surya/GLM/…) handed a dense block — e.g. a footnote
+# column — can fall into a repetition loop, emitting the same line with an
+# incremented counter ad nauseam ("(195) Ibid., p. 188." ×100). That output is
+# strictly worse than Vision's, so we must NOT splice it in. Detect it by the
+# two signatures of a loop: an explosion in line count vs the source block, and
+# a collapse in distinct content once a leading enumerator ("(195) ", "12. ")
+# is stripped — real footnotes vary by page number and stay distinct; a loop
+# repeats one line. Fail-safe: on detection we keep Vision's text for the block.
+def _complement_degenerate(text: str, n_source_lines: int) -> bool:
+    parts = [p.strip() for p in text.splitlines() if p.strip()]
+    if len(parts) < 8:
+        return False  # too short to be a runaway loop
+    exploded = len(parts) > max(8, 3 * max(1, n_source_lines))
+    norm = [re.sub(r"^[(\[]?\d+[)\].]?\s*", "", p) for p in parts]
+    collapsed = len(set(norm)) / len(norm) < 0.5
+    return exploded or collapsed
+
+
 def _split_block_text(text: str, n_lines: int) -> list[str]:
     """Split a block's complement text across its ``n_lines`` source lines.
 
@@ -644,6 +663,12 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
             if (r.get("text") or "").strip()
         ).strip()
         if not new_text:
+            continue
+        if _complement_degenerate(new_text, len(blk_lines)):
+            engine_log(
+                f"[apple_docs] complement {comp!r} returned degenerate/looping "
+                f"output for a {len(blk_lines)}-line block — discarding, "
+                f"keeping Vision text.", "warn")
             continue
         per_line = _split_block_text(new_text, len(blk_lines))
         # Order block lines top→bottom to align with the VLM's reading order.
