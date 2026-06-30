@@ -563,12 +563,17 @@ class PipelineProgressBar(QWidget):
                 head=head, elapsed=self._fmt_duration(elapsed),
                 per_unit=per_unit, unit=unit,
             )
-        # Running — show ETA from moving-average dt.
-        avg_dt = self._moving_avg_dt()
-        if avg_dt is None or total <= 0 or done >= total:
-            eta_str = "—"
+        # Running — ETA from CUMULATIVE throughput (elapsed-since-start ÷ done).
+        # A small moving-average window lurched wildly because the VLM completes
+        # pages in bursts of 4 (a batch returns all at once, then a gap), so the
+        # windowed rate swung across batch boundaries. The cumulative rate is
+        # smooth and converges to the true pace (it includes the one-time
+        # model-load warmup, so it starts high and settles — honest, not jumpy).
+        if (total > 0 and 0 < done < total and self._start_t is not None):
+            rate = (time.monotonic() - self._start_t) / done
+            eta_str = self._fmt_duration(rate * (total - done))
         else:
-            eta_str = self._fmt_duration(avg_dt * (total - done))
+            eta_str = "—"
         return self.tr("{head}  ·  ETA {eta}").format(head=head, eta=eta_str)
 
     def paintEvent(self, _ev):

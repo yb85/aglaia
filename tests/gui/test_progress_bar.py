@@ -80,6 +80,18 @@ def test_final_label_unit_is_page_for_ocr_scan_for_pipeline(_qapp):
     assert "s/scan" in pipe._build_label()  # pipeline counts whole scans
 
 
+def test_eta_is_cumulative_throughput(_qapp):
+    import time
+
+    bar = PipelineProgressBar()
+    bar.reset()
+    bar.set_imported(100)
+    bar._start_t = time.monotonic() - 20.0   # pretend 20 s elapsed
+    for _ in range(10):
+        bar.mark_tick()                      # 10 done → 2.0 s/item → ETA ~180 s
+    assert "ETA 3m" in bar._build_label()    # cumulative, not a jumpy window
+
+
 def test_new_ocr_run_restarts_from_zero(_qapp):
     bar = PipelineProgressBar()
     bar.reset()
