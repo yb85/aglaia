@@ -105,6 +105,12 @@ KEY_MISTRAL_BATCH = "mistral_batch"  # bool — Cloud OCR (Mistral) submits a
                                    # batch job (cheaper, async) instead of a
                                    # synchronous OCR run. Remembered across
                                    # sessions; the OCR card's batch toggle.
+KEY_MISTRAL_FOOTNOTES = "mistral_footnotes"  # str — "numeric" | "alphabetic" |
+                                   # "off". Post-process Mistral markdown:
+                                   # LaTeX/Unicode superscripts → GFM footnotes.
+KEY_MISTRAL_HEADERS = "mistral_headers"  # bool — extract page header/footer via
+                                   # the OCR API (extract_header/extract_footer)
+                                   # → wrapped in <header>/<footer> tags.
 KEY_MODELS_PROMPT_DISMISSED = "models_prompt_dismissed"  # bool — user ticked
                                    # "don't show again" on the first-run model
                                    # install invite (EAST+Vosk / Vosk on mac).
@@ -140,6 +146,8 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_WELCOME_SEEN: False,
     KEY_FILETYPE_ASSOC_DONE: False,
     KEY_MISTRAL_BATCH: False,
+    KEY_MISTRAL_FOOTNOTES: "numeric",
+    KEY_MISTRAL_HEADERS: True,
     KEY_MODELS_PROMPT_DISMISSED: False,
 }
 

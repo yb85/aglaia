@@ -3304,8 +3304,16 @@ class MainWindow(QMainWindow):
         else:
             self._ocr_worker.progress_scan.connect(self._on_ocr_progress)
             self._ocr_worker.finished_ok.connect(self._on_ocr_finished)
-        self._update_ocr_frame_state()
+        # Lock the OCR sidebar up front — we're committing to a run, so the
+        # busy overlay must cover the whole assemble+upload window (esp. a
+        # Mistral batch of hundreds of pages, which can take seconds) so Run
+        # can't be re-clicked / the job double-submitted. Set it explicitly
+        # BEFORE start() so there's no isRunning()-not-yet-true race; the
+        # post-start refresh keeps it consistent, and the finish handlers drop
+        # it via _update_ocr_frame_state().
+        self.ocr_frame.set_ocr_running(True)
         self._ocr_worker.start()
+        self._update_ocr_frame_state()
 
     # ── Mistral batch ──────────────────────────────────────────────────
     def _on_batch_submitted(self, n_jobs: int, error: str):

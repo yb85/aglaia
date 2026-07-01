@@ -86,15 +86,23 @@ def submit(api_key: str, img_rows: list[dict], run_ids: list[int],
     total = len(chunks)
     out: list[dict] = []
     offset = 0
+    # Header/footer extraction must be requested at submit time (same as the
+    # sync path) so the batch pages come back with populated header/footer
+    # fields; page_to_result then wraps them. Driven by the Mistral card toggle.
+    from aglaia.workers.ocr.md_postprocess import mistral_settings
+    _fn, _extract_hf = mistral_settings()
     for ci, (pdf_bytes, n) in enumerate(chunks):
         uploaded = client.files.upload(
             file={"file_name": f"aglaia-ocr-{ci}.pdf", "content": pdf_bytes},
             purpose="ocr")
         signed = client.files.get_signed_url(file_id=uploaded.id)
         # One OCR request line per chunk PDF.
-        line = {"custom_id": "0", "body": {
-            "document": {"type": "document_url", "document_url": signed.url},
-            "include_image_base64": False}}
+        _body = {"document": {"type": "document_url", "document_url": signed.url},
+                 "include_image_base64": False}
+        if _extract_hf:
+            _body["extract_header"] = True
+            _body["extract_footer"] = True
+        line = {"custom_id": "0", "body": _body}
         jsonl = (json.dumps(line) + "\n").encode("utf-8")
         binput = client.files.upload(
             file={"file_name": f"aglaia-batch-{ci}.jsonl", "content": jsonl},
@@ -216,12 +224,27 @@ def list_jobs(api_key: str) -> list[dict]:
 
 # ── result shaping ───────────────────────────────────────────────────────
 def page_to_result(page: dict, page_w: int, page_h: int,
-                   languages: list[str]) -> OcrResult:
+                   languages: list[str], markers: "set | None" = None
+                   ) -> OcrResult:
     """Build the same OcrResult shape the sync path produces, from one
     Mistral page object — markdown for md_export plus the rich page
     (``meta.mistral_page``) so deferred batch results persist via
-    ``ocr_repo.finish`` exactly like a synchronous run, structure intact."""
+    ``ocr_repo.finish`` exactly like a synchronous run, structure intact.
+
+    ``markers`` = the document-wide footnote-marker set (see
+    ``md_postprocess.document_markers``) — footnote refs and their definitions
+    routinely land on different pages, so it must be computed over ALL the
+    batch's pages, not this one. Callers that loop pages should precompute it
+    once and pass it in."""
     md = page.get("markdown", "") if isinstance(page, dict) else (page or "")
+    # Same footnote + header/footer post-processing as the sync path, driven by
+    # the Mistral card toggles (read from config, since there's no engine
+    # instance here). Without this, batch results skip the transform entirely.
+    from aglaia.workers.ocr.md_postprocess import (
+        mistral_settings, postprocess_mistral_page)
+    _fn, _hdr = mistral_settings()
+    md = postprocess_mistral_page(md, page, footnotes=_fn, headers=_hdr,
+                                  markers=markers)
     base: OcrResult = {
         "engine": "mistral_cloud", "languages": list(languages),
         "page_w": int(page_w), "page_h": int(page_h),

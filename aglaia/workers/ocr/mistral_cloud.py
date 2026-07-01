@@ -187,6 +187,41 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         # checked at run time so the card stays selectable (and the user
         # can be pointed at the key field) even before a key is set.
         self.available = _mistralai_available()
+        # Post-processing (defaults ON, per the Mistral card): convert LaTeX/
+        # Unicode superscript footnotes → GFM ([^N]); extract header/footer via
+        # the OCR API's extract_header/extract_footer params → wrapped in HTML.
+        # Read the GUI toggles (config DB); ``configure`` (CLI spec) can override.
+        self._footnotes = "numeric"   # "numeric" | "alphabetic" | "off"
+        self._headers = True
+        try:
+            from aglaia.app_data import db as _cfg
+            with _cfg.session() as _c:
+                self._footnotes = str(_cfg.get(
+                    _c, _cfg.KEY_MISTRAL_FOOTNOTES, "numeric"))
+                self._headers = bool(_cfg.get(
+                    _c, _cfg.KEY_MISTRAL_HEADERS, True))
+        except Exception:
+            pass
+
+    def configure(self, params: dict[str, str]) -> None:
+        fn = (params.get("footnotes") or "").strip().lower()
+        if fn in ("numeric", "alphabetic", "off", "none", ""):
+            self._footnotes = "off" if fn in ("none",) else (fn or self._footnotes)
+        h = (params.get("headers") or "").strip().lower()
+        if h in ("on", "true", "1", "yes"):
+            self._headers = True
+        elif h in ("off", "false", "0", "no"):
+            self._headers = False
+
+    def _post_process(self, md: str, page, markers=None) -> str:
+        """Footnote lift + header/footer wrapping — shared with the batch import
+        (``mistral_batch.page_to_result``) so both paths produce identical md.
+        ``markers`` = the document-wide footnote-marker set (refs/defs straddle
+        pages, so it must be computed across the whole doc, not per page)."""
+        from aglaia.workers.ocr.md_postprocess import postprocess_mistral_page
+        return postprocess_mistral_page(
+            md, page, footnotes=self._footnotes, headers=self._headers,
+            markers=markers)
 
     # Single-image path delegates to the batch path so callers that only
     # have one page still work.
@@ -298,6 +333,14 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         upload order; Mistral page *i* maps to ``dims[i]`` (which is the
         i-th selected scan — page 0,1,2 may be scans 12,45,67). Pages beyond
         ``n_sent`` were truncated and get flagged for OcrWorker."""
+        # Document-wide footnote markers (refs/definitions straddle pages).
+        from aglaia.workers.ocr.md_postprocess import document_markers
+        _markers = None
+        if self._footnotes in ("numeric", "alphabetic"):
+            _all_md = [(p.get("markdown", "") if isinstance(p, dict)
+                        else (p or "")) for p in pages]
+            _markers = document_markers(_all_md, self._footnotes)
+
         results: list[OcrResult] = []
         for i, (w, h) in enumerate(dims):
             base: OcrResult = {
@@ -315,6 +358,7 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
                 page = pages[i] if i < len(pages) else ""
                 md = page.get("markdown", "") if isinstance(page, dict) \
                     else (page or "")
+                md = self._post_process(md, page, markers=_markers)
                 line = {"text": md, "bbox": (0, 0, int(w), int(h)),
                         "confidence": 1.0}
                 base["lines"] = [line] if md else []
@@ -379,9 +423,21 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
             purpose="ocr",
         )
         signed = client.files.get_signed_url(file_id=uploaded.id)
-        resp = client.ocr.process(
+        kw: dict = dict(
             model=MODEL,
             document={"type": "document_url", "document_url": signed.url},
             include_image_base64=False,
         )
+        if self._headers:
+            # Split running heads / page numbers into the page's header/footer
+            # fields instead of the main markdown (Mistral OCR API).
+            kw["extract_header"] = True
+            kw["extract_footer"] = True
+        try:
+            resp = client.ocr.process(**kw)
+        except TypeError:
+            # SDK too old for extract_header/extract_footer → retry without.
+            kw.pop("extract_header", None)
+            kw.pop("extract_footer", None)
+            resp = client.ocr.process(**kw)
         return [page_to_dict(pg) for pg in (getattr(resp, "pages", None) or [])]

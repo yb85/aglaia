@@ -411,6 +411,8 @@ def _check_ocr(db_path: str) -> int:
             run_ids = MistralBatchRepo.run_ids_of(job)
             if status == "SUCCESS":
                 pages = mistral_batch.fetch_pages(api_key, jid)
+                from aglaia.workers.ocr.md_postprocess import batch_markers
+                _mk = batch_markers(pages)  # doc-wide (refs/defs straddle pages)
                 for i, rid in enumerate(run_ids):
                     page = pages[i] if i < len(pages) else {}
                     row = conn.execute(
@@ -420,7 +422,8 @@ def _check_ocr(db_path: str) -> int:
                         (rid,),
                     ).fetchone()
                     w, h = (int(row["w"] or 0), int(row["h"] or 0)) if row else (0, 0)
-                    ocr.finish(rid, mistral_batch.page_to_result(page, w, h, []))
+                    ocr.finish(rid, mistral_batch.page_to_result(
+                        page, w, h, [], markers=_mk))
                 repo.mark_imported(jid)
                 imported += 1
                 print(f"  job {jid}: imported {len(run_ids)} page(s)")

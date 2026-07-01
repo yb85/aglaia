@@ -7,8 +7,6 @@ jobs and import finished results, cancel a job, or list all account jobs for
 the Jobs tab. Network I/O, so it runs off the GUI thread."""
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import QThread, Signal
 
 from aglaia.storage.db import open_db
@@ -128,11 +126,13 @@ class MistralBatchWorker(QThread):
                             f"{type(e).__name__}: {e}")
                         pending += 1
                         continue
+                    from aglaia.workers.ocr.md_postprocess import batch_markers
+                    _mk = batch_markers(pages)  # doc-wide (refs/defs straddle)
                     for i, rid in enumerate(run_ids):
                         page = pages[i] if i < len(pages) else {}
                         w, h = _dims_for_run(conn, rid)
                         ocr_repo.finish(rid, mistral_batch.page_to_result(
-                            page, w, h, []))
+                            page, w, h, [], markers=_mk))
                     repo.mark_imported(jid)
                     imported += 1
                     self.log_line.emit(
