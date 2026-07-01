@@ -39,6 +39,14 @@ def ocr(
             "--ocr-lang", help="'+'-joined BCP-47 codes (e.g. fr-FR+en-US) or 'auto'."
         ),
     ] = "auto",
+    ocr_dpi: Annotated[
+        Optional[int],
+        typer.Option(
+            "--ocr-dpi",
+            help="OCR target DPI — pages are downsampled to this before OCR. "
+            "Default 200 (matches the GUI; see docs/ocr-benchmark.md).",
+        ),
+    ] = None,
     export: Annotated[
         Optional[str],
         typer.Option("--export", help="'+'-joined export specs, e.g. 'pdf:g4+md'."),
@@ -78,6 +86,9 @@ def ocr(
     ] = False,
 ) -> None:
     """OCR documents that don't need processing. Headless (no Qt), no pipeline."""
+    if ocr_dpi is not None:
+        import os
+        os.environ["AGLAIA_OCR_DPI"] = str(int(ocr_dpi))
     cfg = ocr_config(
         paths,
         ocr,

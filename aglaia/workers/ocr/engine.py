@@ -210,11 +210,13 @@ def engine_log(text: str, level: str = "info") -> None:
 import os as _os
 
 
-def resolve_ocr_dpi(default: int = 150) -> int:
+def resolve_ocr_dpi(default: int = 200) -> int:
     """Resolve the user-picked OCR target DPI.
 
     Lookup order: env var ``AGLAIA_OCR_DPI`` → SQLite config
-    (``KEY_OCR_DPI``) → ``default``.
+    (``KEY_OCR_DPI``) → ``default``. Default 200 matches the GUI and the
+    benchmark ceiling (docs/ocr-benchmark.md): 300 buys nothing over 200,
+    while 200 is safe for the local VLMs. Override per-run with ``--ocr-dpi``.
     """
     env = _os.environ.get("AGLAIA_OCR_DPI", "").strip()
     if env:
