@@ -42,11 +42,10 @@ AGLAIA_OCR_DPI=<dpi> AGLAIA_OCR_COMPLEMENT=<none|surya|glm> \
 | apple_docs + glm | 12.3 | 5.3 | 5.6 | 6.4 | complement re-OCRs Greek blocks |
 | apple_docs + surya | 11.0 | 15.0 | 16.4 | 12.6 | |
 | glm | 15.3 | 14.8 | 21.0 | 46.1 | input-size sensitive |
-| paddle_vl | 22.1 | 22.8 | 21.2 | 25.4 | |
 | surya | 43.0 | 39.0 | 40.7 | 46.2 | slowest; output-token-bound (DPI-flat) |
 | **unlimited** | — | — | — | **10.2** | **DPI-independent** (whole-doc, raw blobs — like Mistral); **per-page** (window=1); ~2.6 s load |
 
-VLM model load ≈ 2–3 s (surya/glm/unlimited); 0 for Apple, Paddle, Mistral.
+VLM model load ≈ 2–3 s (surya/glm/unlimited); 0 for Apple, Mistral.
 
 > **unlimited is a whole-document engine** (`recognize_rows`), so — like Mistral
 > — it OCRs the raw stored page blobs and is **DPI-independent**: `AGLAIA_OCR_DPI`
@@ -68,7 +67,6 @@ VLM model load ≈ 2–3 s (surya/glm/unlimited); 0 for Apple, Paddle, Mistral.
 | glm | 0.812 | 0.891 | 0.902 | 0.909 |
 | apple_docs + surya | 0.887 | 0.875 | 0.873 | 0.871 |
 | apple_docs + glm | 0.752 | 0.863 | 0.858 | 0.868 |
-| paddle_vl | 0.766 | 0.671 | 0.675 | 0.714 |
 | **unlimited** (native, window=1) | 0.899 | 0.899 | 0.899 | 0.899 |
 
 *unlimited is DPI-independent (one native value repeated); 0.899 puts it in the
@@ -76,7 +74,7 @@ top band with surya/glm — clean per-page transcription, no Cyrillic hallucinat
 
 *Even Apple agrees only ~0.87 with Mistral (same content, different
 formatting/footnote handling) — so ~0.87 is the "as good as Apple" band, ~0.90+
-is closer to Mistral, and paddle's ~0.67–0.71 is genuinely divergent.*
+is closer to Mistral.*
 
 ## DPI degradation — word-overlap vs the engine's own native-300
 
@@ -87,7 +85,6 @@ is closer to Mistral, and paddle's ~0.67–0.71 is genuinely divergent.*
 | surya | 0.864 | 0.948 | 0.967 |
 | glm | 0.821 | 0.922 | 0.941 |
 | apple_docs + glm | 0.778 | 0.905 | 0.913 |
-| paddle_vl | 0.762 | 0.681 | 0.757 |
 
 ## Recommendation — a single global default: **200 dpi**
 
@@ -126,8 +123,6 @@ on speed. Trade-off: cloud/paid vs the local engines' free/offline.
 - **glm** — good from 150 up; time grows sharply with DPI.
 - **mistral** — best accuracy/speed of the non-Apple engines; one billed request
   per document.
-- **paddle_vl** — excellent French, **unusable Greek** (garbled + repetition
-  loops). Wrong tool for Greek-heavy material. See issue.
 - **unlimited** — now working via our in-process MLX port (../unlimited-ocr-mlx).
   Whole-doc, **DPI-independent**, **per-page** (window=1): **10.2 s/page, 0.899
   vs Mistral** — top-band accuracy at ~4× surya's speed, no Cyrillic
@@ -140,5 +135,4 @@ on speed. Trade-off: cloud/paid vs the local engines' free/offline.
   final judgement on Greek/French still wants a human spot-read.
 - One book's typography and one page style; other corpora may shift the knees.
 - Repetition-loop degeneration on low-context crops (Surya/GLM complement) is
-  suppressed by `repetition_penalty=1.15` on the served VLMs; the same loop
-  affects Paddle's separate pipeline (unfixed).
+  suppressed by `repetition_penalty=1.15` on the served VLMs.

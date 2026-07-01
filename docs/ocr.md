@@ -34,9 +34,10 @@ plugin](./processors.md) appears automatically.
 |---|---|---|
 | **apple_docs** | on-device | structured document OCR — recovers page (headings, blocks, reading order); the right choice for **Markdown** |
 | **apple_vision** | on-device | line-based `VNRecognizeTextRequest`, Latin-first, **no page** — good for the searchable-**PDF** text layer, not for Markdown structure; **default** |
-| **surya** | on-device | VLM via bundled `llama-server` (llama.cpp); `whole_doc` |
-| **paddle_vl** | on-device | PaddleOCR-VL via `mlx-vlm` |
-| **mistral_cloud** | cloud | Mistral Document AI over HTTPS; reads any script |
+| **surya** | on-device | Qwen-VL served via `mlx-vlm`; `whole_doc` |
+| **glm** | on-device | VLM served via `mlx-vlm` |
+| **unlimited** | on-device | Baidu Unlimited-OCR (MLX port, in-process); whole-doc, per-page (window=1), DPI-independent |
+| **mistral_cloud** | cloud | Mistral Document AI over HTTPS; reads any script; footnote + header/footer post-processing |
 
 ## Shared DPI + confidence knobs
 

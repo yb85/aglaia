@@ -32,33 +32,25 @@ dependencies = [
     # dep earns a place in base. See docs/subcommand-cli.md.
     "typer>=0.12",
 ]
-# NOTE: the OCR engines (surya, paddle-VL) are NOT base dependencies. They
-# are heavy and — critically — mutually exclusive: surya-ocr pins
-# huggingface-hub<1 while mlx-vlm (paddle-VL) needs >=1.5. A plain
-# `pip install aglaia` must resolve cleanly, so neither is in the base set.
-# `uv sync` (dev / the macOS bundle) reconciles both via the
-# [tool.uv] override-dependencies below; a loose pip install cannot, so
-# pick ONE engine extra. Apple Vision (macos extra) needs no Python OCR dep.
+# NOTE: the local VLM OCR engines are NOT base dependencies — they're heavy
+# and the serving backend (mlx-vlm) lives in the `macos` / `cuda` extras. A
+# plain `pip install aglaia` stays slim; `uv sync` (dev / the macOS bundle)
+# reconciles versions via the [tool.uv] override-dependencies below. Apple
+# Vision (macos extra) needs no Python OCR dep.
 
 [project.optional-dependencies]
 # NOTE: Surya 2 OCR no longer has its own extra. It's a Qwen3.5-VL model now
 # served through the shared local VLM backend (mlx-vlm in `macos`, vLLM in
 # `cuda`) like glm/unlimited — so `--ocr surya` needs no Surya-specific deps,
 # and the old surya-ocr/torch/llama-server/GGUF stack (+ its conflicts) is gone.
-# OCR engine: PaddleOCR-VL — just the paddleocr layout orchestrator + CPU
-# paddlepaddle. The VLM serving backend (mlx-vlm) lives in the `macos` extra, so
-# PaddleOCR-VL needs `--extra macos --extra paddle` — it is Apple-Silicon-only
-# (its pipeline drives the mlx-vlm server). `pip install "aglaia[macos,paddle]"`.
-paddle = [
-    "paddleocr[doc-parser]>=3.6.0",
-    "paddlepaddle>=3.2.1",
-]
+# (PaddleOCR-VL was dropped 2026-07: weak on Greek, and it dragged in
+# paddleocr + paddlepaddle + opencv-contrib for little gain.)
 # NOTE: the vLLM serving backend (for the `glm` / `unlimited` OCR engines on
 # CUDA/Linux) is intentionally NOT a managed extra. vLLM hard-pins an exact
 # torch/CUDA build and conflicts with every other OCR stack here, so it must be
 # installed per-box to match the local CUDA (e.g. `uv pip install vllm`). The
 # VllmBackend only needs `vllm` importable. Apple Silicon needs nothing extra —
-# those engines serve via the `mlx-vlm` already in the `paddle` extra.
+# those engines serve via the `mlx-vlm` in the `macos` extra.
 # Cross-platform GUI (PySide6 + theme). Decoupled from `macos` so a
 # CLI-only / headless install (the base dependencies) stays slim — no
 # Qt download. The capture GUI on macOS needs `gui` + `macos` together.
@@ -93,8 +85,8 @@ macos = [
     # JAX-CPU host-pool leak (workers ballooning to 14–58 GB during
     # cubic-sheet optimisation). Disabled outside arm64 by the marker.
     "mlx>=0.30; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    # MLX VLM serving backend (mlx_vlm.server). The local OCR VLM engines
-    # (`glm` / `paddle_vl`) serve through it on Apple Silicon; `unlimited` uses
+    # MLX VLM serving backend (mlx_vlm.server). The local OCR VLM engine
+    # `glm` serves through it on Apple Silicon; `unlimited` uses
     # it IN-PROCESS (mlx_vlm.load/generate) for the fused multipage R-SWA path.
     # Pinned to the upstream commit that first ships the `unlimited_ocr`
     # model_type (PR Blaizzy/mlx-vlm#1427, merged 2026-07-01) — not on PyPI yet
@@ -244,8 +236,4 @@ override-dependencies = [
     # leaves a half-written cv2/, force-reinstall the three opencv distros.
     "opencv-python==4.11.0.86",
     "opencv-python-headless==4.11.0.86",
-    # paddleocr pulls opencv-contrib-python — a THIRD distribution writing the
-    # same cv2/ dir. Pin it to the same version too, else it clobbers cv2/ to
-    # its own release (e.g. 4.10) and the shared dir goes half-written/skewed.
-    "opencv-contrib-python==4.11.0.86",
 ]
