@@ -610,6 +610,47 @@ def _split_block_text(text: str, n_lines: int) -> list[str]:
     return [text.strip()] + [""] * (n_lines - 1)
 
 
+# Primary-subtag → script the OCR languages imply. Vision confidence alone
+# misses *confidently-wrong* misreads — most often Greek rendered as visually
+# confusable CYRILLIC in a Latin/Greek document. Any letter from a script the
+# document's languages don't cover is near-certain garbage (measured precision
+# 100% / recall ~96% on this corpus), so it should go to the complement
+# regardless of confidence.
+_LANG_SCRIPT = {
+    "la": "Latin", "fr": "Latin", "en": "Latin", "de": "Latin", "es": "Latin",
+    "it": "Latin", "pt": "Latin", "nl": "Latin",
+    "el": "Greek", "grc": "Greek",
+    "ru": "Cyrillic", "uk": "Cyrillic", "bg": "Cyrillic", "sr": "Cyrillic",
+}
+
+
+def _char_script(ch: str) -> Optional[str]:
+    o = ord(ch)
+    if (0x41 <= o <= 0x5A or 0x61 <= o <= 0x7A
+            or 0xC0 <= o <= 0x24F or 0x1E00 <= o <= 0x1EFF):
+        return "Latin"
+    if 0x370 <= o <= 0x3FF or 0x1F00 <= o <= 0x1FFF:
+        return "Greek"
+    if 0x400 <= o <= 0x52F:
+        return "Cyrillic"
+    return None  # digits / punctuation / other — script-neutral, ignored
+
+
+def _has_unexpected_script(text: str, languages: list[str],
+                           min_chars: int = 2) -> bool:
+    """True if ``text`` carries ≥ ``min_chars`` letters from a script the OCR
+    ``languages`` don't cover (e.g. Cyrillic in a fr+el document) — a
+    high-precision garbage signal Vision confidence misses."""
+    expected = {_LANG_SCRIPT.get((lc or "").split("-")[0].lower())
+                for lc in (languages or [])}
+    expected.discard(None)
+    if not expected:
+        expected = {"Latin", "Greek"}  # sensible default for this domain
+    bad = sum(1 for ch in text
+              if (s := _char_script(ch)) is not None and s not in expected)
+    return bad >= min_chars
+
+
 def _apply_complement(arr: np.ndarray, lines: list[dict],
                       document: list[dict], comp: str,
                       languages: list[str],
@@ -621,8 +662,14 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
     essential — the recognition-only VLM returns nothing on a thin
     one-line strip but reads a multi-line block cleanly. Returns
     ``(n_offloaded, complement_used_or_None)``."""
+    # Offload a line to the complement when Vision is unsure (confidence gate)
+    # OR when it emitted a script the document's languages don't cover — Vision
+    # renders Greek as confusable Cyrillic *with high confidence*, so the
+    # confidence gate alone leaks those. Script anomaly is a near-certain
+    # misread (measured 100% precision here), so it fires regardless of score.
     low = [ln for ln in lines
-           if float(ln.get("confidence", 1.0)) < gate
+           if (float(ln.get("confidence", 1.0)) < gate
+               or _has_unexpected_script(ln.get("text", ""), languages))
            and ln.get("bbox")
            and not _is_degenerate(ln.get("text", ""))]
     if not low:
