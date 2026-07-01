@@ -282,7 +282,12 @@ def _predict_with_timeout(pipeline: Any, image: np.ndarray) -> Any:
 
     def _runner() -> None:
         try:
-            result[0] = pipeline.predict(image)
+            # repetition_penalty + a token cap: PaddleOCR-VL runs its own
+            # mlx-vlm server (not our openai_compat path), so it needs the same
+            # anti-degeneration knobs applied here — without them it loops on a
+            # script it can't read (e.g. Greek), filling the token budget.
+            result[0] = pipeline.predict(
+                image, repetition_penalty=1.15, max_new_tokens=4096)
         except BaseException as e:  # noqa: BLE001 — re-raised in caller
             err[0] = e
 

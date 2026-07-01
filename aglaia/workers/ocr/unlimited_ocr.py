@@ -61,8 +61,13 @@ class UnlimitedOcrEngine(OpenAiCompatVlmOcr):
     description = "Local 3B doc VLM (MLX/vLLM); long docs, Markdown + tables."
     mlx_target_key = "unlimited_ocr_mlx"
     vllm_target_key = "unlimited_ocr_vllm"
-    # The model card requires a literal "<image>" prefix.
-    prompt = "<image>\nConvert this page to Markdown."
+    # NB: do NOT put a literal "<image>" in the prompt. The model card's raw
+    # API wants it, but through the OpenAI-compat server the image arrives as an
+    # ``image_url`` content part and the chat template inserts the image token
+    # itself — a literal "<image>" here is a SECOND marker → the server rejects
+    # the request with "image tokens ... does not match the number of images:
+    # 2 != 1" (HTTP 500 on every page).
+    prompt = "Convert this page to Markdown."
     # skip_special_tokens=False keeps the <|ref|>/<|det|> grounding tokens (else
     # the server strips them and we lose the bbox layer); the R-SWA xargs are the
     # recipe's recommended defaults.
