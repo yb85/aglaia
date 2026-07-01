@@ -72,6 +72,14 @@ _AVAILABLE: Optional[bool] = None
 # SQLite ``KEY_OCR_CONFIDENCE_GATE`` → this default).
 DEFAULT_CONFIDENCE_GATE = 0.7
 
+# When more than this FRACTION of a page's lines are flagged for the complement
+# (low confidence OR unexpected script), Vision is failing on the page as a
+# whole — so one clean whole-page pass by the complement VLM beats dozens of
+# block re-OCRs + splices (the block path is fragile and the VLM reads a full
+# page cleanly anyway). 0.30 balances: below it, targeted block re-OCR keeps
+# Vision's fast/good majority; above it, the page is garbage-dominated.
+FULL_PAGE_COMPLEMENT_FRAC = 0.30
+
 # Pixel padding added around a low-confidence line's bbox before cropping
 # for the complement, as a fraction of the line height (re-OCR likes a
 # little breathing room around the glyphs).
@@ -646,6 +654,27 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
             f"(weights/deps missing) — keeping Vision text for "
             f"{len(low)} low-conf line(s).", "warn")
         return 0, None
+
+    # Whole-page fallback: when Vision fails on most of the page, one clean
+    # complement pass over the WHOLE image beats many block re-OCRs + splices.
+    frac = len(low) / max(len(lines), 1)
+    if frac > FULL_PAGE_COMPLEMENT_FRAC:
+        try:
+            res = engine.recognize(arr, languages)
+            new_lines = res.get("lines") or []
+        except Exception as e:  # noqa: BLE001
+            engine_log(f"[apple_docs] whole-page complement failed: {e} "
+                       f"— falling back to per-block.", "warn")
+            new_lines = []
+        if new_lines:
+            engine_log(
+                f"[apple_docs] {len(low)}/{len(lines)} lines flagged "
+                f"({frac:.0%} > {FULL_PAGE_COMPLEMENT_FRAC:.0%}) → whole-page "
+                f"re-OCR with {comp}", "info")
+            lines[:] = new_lines       # replace Vision's page with the VLM's
+            document.clear()           # VLM has no doc tree → md falls back to lines
+            return len(low), comp
+        # empty VLM result → fall through to the per-block path
 
     blocks = _group_low_blocks(low)
     engine_log(
