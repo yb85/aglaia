@@ -710,15 +710,19 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
         # Order block lines top→bottom to align with the VLM's reading order.
         blk_sorted = sorted(blk_lines, key=lambda ln: ln["bbox"][1])
         for ln, txt in zip(blk_sorted, per_line):
-            if not txt:
-                continue
-            engine_log(
-                f"[apple_docs]   conf={ln['confidence']:.2f} "
-                f"{ln['text'][:28]!r} → {txt[:28]!r}", "info")
+            # Set EVERY block line — including the blanks _split_block_text
+            # produces on a line-count mismatch (whole block text lands on the
+            # first line, rest blanked). Those blanks MUST be cleared, not left
+            # as Vision's garbage: the corrected text is already on line 1, so
+            # keeping the old (Cyrillic) text here was the leak that left most
+            # re-OCR'd lines uncorrected.
+            old = ln.get("text", "")
             ln["text"] = txt
             ln["confidence"] = max(float(ln.get("confidence", 0.0)), 0.99)
             ln["complement"] = comp
             if document:
                 _replace_in_document(document, ln["bbox"], txt)
             n += 1
+            if txt:
+                engine_log(f"[apple_docs]   {old[:24]!r} → {txt[:24]!r}", "info")
     return n, (comp if n else None)
