@@ -24,7 +24,7 @@ import sys
 _EXCLUDE_KEYS = {"vosk_en"}        # capture-only, no headless use
 _MAC_ONLY_KEYS = {"paddle_vl"}     # MLX 4-bit — Apple Silicon only
 _DEFAULT_KEYS = {"dbnet"}          # pre-ticked recommendation
-_ORDER = ["dbnet", "east", "surya", "paddle_vl"]   # display order; rest appended
+_ORDER = ["dbnet", "east", "surya_mlx", "paddle_vl"]   # display order; rest appended
 
 
 def _offered_specs(is_mac: bool) -> list:

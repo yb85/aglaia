@@ -167,10 +167,16 @@ uv sync --extra gui                 # Windows / Linux GUI
 uv sync                             # headless: CLI pipeline, no Qt
 ```
 
-Optional extras: `--extra surya` / `--extra paddle` (OCR engines),
-`--extra voice` (Vosk), `--extra cloud` (Mistral), `--extra server`
-(FastAPI + uvicorn HTTP job server), `--extra cuda` (NVIDIA GPU dewarp
-on Linux).
+Optional extras: `--extra cloud` (Mistral OCR), `--extra surya` (Surya OCR),
+`--extra paddle` (PaddleOCR-VL — needs `--extra macos` too), `--extra voice`
+(Vosk), `--extra server` (FastAPI + uvicorn HTTP job server).
+
+**Local VLM OCR** (`--ocr glm` / `--ocr unlimited`, also PaddleOCR-VL) serves
+through a bundled-by-platform backend: `--extra macos` ships the MLX backend
+(Apple Silicon), `--extra cuda` ships vLLM (Linux, GPU or CPU). So on a Mac the
+GUI install (`--extra gui --extra macos`) already includes local VLM OCR; on a
+Linux GPU box use `--extra cuda`. (`surya` and `cuda` are mutually exclusive —
+incompatible torch/openai pins.)
 
 **First run (CLI-only installs):** run the one-time setup to pick and download
 the offline models, seed the default pipelines, and bootstrap the config:
@@ -205,6 +211,9 @@ uv run aglaia gui --camera-id 1      # explicit form
 # Headless batch — same chain, no Qt
 uv run aglaia run ~/scans/*.jpg --ocr auto --export pdf:g4+md
 uv run aglaia run ~/scans/my-book.agl -p book_curved_x2 --ocr surya:lang=fr-FR
+
+# OCR a clean PDF/scan with NO processing (no dewarp/binarize)
+uv run aglaia ocr ~/scans/clean.pdf --export pdf:g4+md
 ```
 
 Commands:
@@ -213,6 +222,7 @@ Commands:
 |---|---|
 | `gui [PROJECT]` | Capture GUI (default). `--camera-id N`, `--diagnose-memory`. |
 | `run PATHS…` | Headless batch over images, PDFs, or one `.agl`. `--ocr ENGINE[:opt…]` (now needs a value — use `--ocr auto`), `--ocr-lang`, `--export`, `--md-refine`, `--project-name`, `--parent-dir`, `--input-dpi [force:]N`, `--check-ocr`. |
+| `ocr PATHS…` | OCR PDFs/images (or re-OCR a `.agl`) with **no** processing chain — for already-clean docs. Same OCR/export options as `run`, minus `--pipeline`/`--workers`/`--force-proc`. Engine defaults to `auto`. |
 | `setup` | Interactive first-run setup (choose/download models, seed config). |
 | `list pipelines\|ocr\|exports` | Introspect available pipelines, OCR engines, exporters. |
 | `server` | HTTP job server (see below). |

@@ -50,6 +50,9 @@ class PageOption(AbstractProcessorOption):
     # brighter); bleed-through ghosts stay < 0.5. So the cutoff is 0.5 — drop
     # ghosts, keep dim-but-real pages. 0 = disabled.
     min_contrast: float = 0.5
+    # XY-cut gutter width: a vertical whitespace valley must span at least this
+    # fraction of page width to split columns/pages. See `xy_cut`.
+    gutter_min_frac: float = 0.02
     # Smart-merge tunables. See `smart_merge` / `_pair_score`.
     merge_threshold: float = 0.60
     merge_gap_weight: float = 0.4
@@ -79,6 +82,61 @@ def merge_layouts(boxes):
             curr_group = list(box)
     if curr_group: merged_groups.append(tuple(curr_group))
     return merged_groups
+
+
+def xy_cut(boxes, *, page_w, min_gap_frac=0.02):
+    """Split detection boxes into column groups at vertical whitespace gutters.
+
+    This is the X-projection step of the classic recursive XY-cut: project
+    every box onto the x-axis, union the coverage into solid runs, and treat
+    each interior gap WIDER than ``min_gap_frac × page_w`` as a column / page
+    boundary. The Y-cut of XY-cut is deliberately omitted for page detection —
+    a page is vertically continuous, so horizontal whitespace between a running
+    head and the body must NOT split it into two "pages". Returns the bounding
+    rect of each column group, sorted left→right.
+
+    Why this over the old pairwise x-overlap clustering (`merge_layouts`): a
+    page boundary is a real *column of whitespace*, not the mere absence of box
+    overlap. `merge_layouts` started a new group at ANY gap (touching boxes
+    don't "overlap"), so a page-number box sitting flush against the body
+    column spawned a phantom 1-box "page" — which then stole a `max_pages`
+    slot and forced the two real pages to fuse (the DBnet 2-up mis-split). Here
+    a sub-gutter gap keeps boxes in the same column. The one knob,
+    `min_gap_frac`, is the minimum gutter width as a fraction of page width —
+    directly interpretable, unlike the merge scorer's weights."""
+    if not boxes:
+        return []
+    boxes = [tuple(int(v) for v in b) for b in boxes]
+    min_gap = max(1, int(min_gap_frac * page_w))
+    # Union the x-intervals; a gap < min_gap stays inside the same run (the
+    # projection-profile "valley" must be a real gutter, not an inter-word gap).
+    ivals = sorted((b[0], b[2]) for b in boxes)
+    runs = []
+    cs, ce = ivals[0]
+    for s, e in ivals[1:]:
+        if s <= ce + min_gap:
+            ce = max(ce, e)
+        else:
+            runs.append((cs, ce))
+            cs, ce = s, e
+    runs.append((cs, ce))
+    if len(runs) == 1:
+        b = boxes
+        return [(min(x[0] for x in b), min(x[1] for x in b),
+                 max(x[2] for x in b), max(x[3] for x in b))]
+    # Assign each box to the run containing its x-centre (nearest run if it
+    # falls inside a gutter), then bound each group.
+    groups: list[list] = [[] for _ in runs]
+    for b in boxes:
+        cx = (b[0] + b[2]) / 2.0
+        k = min(range(len(runs)),
+                key=lambda i: 0.0 if runs[i][0] <= cx <= runs[i][1]
+                else min(abs(cx - runs[i][0]), abs(cx - runs[i][1])))
+        groups[k].append(b)
+    rects = [(min(x[0] for x in g), min(x[1] for x in g),
+              max(x[2] for x in g), max(x[3] for x in g))
+             for g in groups if g]
+    return sorted(rects, key=lambda r: r[0])
 
 def _pair_score(a, b, *, page_w, page_h,
                 gap_weight, width_weight, gap_norm_cap,
@@ -187,6 +245,26 @@ def smart_merge(pages, *, max_pages, page_w, page_h,
                 pages.pop(drop)
                 bonuses.pop(drop)
                 continue
+            # Capacity forces a merge, but no pair is a genuine over-split (all
+            # score < threshold). Merging the top-scoring pair here would fuse
+            # the two LARGEST real pages (e.g. a 2-up spread) and orphan a
+            # small fragment — an isolated page-number / running-head box the
+            # detector dropped just outside the body column — as its own page.
+            # Instead absorb the SMALLEST page into its best-scoring neighbour:
+            # small folds into large, the real pages stay intact.
+            small = min(
+                range(len(pages)),
+                key=lambda k: (pages[k][2] - pages[k][0])
+                              * (pages[k][3] - pages[k][1]))
+            partner = max(
+                (k for k in range(len(pages)) if k != small),
+                key=lambda k: _pair_score(
+                    pages[small], pages[k],
+                    page_w=page_w, page_h=page_h,
+                    gap_weight=gap_weight, width_weight=width_weight,
+                    gap_norm_cap=gap_norm_cap,
+                    contrast_bonus=max(bonuses[small], bonuses[k])))
+            best_i, best_j = min(small, partner), max(small, partner)
         a = pages[best_i]
         b = pages[best_j]
         merged = (
@@ -265,6 +343,12 @@ class PageDetector(AbstractImageProcessor):
                            "of the max across all merged pages in the scan. Well-lit pages "
                            "> 0.7, dim/shadowed-but-real pages ~0.6; bleed-through < 0.5. "
                            "0 = disabled."),
+        "gutter_min_frac": _f(0.02, 0.005, 0.2, 0.005,
+                              "XY-cut: minimum vertical whitespace-gutter width (as a "
+                              "fraction of page width) to split columns/pages. Below "
+                              "this, adjacent boxes stay in one column — so a page "
+                              "number flush against the body never spawns its own page.",
+                              advanced=True),
         "merge_threshold": _f(0.60, 0.0, 1.5, 0.05,
                               "Auto-merge any adjacent page pair whose mergeability "
                               "score is ≥ this. Lower = merge more aggressively.",
@@ -314,6 +398,7 @@ class PageDetector(AbstractImageProcessor):
         self.rescale_threshold = options.rescale_threshold
         self.processing_dpi = options.processing_dpi
         self.min_contrast = float(getattr(options, "min_contrast", 0.0))
+        self.gutter_min_frac = float(getattr(options, "gutter_min_frac", 0.02))
         self.merge_threshold = float(getattr(options, "merge_threshold", 0.60))
         self.merge_gap_weight = float(getattr(options, "merge_gap_weight", 0.4))
         self.merge_width_weight = float(getattr(options, "merge_width_weight", 0.6))
@@ -373,7 +458,11 @@ class PageDetector(AbstractImageProcessor):
         if not boxes:
             return input_buf
 
-        pages = merge_layouts(boxes)
+        # Group boxes into pages/columns by vertical whitespace gutters
+        # (XY-cut X-projection) — robust to page-number specks that pairwise
+        # x-overlap clustering would orphan into their own page.
+        pages = xy_cut(boxes, page_w=w_orig,
+                       min_gap_frac=self.gutter_min_frac)
         pages.sort(key=lambda b: b[0])
 
         # Contrast filter — HARD DROP at the page level (post-merge).

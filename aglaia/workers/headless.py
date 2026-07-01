@@ -25,31 +25,46 @@ event loop and live-edit affordances.
 from __future__ import annotations
 
 import io
-import json
 import multiprocessing
 import queue as _q
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from PIL import Image
 
 from aglaia.app_data import db as app_db
-from aglaia.workers.Initializer import create_processing_chain, initialize, load_pipeline_def
+from aglaia.workers.Initializer import (
+    create_processing_chain,
+    initialize,
+    load_pipeline_def,
+)
 from aglaia.workers.ImportHelpers import (
-    catchup_active_scans, enqueue_image_files, enqueue_pdf_files,
+    _embedded_dpi,
+    _persist_raw,
+    catchup_active_scans,
+    enqueue_image_files,
+    enqueue_pdf_files,
 )
 from aglaia.workers.PDFprocessor import create_pdf_from_db
 from aglaia.workers.md_export import write_markdown
 from aglaia.workers.cli import (
-    CliConfig, default_parent_dir, default_project_name, effective_workers,
+    CliConfig,
+    default_parent_dir,
+    default_project_name,
+    effective_workers,
     resolve_pipeline_path,
 )
 from aglaia.storage.db import open_db
-from aglaia.storage.repo import PipelineRepo, ProjectRepo, ScanRepo, OcrRepo
+from aglaia.storage.repo import (
+    BranchRepo,
+    OcrRepo,
+    PipelineRepo,
+    ProjectRepo,
+    ScanRepo,
+)
 
 
 # Hard ceiling so a stuck chain can't keep the CLI hanging forever; the
@@ -63,6 +78,7 @@ def _warn_workers_ram(raw_workers) -> None:
     (auto is already RAM-capped). Respects the GUI 'don't warn again' flag."""
     try:
         from aglaia.worker_count import resolve_workers, ram_warning
+
         count, is_auto = resolve_workers(raw_workers)
         if is_auto:
             return
@@ -70,6 +86,7 @@ def _warn_workers_ram(raw_workers) -> None:
         if not msg:
             return
         from aglaia.app_data import db as cfg
+
         with cfg.session() as conn:
             if bool(cfg.get(conn, cfg.KEY_WORKERS_RAM_WARN_DISMISSED, False)):
                 return
@@ -93,8 +110,9 @@ def _build_initialize_argv(cfg: CliConfig, project_dir: Path) -> list[str]:
     return argv
 
 
-def _run_ocr(db_path: str, *, engine_name: str, languages: list[str],
-             params: dict | None = None) -> int:
+def _run_ocr(
+    db_path: str, *, engine_name: str, languages: list[str], params: dict | None = None
+) -> int:
     """Run OCR sync on every branch that's missing or stale.
 
     `engine_name` follows the CLI semantics: 'auto' tries apple then
@@ -110,8 +128,11 @@ def _run_ocr(db_path: str, *, engine_name: str, languages: list[str],
                 if eng.available:
                     return n, eng
             raise SystemExit("OCR: no engine available (apple_vision, surya).")
-        canonical = {"apple": "apple_vision", "surya": "surya",
-                     "mistral": "mistral_cloud"}.get(name, name)
+        canonical = {
+            "apple": "apple_vision",
+            "surya": "surya",
+            "mistral": "mistral_cloud",
+        }.get(name, name)
         try:
             eng = get_engine(canonical)
         except KeyError as e:
@@ -126,59 +147,157 @@ def _run_ocr(db_path: str, *, engine_name: str, languages: list[str],
     conn = open_db(db_path)
     try:
         ocr = OcrRepo(conn)
-        rows = ocr.branches_needing_ocr(include_stale=True)
+        # Per-engine: a branch needs OCR for THIS engine even if another engine
+        # already ran it → re-running a different engine adds its layer instead
+        # of being a no-op, keeping the existing engine's layer.
+        rows = ocr.branches_needing_ocr(include_stale=True, engine=engine_canonical)
         if not rows:
             print("OCR: nothing to do.")
             return 0
-        print(f"OCR: {len(rows)} branch(es), engine={engine_canonical}, langs={languages or '<auto>'}")
+        print(
+            f"OCR: {len(rows)} branch(es), engine={engine_canonical}, langs={languages or '<auto>'}"
+        )
+        # Pay the model-load cost up front and time it SEPARATELY, so the
+        # per-page numbers below are steady-state processing — not load +
+        # first-page conflated. No-op (≈0 s) for Apple Vision; spins up the
+        # local server for the VLMs.
+        _tl0 = time.perf_counter()
+        try:
+            engine.warmup(languages)
+        except Exception as e:  # noqa: BLE001 — surface, keep going
+            print(f"OCR: warmup failed: {e}", file=sys.stderr, flush=True)
+        load_s = time.perf_counter() - _tl0
+        print(f"OCR: model load {load_s:.1f}s", flush=True)
+
+        # Cloud WHOLE-DOCUMENT engines (Mistral) OCR the entire project in ONE
+        # request — all pages assembled into a single PDF, one API call. The
+        # per-page loop below would upload one PDF per page (24 calls, billed,
+        # and not how the engine is meant to run); route them through the same
+        # recognize_rows() the GUI's OcrWorker uses. (CLI/GUI still have two OCR
+        # drivers — that divergence needs an audit; see issue note.)
+        if callable(getattr(engine, "recognize_rows", None)):
+            img_rows: list[dict] = []
+            handles: list[tuple[int, int, str]] = []  # (run_id, scan_id, bp)
+            for r in rows:
+                irow = conn.execute(
+                    "SELECT blob, dpi, type, format, width, height "
+                    "FROM images WHERE id = ?", (int(r["image_id"]),)
+                ).fetchone()
+                if irow is None:
+                    continue
+                run_id = ocr.start(
+                    scan_id=int(r["scan_id"]), node_id=int(r["chosen_node_id"]),
+                    branch_path=r["branch_path"] or "",
+                    engine=engine_canonical, languages=languages,
+                )
+                img_rows.append(dict(irow))
+                handles.append((run_id, int(r["scan_id"]), r["branch_path"] or ""))
+            if not img_rows:
+                return 1
+            print(f"OCR: 1 whole-document request → {len(img_rows)} page(s)…",
+                  flush=True)
+            _t0 = time.perf_counter()
+            try:
+                results = engine.recognize_rows(img_rows, languages)
+            except Exception as e:  # noqa: BLE001
+                for run_id, _, _ in handles:
+                    ocr.fail(run_id, f"{type(e).__name__}: {e}")
+                print(f"OCR: ERROR {e}", file=sys.stderr, flush=True)
+                return 1
+            req_s = time.perf_counter() - _t0
+            done = 0
+            for (run_id, _sid, _bp), result in zip(handles, results):
+                try:
+                    ocr.finish(run_id, result)
+                    done += 1
+                except Exception as e:  # noqa: BLE001
+                    ocr.fail(run_id, f"{type(e).__name__}: {e}")
+            print(
+                f"OCR: {done} page(s) processed in {req_s:.1f}s "
+                f"(mean {req_s / max(done, 1):.2f}s/page amortized, "
+                f"one whole-document request) + {load_s:.1f}s model load",
+                flush=True,
+            )
+            return 0 if done > 0 else 1
+
         done = 0
+        page_ms: list[float] = []
         for r in rows:
             scan_id = int(r["scan_id"])
             branch_path = r["branch_path"] or ""
             node_id = int(r["chosen_node_id"])
             image_id = int(r["image_id"])
             blob_row = conn.execute(
-                "SELECT blob FROM images WHERE id = ?", (image_id,)
+                "SELECT blob, dpi FROM images WHERE id = ?", (image_id,)
             ).fetchone()
             if blob_row is None:
                 continue
+            # Pass the page's true DPI so the engine downsamples to the
+            # configured ocr_dpi. Without it the engine sees src_dpi=0 and
+            # falls back to a coarse longest-edge budget that barely shrinks
+            # a 300-dpi page → it OCRs ~2× the pixels (≈2× slower) at the
+            # wrong resolution, unlike the GUI which passes src_dpi.
+            src_dpi = float(blob_row["dpi"] or 0)
             run_id = ocr.start(
-                scan_id=scan_id, node_id=node_id, branch_path=branch_path,
-                engine=engine_canonical, languages=languages,
+                scan_id=scan_id,
+                node_id=node_id,
+                branch_path=branch_path,
+                engine=engine_canonical,
+                languages=languages,
             )
             try:
                 pil = Image.open(io.BytesIO(blob_row["blob"])).convert("RGB")
                 arr = np.array(pil, dtype=np.uint8)
                 _t0 = time.perf_counter()
-                result = engine.recognize(arr, languages)
+                result = engine.recognize(arr, languages, src_dpi=src_dpi)
                 _ms = (time.perf_counter() - _t0) * 1000.0
                 ocr.finish(run_id, result)
                 done += 1
+                page_ms.append(_ms)
                 n_lines = len(result.get("lines", []))
                 # Per-page op-log line (parseable by the bench harness for
                 # OCR p5/p50/p95). Mirrors the pipeline op-log shape so the
                 # log strip / log tab read identically across subsystems.
                 from aglaia.workers.oplog import format_op
+
                 scope = {"scan": scan_id}
                 if branch_path:
                     scope["layout"] = branch_path
-                print(format_op(f"ocr.{engine_canonical}", elapsed_ms=_ms,
-                                color=False, lines=n_lines, **scope),
-                      flush=True)
+                print(
+                    format_op(
+                        f"ocr.{engine_canonical}",
+                        elapsed_ms=_ms,
+                        color=False,
+                        lines=n_lines,
+                        **scope,
+                    ),
+                    flush=True,
+                )
             except Exception as e:
                 ocr.fail(run_id, f"{type(e).__name__}: {e}")
                 print(f"  scan {scan_id}: ERROR {e}", file=sys.stderr)
+        # Steady-state page summary, kept separate from the model-load line
+        # above so a benchmark can attribute time correctly.
+        if page_ms:
+            srt = sorted(page_ms)
+            total_s = sum(page_ms) / 1000.0
+            mean_s = total_s / len(page_ms)
+            p50_s = srt[len(srt) // 2] / 1000.0
+            print(
+                f"OCR: {done} page(s) processed in {total_s:.1f}s "
+                f"(mean {mean_s:.2f}s/page, median {p50_s:.2f}s/page) "
+                f"+ {load_s:.1f}s model load",
+                flush=True,
+            )
         return 0 if done > 0 else 1
     finally:
         conn.close()
 
 
-_OCR_CANON = {"apple": "apple_vision", "surya": "surya",
-              "mistral": "mistral_cloud"}
+_OCR_CANON = {"apple": "apple_vision", "surya": "surya", "mistral": "mistral_cloud"}
 
 
-def _submit_batch_ocr(db_path: str, *, engine_name: str,
-                      languages: list[str]) -> int:
+def _submit_batch_ocr(db_path: str, *, engine_name: str, languages: list[str]) -> int:
     """Submit a Mistral batch OCR job for every missing/stale branch and
     leave it pending — no Qt. Prints the `--check-ocr` command to retrieve."""
     from aglaia.workers.ocr import get_engine
@@ -193,17 +312,20 @@ def _submit_batch_ocr(db_path: str, *, engine_name: str,
     except KeyError as e:
         raise SystemExit(f"OCR: {e}") from None
     if not isinstance(eng, BatchableOCR):
-        raise SystemExit(f"OCR: engine {canonical!r} does not support batch "
-                         f"— drop ':batch' (or use ':stream').")
+        raise SystemExit(
+            f"OCR: engine {canonical!r} does not support batch "
+            f"— drop ':batch' (or use ':stream')."
+        )
     api_key = get_mistral_api_key()
     if not api_key:
-        raise SystemExit("OCR: no Mistral API key (set MISTRAL_API_KEY or the "
-                         "OCR tab's Cloud card).")
+        raise SystemExit(
+            "OCR: no Mistral API key (set MISTRAL_API_KEY or the OCR tab's Cloud card)."
+        )
     conn = open_db(db_path)
     try:
         ocr = OcrRepo(conn)
         repo = MistralBatchRepo(conn)
-        rows = ocr.branches_needing_ocr(include_stale=True)
+        rows = ocr.branches_needing_ocr(include_stale=True, engine=canonical)
         if not rows:
             print("OCR: nothing to do.")
             return 0
@@ -212,17 +334,28 @@ def _submit_batch_ocr(db_path: str, *, engine_name: str,
         for r in rows:
             rec = conn.execute(
                 "SELECT blob, dpi, type, format, width, height "
-                "FROM images WHERE id = ?", (int(r["image_id"]),)).fetchone()
+                "FROM images WHERE id = ?",
+                (int(r["image_id"]),),
+            ).fetchone()
             if rec is None:
                 continue
             rid = ocr.start(
-                scan_id=int(r["scan_id"]), node_id=int(r["chosen_node_id"]),
-                branch_path=r["branch_path"] or "", engine=canonical,
-                languages=languages)
-            img_rows.append({
-                "blob": rec["blob"], "dpi": rec["dpi"], "type": rec["type"],
-                "format": rec["format"], "width": rec["width"],
-                "height": rec["height"]})
+                scan_id=int(r["scan_id"]),
+                node_id=int(r["chosen_node_id"]),
+                branch_path=r["branch_path"] or "",
+                engine=canonical,
+                languages=languages,
+            )
+            img_rows.append(
+                {
+                    "blob": rec["blob"],
+                    "dpi": rec["dpi"],
+                    "type": rec["type"],
+                    "format": rec["format"],
+                    "width": rec["width"],
+                    "height": rec["height"],
+                }
+            )
             run_ids.append(rid)
         if not run_ids:
             print("OCR: nothing to do.")
@@ -230,17 +363,23 @@ def _submit_batch_ocr(db_path: str, *, engine_name: str,
         print(f"OCR (batch): submitting {len(run_ids)} page(s) to Mistral…")
         jobs = mistral_batch.submit(api_key, img_rows, run_ids, db_path)
         for j in jobs:
-            repo.add(j["job_id"], input_file_id=j.get("input_file_id"),
-                     chunk=j.get("chunk", 0),
-                     chunks_total=j.get("chunks_total", 1),
-                     page_count=j.get("page_count"), status="QUEUED",
-                     run_ids=j.get("run_ids"))
+            repo.add(
+                j["job_id"],
+                input_file_id=j.get("input_file_id"),
+                chunk=j.get("chunk", 0),
+                chunks_total=j.get("chunks_total", 1),
+                page_count=j.get("page_count"),
+                status="QUEUED",
+                run_ids=j.get("run_ids"),
+            )
         conn.commit()
         print(f"OCR (batch): submitted {len(jobs)} job(s):")
         for j in jobs:
             print(f"  {j['job_id']}")
-        print("\nRetrieve the results when ready with:\n"
-              f"  aglaia --headless --check-ocr {db_path}")
+        print(
+            "\nRetrieve the results when ready with:\n"
+            f"  aglaia --headless --check-ocr {db_path}"
+        )
         return 0
     finally:
         conn.close()
@@ -278,11 +417,10 @@ def _check_ocr(db_path: str) -> int:
                         "SELECT i.width AS w, i.height AS h FROM ocr_runs r "
                         "JOIN nodes n ON n.id = r.node_id "
                         "JOIN images i ON i.id = n.image_id WHERE r.id = ?",
-                        (rid,)).fetchone()
-                    w, h = (int(row["w"] or 0), int(row["h"] or 0)) if row \
-                        else (0, 0)
-                    ocr.finish(rid, mistral_batch.page_to_result(
-                        page, w, h, []))
+                        (rid,),
+                    ).fetchone()
+                    w, h = (int(row["w"] or 0), int(row["h"] or 0)) if row else (0, 0)
+                    ocr.finish(rid, mistral_batch.page_to_result(page, w, h, []))
                 repo.mark_imported(jid)
                 imported += 1
                 print(f"  job {jid}: imported {len(run_ids)} page(s)")
@@ -295,46 +433,80 @@ def _check_ocr(db_path: str) -> int:
                 still += 1
                 print(f"  job {jid}: {status} (not ready)")
         conn.commit()
-        print(f"Batch check: {imported} imported, {still} pending, "
-              f"{failed} failed.")
+        print(f"Batch check: {imported} imported, {still} pending, {failed} failed.")
         return 0 if still == 0 else 2
     finally:
         conn.close()
 
 
-def _run_exports(db_path: str, project_dir: Path, slug: str,
-                 exports: list, ocr_layer: bool,
-                 md_refine: str | None = None) -> int:
+def _ocr_layer_available(conn, engine: str) -> bool:
+    """True if `engine` has a done OCR layer; else print the available layers
+    (latest-generated first) so the user can pick a valid one."""
+    layers = OcrRepo(conn).available_ocr_layers()
+    if any(r["engine"] == engine for r in layers):
+        return True
+    avail = (
+        ", ".join(f"{r['engine']} ({r['n_branches']} pp)" for r in layers) or "none"
+    )
+    print(
+        f"  ! OCR layer '{engine}' not found. Available (latest first): {avail}",
+        file=sys.stderr,
+    )
+    return False
+
+
+def _run_exports(
+    db_path: str,
+    project_dir: Path,
+    slug: str,
+    exports: list,
+    ocr_layer: bool,
+    md_refine: str | None = None,
+) -> int:
     """Execute every export task. Returns 0 on success, non-zero if any
     task failed."""
     fail = 0
     for task in exports:
+        # `pdf:ocr=surya` / `md:ocr=apple` select which OCR layer to export
+        # (default = the latest layer regardless of engine). Aliases honoured.
+        raw_eng = task.params.get("ocr")
+        ocr_engine = _OCR_CANON.get(raw_eng, raw_eng) if raw_eng else None
+        tag = f" [OCR layer: {ocr_engine}]" if ocr_engine else ""
         if task.kind == "pdf":
             out = project_dir / f"{slug}.pdf"
-            print(f"Export PDF ({task.profile}) → {out}")
-            with open_db(db_path) as _:  # noqa: F841 — just to surface DB errors early
-                pass
             conn = open_db(db_path)
             try:
+                if ocr_engine and not _ocr_layer_available(conn, ocr_engine):
+                    fail += 1
+                    continue
+                print(f"Export PDF ({task.profile}) → {out}{tag}")
                 ok = create_pdf_from_db(
-                    conn, out, step_name=None,
+                    conn,
+                    out,
+                    step_name=None,
                     compression=task.profile or "auto",
                     add_ocr_layer=ocr_layer,
+                    engine=ocr_engine,
                 )
             finally:
                 conn.close()
             if not ok:
-                print(f"  ! PDF export failed", file=sys.stderr)
+                print("  ! PDF export failed", file=sys.stderr)
                 fail += 1
         elif task.kind == "md":
             out = project_dir / f"{slug}.md"
             # `--export md:refine=apple_fm` overrides the global --md-refine.
             refine = task.params.get("refine", md_refine)
-            print(f"Export Markdown → {out}"
-                  + (f" (LLM refine: {refine})" if refine else ""))
             conn = open_db(db_path)
             try:
-                ok = write_markdown(conn, out, refine=refine)
+                if ocr_engine and not _ocr_layer_available(conn, ocr_engine):
+                    fail += 1
+                    continue
+                print(
+                    f"Export Markdown → {out}{tag}"
+                    + (f" (LLM refine: {refine})" if refine else "")
+                )
+                ok = write_markdown(conn, out, refine=refine, engine=ocr_engine)
             finally:
                 conn.close()
             if not ok:
@@ -416,9 +588,12 @@ class _LogDrainer(threading.Thread):
                     self._done_branches.add((sid, payload.get("branch_path") or ""))
                     self._last_branch_ts = time.monotonic()
                     n = len(self._done_scans)
-                print(f"branch ready: scan={sid} "
-                      f"path={payload.get('branch_path') or '-'} "
-                      f"({n}/{self._total_expected})", flush=True)
+                print(
+                    f"branch ready: scan={sid} "
+                    f"path={payload.get('branch_path') or '-'} "
+                    f"({n}/{self._total_expected})",
+                    flush=True,
+                )
             elif tag in ("log_info", "log_warning", "error"):
                 txt = msg[1] if len(msg) > 1 else ""
                 if txt:
@@ -431,8 +606,7 @@ class _LogDrainer(threading.Thread):
         with self._lock:
             return len(self._done_scans)
 
-    def wait_for_completion(self, timeout_s: float,
-                            quiesce_s: float = 8.0) -> int:
+    def wait_for_completion(self, timeout_s: float, quiesce_s: float = 8.0) -> int:
         """Block until the run settles or ``timeout_s`` elapses.
 
         Two phases, because a scan's branch count is dynamic (PageDetector
@@ -444,13 +618,14 @@ class _LogDrainer(threading.Thread):
              settle). Returning on the scan count alone tore multi-layout
              scans down after their first branch."""
         deadline = time.monotonic() + timeout_s
-        while self.done_count() < self._total_expected and \
-                time.monotonic() < deadline:
+        while self.done_count() < self._total_expected and time.monotonic() < deadline:
             time.sleep(0.2)
         n = self.done_count()
         if n < self._total_expected:
-            print(f"WARN: only {n}/{self._total_expected} scans finished "
-                  f"within timeout.", file=sys.stderr)
+            print(
+                f"WARN: only {n}/{self._total_expected} scans finished within timeout.",
+                file=sys.stderr,
+            )
             return n
         # Phase 2: wait for branch activity to go silent (all siblings done).
         while time.monotonic() < deadline:
@@ -465,6 +640,202 @@ class _LogDrainer(threading.Thread):
         self._stop.set()
 
 
+# ── chain-free OCR (the `aglaia ocr` command) ────────────────────────
+#
+# For already-clean docs (born-digital PDFs, flat scans) that need no geometric
+# processing: ingest each page as the raw COLOR root node, register a single
+# branch pointing straight at it, then reuse the same OCR + export primitives as
+# `run`. No IntegratedProcessingChain — no worker pool, no dewarp/binarize.
+
+# A synthetic, zero-step pipeline so the nodes/branches have a valid
+# pipeline_version to reference (OCR never reads it).
+_OCR_PASSTHROUGH_YAML = "name: ocr-passthrough\npipeline: []\nreplay: false\n"
+
+
+def _ingest_one(
+    db_path: str,
+    pv_id: int,
+    slug: str,
+    arr,
+    dpi: float,
+    *,
+    source: str,
+    source_ref: str,
+) -> None:
+    """Persist a raw page + a single branch (chosen node = the raw image)."""
+    scan_id, root_node_id, _fs, _idx, _img = _persist_raw(
+        db_path,
+        pv_id,
+        slug,
+        arr,
+        dpi,
+        source=source,
+        source_ref=source_ref,
+    )
+    conn = open_db(db_path)  # autocommit (isolation_level=None)
+    try:
+        BranchRepo(conn).upsert(scan_id, "", root_node_id)
+    finally:
+        conn.close()
+
+
+def _ingest_images_no_chain(
+    db_path: str,
+    pv_id: int,
+    slug: str,
+    image_paths,
+    *,
+    default_dpi: float,
+    force_dpi: bool,
+) -> int:
+    import cv2
+
+    paths = sorted(image_paths, key=lambda p: Path(p).name.lower())
+    n = 0
+    for p in paths:
+        arr = cv2.imread(str(p))
+        if arr is None:
+            print(f"  ! skipped (unreadable): {p}", file=sys.stderr)
+            continue
+        rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+        embedded = None if force_dpi else _embedded_dpi(Path(p))
+        dpi = float(embedded) if embedded else float(default_dpi)
+        _ingest_one(db_path, pv_id, slug, rgb, dpi, source="import", source_ref=str(p))
+        n += 1
+    return n
+
+
+def _ingest_pdfs_no_chain(
+    db_path: str, pv_id: int, slug: str, pdf_paths, *, render_dpi: float
+) -> int:
+    from aglaia.workers.pdf_extract import open_pdf, render_page
+
+    pdfs = sorted(pdf_paths, key=lambda p: Path(p).name.lower())
+    n = 0
+    for pdf in pdfs:
+        try:
+            doc = open_pdf(pdf)
+        except Exception as e:
+            print(f"  ! skipped (cannot open): {pdf} ({e})", file=sys.stderr)
+            continue
+        try:
+            for pno in range(len(doc)):
+                arr = render_page(doc, pno, render_dpi)
+                _ingest_one(
+                    db_path,
+                    pv_id,
+                    slug,
+                    arr,
+                    render_dpi,
+                    source="pdf",
+                    source_ref=f"{pdf}#{pno + 1}",
+                )
+                n += 1
+        finally:
+            doc.close()
+    return n
+
+
+def run_ocr_only(cfg: CliConfig) -> int:
+    """`aglaia ocr PATHS…` — OCR PDFs/images (or re-OCR a .agl) with NO geometric
+    processing. Ingest → OCR → export; reuses run()'s OCR/export primitives."""
+    if not cfg.has_inputs():
+        print("No inputs. Pass PDFs, images, or one .agl project.", file=sys.stderr)
+        return 2
+
+    from aglaia.storage import (
+        project_filename,
+        resolve_existing_project_db,
+        slug_from_project_file,
+    )
+
+    if cfg.source == "project":
+        project_file = cfg.project_file
+        project_dir = project_file.parent
+        slug = slug_from_project_file(project_file)
+        if cfg.check_ocr:
+            return _check_ocr(str(project_file))
+        # else: re-OCR the project's existing branches (no ingest).
+    else:
+        slug = default_project_name(cfg)
+        parent = default_parent_dir(cfg)
+        parent.mkdir(parents=True, exist_ok=True)
+        project_dir = parent
+        project_file = resolve_existing_project_db(
+            project_dir, slug
+        ) or project_dir / project_filename(slug)
+
+        conn = open_db(project_file)
+        try:
+            ProjectRepo(conn).init(name=slug, slug=slug)
+            pv_id = PipelineRepo(conn).upsert(
+                _OCR_PASSTHROUGH_YAML, "ocr-passthrough", step_count=0
+            )
+        finally:
+            conn.close()
+        try:
+            with app_db.session() as cdb:
+                app_db.remember_project(cdb, project_file, slug)
+        except Exception:
+            pass
+
+        if cfg.source == "images":
+            print(f"Ingesting {len(cfg.inputs)} image(s) (no processing)…")
+            n = _ingest_images_no_chain(
+                str(project_file),
+                pv_id,
+                slug,
+                cfg.inputs,
+                default_dpi=float(cfg.input_dpi) if cfg.input_dpi else 120.0,
+                force_dpi=cfg.input_dpi_force,
+            )
+        else:  # pdfs
+            print(f"Ingesting {len(cfg.inputs)} PDF(s) (no processing)…")
+            n = _ingest_pdfs_no_chain(
+                str(project_file),
+                pv_id,
+                slug,
+                cfg.inputs,
+                render_dpi=float(cfg.input_dpi) if cfg.input_dpi else 200.0,
+            )
+        if n == 0:
+            print("No pages ingested.", file=sys.stderr)
+            return 2
+        print(f"Ingested {n} page(s).")
+
+    # OCR — the whole point of this command, so default to 'auto' if unset.
+    engine = cfg.ocr_engine if cfg.do_ocr else "auto"
+    if cfg.ocr_batch:
+        return _submit_batch_ocr(
+            str(project_file), engine_name=engine, languages=cfg.ocr_languages
+        )
+    _run_ocr(
+        str(project_file),
+        engine_name=engine,
+        languages=cfg.ocr_languages,
+        params=cfg.ocr_params,
+    )
+
+    if cfg.exports:
+        rc = _run_exports(
+            str(project_file),
+            project_dir,
+            slug,
+            cfg.exports,
+            ocr_layer=True,
+            md_refine=cfg.md_refine,
+        )
+        if rc:
+            return rc
+    try:
+        from aglaia.storage.db import compact_db
+
+        compact_db(str(project_file))
+    except Exception:
+        pass
+    return 0
+
+
 def run(cfg: CliConfig) -> int:
     """Top-level headless entry. Returns process exit code."""
     if not cfg.has_inputs():
@@ -472,8 +843,11 @@ def run(cfg: CliConfig) -> int:
         return 2
 
     from aglaia.storage import (
-        project_filename, resolve_existing_project_db, slug_from_project_file,
+        project_filename,
+        resolve_existing_project_db,
+        slug_from_project_file,
     )
+
     # Project dir + slug
     if cfg.source == "project":
         project_file = cfg.project_file
@@ -488,8 +862,9 @@ def run(cfg: CliConfig) -> int:
         parent = default_parent_dir(cfg)
         parent.mkdir(parents=True, exist_ok=True)
         project_dir = parent
-        project_file = (resolve_existing_project_db(project_dir, slug)
-                        or project_dir / project_filename(slug))
+        project_file = resolve_existing_project_db(
+            project_dir, slug
+        ) or project_dir / project_filename(slug)
 
     # initialize() builds args, resolves config, pipeline path, etc.
     saved_argv = sys.argv[:]
@@ -502,6 +877,7 @@ def run(cfg: CliConfig) -> int:
     pipeline_path = resolve_pipeline_path(cfg.pipeline)
     if pipeline_path is None:
         from aglaia.assets import config_path
+
         pipeline_path = config_path("pipelines", "book_curved_x2.yaml").resolve()
     args.pipeline = pipeline_path
     args.project_slug = slug
@@ -546,14 +922,21 @@ def run(cfg: CliConfig) -> int:
         if cfg.source == "pdfs":
             print(f"Importing {len(cfg.inputs)} PDF(s)…")
             enqueue_pdf_files(
-                db_path=str(project_file), pipeline_version_id=pipeline_version_id,
-                slug=slug, chain=chain, pdf_paths=cfg.inputs, log_queue=log_queue,
+                db_path=str(project_file),
+                pipeline_version_id=pipeline_version_id,
+                slug=slug,
+                chain=chain,
+                pdf_paths=cfg.inputs,
+                log_queue=log_queue,
             )
         elif cfg.source == "images":
             print(f"Importing {len(cfg.inputs)} image(s)…")
             enqueue_image_files(
-                db_path=str(project_file), pipeline_version_id=pipeline_version_id,
-                slug=slug, chain=chain, image_paths=cfg.inputs,
+                db_path=str(project_file),
+                pipeline_version_id=pipeline_version_id,
+                slug=slug,
+                chain=chain,
+                image_paths=cfg.inputs,
                 default_dpi=float(cfg.input_dpi) if cfg.input_dpi else 120.0,
                 force_dpi=cfg.input_dpi_force,
                 log_queue=log_queue,
@@ -564,7 +947,8 @@ def run(cfg: CliConfig) -> int:
             n_caught = catchup_active_scans(
                 db_path=str(project_file),
                 pipeline_version_id=pipeline_version_id,
-                chain=chain, force=cfg.force_proc,
+                chain=chain,
+                force=cfg.force_proc,
             )
             if n_caught:
                 kind = "force-reprocessed" if cfg.force_proc else "caught up"
@@ -613,23 +997,36 @@ def run(cfg: CliConfig) -> int:
             # `--do-ocr mistral:batch` — submit + leave pending (retrieve
             # later with `--check-ocr`). Skip exports below: results aren't
             # in yet.
-            _submit_batch_ocr(str(project_file), engine_name=cfg.ocr_engine,
-                              languages=cfg.ocr_languages)
+            _submit_batch_ocr(
+                str(project_file),
+                engine_name=cfg.ocr_engine,
+                languages=cfg.ocr_languages,
+            )
             return 0
-        _run_ocr(str(project_file), engine_name=cfg.ocr_engine,
-                 languages=cfg.ocr_languages, params=cfg.ocr_params)
+        _run_ocr(
+            str(project_file),
+            engine_name=cfg.ocr_engine,
+            languages=cfg.ocr_languages,
+            params=cfg.ocr_params,
+        )
 
     # Exports
     if cfg.exports:
         ocr_layer = cfg.do_ocr  # if user asked for OCR, embed the layer in PDFs
-        rc = _run_exports(str(project_file), project_dir, slug,
-                          cfg.exports, ocr_layer=ocr_layer,
-                          md_refine=cfg.md_refine)
+        rc = _run_exports(
+            str(project_file),
+            project_dir,
+            slug,
+            cfg.exports,
+            ocr_layer=ocr_layer,
+            md_refine=cfg.md_refine,
+        )
         if rc:
             return rc
     # Fold the WAL back into the .agl + drop -wal/-shm sidecars at rest.
     try:
         from aglaia.storage.db import compact_db
+
         compact_db(str(project_file))
     except Exception:
         pass

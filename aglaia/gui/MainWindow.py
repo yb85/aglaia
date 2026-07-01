@@ -2349,12 +2349,14 @@ class MainWindow(QMainWindow):
         # Tag the file with the OCR engine used when the user opted to
         # embed a text layer — makes it obvious which Aglaïa run
         # produced the searchable PDF (apple / surya / paddle).
+        # Which OCR layer (engine) to embed — None = the latest layer.
+        ocr_engine = self._export_tab.selected_ocr_engine() if add_ocr_layer else None
         ocr_suffix = ""
         if add_ocr_layer:
             try:
                 from aglaia.workers.md_export import ocr_engine_suffix
                 with db_session(self.db_path) as _conn:
-                    ocr_suffix = ocr_engine_suffix(_conn)
+                    ocr_suffix = ocr_engine_suffix(_conn, ocr_engine)
             except Exception:
                 ocr_suffix = ""
         output_filename = f"{self.slug_name}{suffix}{ocr_suffix}.pdf"
@@ -2369,14 +2371,15 @@ class MainWindow(QMainWindow):
             self.tr("Generating PDF ({src}, {comp})…").format(src=source_type, comp=compression)
         )
         QTimer.singleShot(100, lambda: self._run_pdf_maker(
-            step_filter, output_path, compression, add_ocr_layer))
+            step_filter, output_path, compression, add_ocr_layer, ocr_engine))
 
     def _run_pdf_maker(self, step_name: Optional[str], output_path: Path,
-                       compression: str = "auto", add_ocr_layer: bool = False):
+                       compression: str = "auto", add_ocr_layer: bool = False,
+                       ocr_engine: Optional[str] = None):
         with db_session(self.db_path) as conn:
             success = create_pdf_from_db(
                 conn, output_path, step_name=step_name, compression=compression,
-                add_ocr_layer=add_ocr_layer,
+                add_ocr_layer=add_ocr_layer, engine=ocr_engine,
             )
         if success:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
@@ -2517,9 +2520,10 @@ class MainWindow(QMainWindow):
     def _export_markdown(self):
         from aglaia.workers.md_export import write_markdown, ocr_engine_suffix
         from PySide6.QtWidgets import QFileDialog
+        ocr_engine = self._export_tab.selected_ocr_engine()
         try:
             with db_session(self.db_path) as conn:
-                suffix = ocr_engine_suffix(conn)
+                suffix = ocr_engine_suffix(conn, ocr_engine)
         except Exception:
             suffix = ""
         default = self.args.workspace_dir / f"{self.slug_name}{suffix}.md"
@@ -2540,7 +2544,7 @@ class MainWindow(QMainWindow):
             else self.tr("Writing Markdown…"))
         try:
             with db_session(self.db_path) as conn:
-                ok = write_markdown(conn, output_path, refine=refine)
+                ok = write_markdown(conn, output_path, refine=refine, engine=ocr_engine)
         except Exception as e:
             self._on_log_line("error", f"Markdown export failed: {e}")
             self.status_label.setText(self.tr("Markdown export failed."))
@@ -2974,6 +2978,13 @@ class MainWindow(QMainWindow):
         # A multi-branch scan reaches branch_ready once per branch, but
         # `set_processing(False)` is idempotent so extra fires are cheap.
         if scan_id is not None:
+            # A (re)processed scan has FRESH node ids. cell_disable_states is
+            # memoised per scan and keyed by node id, so drop this scan's entry
+            # — otherwise the stale map misses every new node, every round
+            # stage-toggle resolves to (toggleable=False) and locks, and since a
+            # locked button can't fire set_step_disabled the cache never clears:
+            # the per-page disable stays dead after any processing/reprocess.
+            self.__dict__.get("_cell_disable_cache", {}).pop(int(scan_id), None)
             w = self.scan_widgets_by_scan.get(int(scan_id))
             if w is not None:
                 w.set_processing(False)   # per-scan spinner clear — immediate
@@ -3415,18 +3426,20 @@ class MainWindow(QMainWindow):
         bar.set_label_prefix(self.tr("OCR"))
         bar.reset()
         bar.set_imported(total)
-        # No per-page ticks until the first result lands (whole-doc Cloud
-        # OCR, or the slow first Surya/Paddle batch) — show an activity
-        # animation instead of a stuck 0%. The first tick flips it off.
-        bar.set_indeterminate(True, self.tr("OCR · working…"))
+        # No per-page ticks until the first result lands — for a local VLM
+        # this window is the model spinning up on first run; for Cloud it's
+        # the whole-doc round-trip. "loading…" is more precise than "working"
+        # and matches the worker's first-run log. The first tick flips it off.
+        bar.set_indeterminate(True, self.tr("OCR · loading…"))
 
     def _on_ocr_progress(self, scan_id: int):
-        # OCR completes per (scan, branch). Single broadcast → all views
-        # + bottom-bar OCR frame resync from the single source of truth.
+        # OCR completes per (scan, branch). The progress tick is cheap (keep it
+        # immediate); the heavy state fan-out (DB joins + badge repaint across
+        # every scan) is coalesced via the debounce in `_on_ocr_state_changed`,
+        # so a burst of page completions doesn't hitch the UI.
         self.status_bar_widget.progress.set_indeterminate(False)
         self.status_bar_widget.progress.mark_tick()
         self.ocr_state_changed.emit()
-        self._refresh_alt_views_if_visible()
 
     def _on_ocr_finished(self, ok: bool, error_text: str):
         # Leave the label on "OCR" so the user sees "OCR · N/N · 100%"
@@ -3503,6 +3516,16 @@ class MainWindow(QMainWindow):
             return
         has_any = bool(getattr(self, "_ocr_has_any", False))
         self._export_tab.set_ocr_layer_available(has_any)
+        # Populate the OCR-layer (engine) selector — latest-generated first.
+        layers = []
+        if has_any:
+            try:
+                from aglaia.storage.repo import OcrRepo
+                with db_session(self.db_path) as conn:
+                    layers = OcrRepo(conn).available_ocr_layers()
+            except Exception:
+                layers = []
+        self._export_tab.set_ocr_layers(layers)
 
     def _clamp_to_screen(self):
         """Force the window back to maximised inside the current screen's
@@ -3705,16 +3728,27 @@ class MainWindow(QMainWindow):
                 self._left_panel_open_btn.raise_()
 
     def _on_ocr_state_changed(self) -> None:
-        """Single fan-out for any OCR-relevant DB change. Refreshes
-        badges across all views + the bottom-bar OCR frame counts."""
-        try:
-            self._refresh_ocr_ui()
-        except Exception:
-            pass
-        try:
-            self._update_ocr_frame_state()
-        except Exception:
-            pass
+        """Single fan-out for any OCR-relevant DB change. DEBOUNCED: the refresh
+        runs ``branch_status_map`` DB joins + repaints every scan widget's badge,
+        which fired per OCR page made the UI sluggish (OCR runs in its own
+        QThread, but this fan-out is main-thread). Coalesce a burst of
+        completions into one refresh ~350 ms after the last event."""
+        t = getattr(self, "_ocr_refresh_timer", None)
+        if t is None:
+            from PySide6.QtCore import QTimer
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(self._do_ocr_state_refresh)
+            self._ocr_refresh_timer = t
+        t.start(350)
+
+    def _do_ocr_state_refresh(self) -> None:
+        for fn in (self._refresh_ocr_ui, self._update_ocr_frame_state,
+                   self._refresh_alt_views_if_visible):
+            try:
+                fn()
+            except Exception:
+                pass
 
     # ── broadcast subscribers ─────────────────────────────────────
     def _on_step_disabled_changed(self, scan_id: int, branch_path: str,

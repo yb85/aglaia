@@ -11,7 +11,7 @@ import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Iterable, Optional
 
 from aglaia.storage.db import execute_write
 
@@ -572,6 +572,19 @@ class OcrRepo:
         self.conn.execute(
             "UPDATE ocr_runs SET is_stale = 0 WHERE id = ?", (run_id,)
         )
+        # Max ONE done layer per (branch, engine): drop superseded same-engine
+        # done rows so a re-run *replaces* rather than accumulates. Other
+        # engines' layers are untouched — kept + independently export-selectable.
+        row = self.conn.execute(
+            "SELECT scan_id, branch_path, engine FROM ocr_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is not None:
+            self.conn.execute(
+                "DELETE FROM ocr_runs WHERE scan_id = ? AND branch_path = ? "
+                "AND engine = ? AND status = 'done' AND id != ?",
+                (row["scan_id"], row["branch_path"], row["engine"], run_id),
+            )
 
     def fail(self, run_id: int, err: str) -> None:
         self.conn.execute(
@@ -674,45 +687,54 @@ class OcrRepo:
         )
         return cur.rowcount or 0
 
-    def branches_needing_ocr(self, *, include_stale: bool) -> list[sqlite3.Row]:
-        """Branches missing OCR (or stale, if include_stale). Reads from
-        the persisted `is_stale` column — same source of truth as the UI."""
-        if include_stale:
-            return self.conn.execute("""
-                SELECT b.id AS branch_id, b.scan_id, b.branch_path,
-                       b.chosen_node_id, n.image_id, n.filestem
-                FROM branches b
-                JOIN nodes n ON n.id = b.chosen_node_id
-                JOIN scans s ON s.id = b.scan_id
-                WHERE s.deleted_at IS NULL
-                  AND b.trashed_at IS NULL
-                  AND NOT EXISTS (
-                    SELECT 1 FROM ocr_runs o
-                    WHERE o.scan_id = b.scan_id
-                      AND o.branch_path = b.branch_path
-                      AND o.status = 'done'
-                      AND o.is_stale = 0
-                )
-                ORDER BY s.idx ASC, b.branch_path ASC
-            """).fetchall()
-        else:
-            # Only branches with NO OCR at all (no done run for ANY node).
-            return self.conn.execute("""
-                SELECT b.id AS branch_id, b.scan_id, b.branch_path,
-                       b.chosen_node_id, n.image_id, n.filestem
-                FROM branches b
-                JOIN nodes n ON n.id = b.chosen_node_id
-                JOIN scans s ON s.id = b.scan_id
-                WHERE s.deleted_at IS NULL
-                  AND b.trashed_at IS NULL
-                  AND NOT EXISTS (
-                    SELECT 1 FROM ocr_runs o
-                    WHERE o.scan_id = b.scan_id
-                      AND o.branch_path = b.branch_path
-                      AND o.status = 'done'
-                )
-                ORDER BY s.idx ASC, b.branch_path ASC
-            """).fetchall()
+    def branches_needing_ocr(self, *, include_stale: bool,
+                             engine: Optional[str] = None) -> list[sqlite3.Row]:
+        """Branches missing OCR — or stale, if include_stale.
+
+        With ``engine`` given, "needs OCR" is evaluated **per engine**: a branch
+        needs OCR only if it lacks a done (and non-stale, when include_stale) run
+        FOR THAT ENGINE — so re-running a different engine re-OCRs the branch
+        while keeping the other engine's layer. ``engine=None`` keeps the
+        original cross-engine behaviour. Reads the persisted `is_stale` column
+        (same source of truth as the UI)."""
+        stale_clause = " AND o.is_stale = 0" if include_stale else ""
+        eng_clause = " AND o.engine = ?" if engine else ""
+        params: tuple = (engine,) if engine else ()
+        sql = f"""
+            SELECT b.id AS branch_id, b.scan_id, b.branch_path,
+                   b.chosen_node_id, n.image_id, n.filestem
+            FROM branches b
+            JOIN nodes n ON n.id = b.chosen_node_id
+            JOIN scans s ON s.id = b.scan_id
+            WHERE s.deleted_at IS NULL
+              AND b.trashed_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM ocr_runs o
+                WHERE o.scan_id = b.scan_id
+                  AND o.branch_path = b.branch_path
+                  AND o.status = 'done'{stale_clause}{eng_clause}
+            )
+            ORDER BY s.idx ASC, b.branch_path ASC
+        """
+        return self.conn.execute(sql, params).fetchall()
+
+    def available_ocr_layers(self, scan_id: Optional[int] = None) -> list[sqlite3.Row]:
+        """Distinct OCR engines that have a ``done`` layer, **latest-generated
+        first** — feeds the export 'OCR layer' selector. Rows:
+        ``{engine, created_at, n_branches}``. ``scan_id=None`` = whole project."""
+        where = "WHERE status = 'done'"
+        params: tuple = ()
+        if scan_id is not None:
+            where += " AND scan_id = ?"
+            params = (scan_id,)
+        # Order by MAX(id) — monotonic insertion order = true generation order,
+        # robust to created_at's seconds-resolution ties.
+        return self.conn.execute(
+            f"SELECT engine, MAX(created_at) AS created_at, "
+            f"COUNT(DISTINCT branch_path) AS n_branches "
+            f"FROM ocr_runs {where} GROUP BY engine ORDER BY MAX(id) DESC",
+            params,
+        ).fetchall()
 
     def all_branches(self) -> list[sqlite3.Row]:
         return self.conn.execute("""

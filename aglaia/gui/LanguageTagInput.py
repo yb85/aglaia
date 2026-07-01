@@ -67,19 +67,48 @@ LANGUAGES: list[tuple[str, str]] = [
     ("la", "Latin"),
 ]
 
-CODE_TO_NAME = {c: n for c, n in LANGUAGES}
 # Apple Vision-only codes (queried at runtime) that aren't in the editorial
 # catalogue above — give them friendly names for the chip tooltips / picker.
-CODE_TO_NAME.update({
-    "yue-Hans": "Cantonese (Simplified)",
-    "yue-Hant": "Cantonese (Traditional)",
-    "ars-SA": "Najdi Arabic",
-    "id-ID": "Indonesian",
-    "ms-MY": "Malay",
-    "no-NO": "Norwegian",
-    "nn-NO": "Norwegian (Nynorsk)",
-    "vi-VT": "Vietnamese",
-})
+LANGUAGES += [
+    ("yue-Hans", "Cantonese (Simplified)"),
+    ("yue-Hant", "Cantonese (Traditional)"),
+    ("ars-SA", "Najdi Arabic"),
+]
+
+# Whole-ISO discovery: augment the curated (region-specific) catalogue above
+# with the common world languages by ISO 639 code, named via langcodes. This is
+# the completer list only — the input accepts ANY valid BCP-47 tag (see
+# _parse_code), so no language is off-limits, and plugin VLMs / unknown
+# languages on a known script are covered.
+_COMMON_CODES = (
+    "en fr es de it pt nl sv nb nn da fi is pl cs sk hu ro bg hr sr sl et lv lt "
+    "mk sq el grc la ru uk be kk ky uz az tk tt tg mn ka hy he ar fa ur ps ckb "
+    "sd ug th lo km my bo si ta te kn ml hi mr ne sa bn as gu pa or am ti zh yue "
+    "ja ko vi id ms tl jv su ceb sw zu xh yo ig ha so rw mg ht eo cy ga gd br oc "
+    "ca eu gl af fo lb mt gv kw tr"
+).split()
+
+
+def _augment_catalogue(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    seen = {c for c, _ in items}
+    try:
+        import langcodes
+        for code in _COMMON_CODES:
+            if code in seen:
+                continue
+            try:
+                name = langcodes.Language.get(code).display_name()
+            except Exception:
+                name = code
+            items.append((code, name))
+            seen.add(code)
+    except Exception:
+        pass
+    return items
+
+
+LANGUAGES = _augment_catalogue(LANGUAGES)
+CODE_TO_NAME = {c: n for c, n in LANGUAGES}
 NAME_TO_CODE = {n.lower(): c for c, n in LANGUAGES}
 
 
@@ -153,8 +182,17 @@ class LanguageTagInput(QWidget):
                 return tail
             if tail.lower() in NAME_TO_CODE:
                 return NAME_TO_CODE[tail.lower()]
-        if 2 <= len(head) <= 3 and head.isalpha():
-            return head.lower()
+        # Whole-ISO coverage: accept ANY well-formed BCP-47 / ISO 639 tag
+        # (fr-FR, sr-Cyrl, zh-Hant, grc, …), not just the completer catalogue —
+        # but reject junk (langcodes validates against the registry).
+        try:
+            import langcodes
+            if langcodes.tag_is_valid(head):
+                return head
+        except Exception:
+            # langcodes unavailable — fall back to the lenient shape check.
+            if 2 <= len(head) <= 3 and head.isalpha():
+                return head.lower()
         return None
 
     def set_allowed_languages(self, codes: list[str]) -> None:

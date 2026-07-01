@@ -104,6 +104,17 @@ class TrapezoidalOption(AbstractProcessorOption):
     # Reject Zhang-He's recovered aspect if it drifts more than this
     # fraction from the bbox aspect — guard against degenerate solves.
     zhang_he_max_drift: float = 0.15
+    # Self-check auto-discard: a correct keystone leaves the body baselines
+    # at least as horizontal as they were; a degenerate quad (the VP/edge fit
+    # went astray) rotates them → a visible slant. Reject the correction when
+    # it would ADD more than this many degrees of median tilt to the
+    # full-width baselines vs the source. 0 disables the gate.
+    max_added_tilt_deg: float = 1.5
+    # Reject an implausibly THIN column quad (w/h below this) — a real body
+    # column on these scans sits ~0.6-0.9; a thinner one means the column-edge
+    # fit collapsed (the worst, most obvious slant case). Tighter than the
+    # max_aspect_ratio floor (1/5 = 0.2). 0 disables.
+    min_column_aspect: float = 0.5
 
     # Pure UI-surfacing flag: when True, the GUI shows + pre-ticks the
     # "Normalize character width" checkbox so the user knows the
@@ -209,6 +220,16 @@ class TrapezoidalCorrection(AbstractImageProcessor):
                                     advanced=True),
         "max_aspect_ratio": _f(5.0, 1.0, 20.0, 0.5,
                                "Sanity cap on recovered w/h.", advanced=True),
+        "max_added_tilt_deg": _f(1.5, 0.0, 15.0, 0.5,
+                                 "Auto-discard: reject the correction if it would add "
+                                 "more than this much median tilt to the body baselines "
+                                 "(a degenerate quad slants the page). 0 = off.",
+                                 advanced=True),
+        "min_column_aspect": _f(0.5, 0.0, 1.0, 0.01,
+                                "Auto-discard: reject an implausibly thin column quad "
+                                "(w/h below this) — the column-edge fit collapsed. "
+                                "0 = off.",
+                                advanced=True),
         "norm_width": _b(False,
                          "Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).",
                          advanced=True),
@@ -578,6 +599,45 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         ], dtype=np.float32)
         H_col = cv2.getPerspectiveTransform(quad.astype(np.float32), dst_col)
 
+        # 5a. Degenerate-quad guard: an implausibly thin column means the
+        # left/right edge fit collapsed — the most obvious bad-keystone case
+        # (a sliver quad rectified to a sliver, the page sheared to fill it).
+        if (self.opt.min_column_aspect > 0
+                and recovered_aspect < self.opt.min_column_aspect):
+            return self._fallback(
+                buf,
+                reason=(f"column too thin (aspect {recovered_aspect:.2f} < "
+                        f"{self.opt.min_column_aspect:.2f})"),
+                n_lines=len(baselines),
+            )
+
+        # 5b. Self-check / auto-discard. A sound keystone keeps the text
+        # baselines at least as horizontal as the source; a degenerate quad
+        # (VP/edge fit gone astray) rotates them — the visible page slant.
+        # Measure ALL baselines, not just the full-width subset: those define
+        # the quad and so map to horizontal by construction (circular); the
+        # interior / short lines are the honest witnesses of the global slant.
+        # Push them through H_col and bail to passthrough if the correction
+        # ADDS tilt beyond the bound.
+        if self.opt.max_added_tilt_deg > 0 and len(baselines) >= 5:
+            inv = 1.0 / ana_scale if ana_scale < 1.0 else 1.0
+            src_lines = [(pL * inv, pR * inv) for pL, pR in baselines]
+            before_tilt = _median_baseline_tilt(src_lines)
+            warped = []
+            for pL, pR in src_lines:
+                pts = np.array([pL, pR], dtype=np.float64).reshape(-1, 1, 2)
+                wpts = cv2.perspectiveTransform(
+                    pts, H_col.astype(np.float64)).reshape(-1, 2)
+                warped.append((wpts[0], wpts[1]))
+            after_tilt = _median_baseline_tilt(warped)
+            if after_tilt > before_tilt + self.opt.max_added_tilt_deg:
+                return self._fallback(
+                    buf,
+                    reason=(f"correction would slant baselines "
+                            f"{before_tilt:.1f}°→{after_tilt:.1f}°"),
+                    n_lines=len(baselines),
+                )
+
         # 6. Expand canvas so the full SOURCE image is preserved — nothing
         # outside the column quad gets cropped.
         src_corners = np.array(
@@ -770,6 +830,19 @@ def _line_tilt_deg(line: np.ndarray) -> float:
     """Tilt of a homogeneous line in degrees (horizontal = 0)."""
     a, b, _ = line.reshape(3)
     return math.degrees(math.atan2(-a, b))
+
+
+def _median_baseline_tilt(lines) -> float:
+    """Median absolute tilt (deg) of ``(pL, pR)`` baseline endpoint pairs;
+    horizontal = 0. Lines too short to give a stable angle are skipped."""
+    angs = []
+    for pL, pR in lines:
+        dx = float(pR[0] - pL[0])
+        dy = float(pR[1] - pL[1])
+        if abs(dx) < 4.0:
+            continue
+        angs.append(abs(math.degrees(math.atan2(dy, dx))))
+    return float(np.median(angs)) if angs else 0.0
 
 
 def _is_convex(quad: np.ndarray) -> bool:

@@ -97,9 +97,11 @@ class OcrWorker(QThread):
             if self._mode == self.MODE_FORCE:
                 rows = ocr_repo.all_branches()
             elif self._mode == self.MODE_MISSING:
-                rows = ocr_repo.branches_needing_ocr(include_stale=False)
+                rows = ocr_repo.branches_needing_ocr(
+                    include_stale=False, engine=self._engine_name)
             else:
-                rows = ocr_repo.branches_needing_ocr(include_stale=True)
+                rows = ocr_repo.branches_needing_ocr(
+                    include_stale=True, engine=self._engine_name)
 
             total = len(rows)
             if total == 0:
@@ -210,9 +212,14 @@ class OcrWorker(QThread):
                 lo = chunk_start + 1
                 hi = min(chunk_start + len(pending), total)
                 span = f"page {lo}" if lo == hi else f"pages {lo}–{hi}"
-                hint = (" — loading the model on first run, please wait…"
-                        if chunk_start == 0 else
-                        " — VLM OCR; dense pages can take a few minutes")
+                # Only the locally-served VLMs are slow to spin up / per dense
+                # page; Apple Vision et al. are fast, so don't promise minutes.
+                if getattr(engine, "served_vlm", False):
+                    hint = (" — loading the model on first run, please wait…"
+                            if chunk_start == 0 else
+                            " — VLM OCR; dense pages can take a few minutes")
+                else:
+                    hint = ""
                 self.log_line.emit(
                     "info", f"OCR: {span} of {total}{hint}")
 

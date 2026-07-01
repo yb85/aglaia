@@ -35,7 +35,7 @@ from PySide6.QtGui import (
     QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap, QTextOption,
 )
 from PySide6.QtWidgets import (
-    QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy,
+    QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QSizePolicy,
     QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -46,7 +46,6 @@ from aglaia.gui.colors import (
     COLOR_ERROR,
     COLOR_ERROR_STRONG,
     COLOR_FONT_DIM,
-    COLOR_FONT_INVERSE,
     COLOR_FONT_LINK_HOVER,
     COLOR_FONT_MUTED,
     COLOR_FONT_ON_TOAST,
@@ -339,6 +338,11 @@ class PipelineProgressBar(QWidget):
         self._done_times: deque[float] = deque(maxlen=self._ETA_WINDOW)
         self._label_prefix = self.tr("Pipeline")
         self._tick_count = 0
+        # OCR ("tick") mode: the done-count comes from the private monotonic
+        # `_tick_count`, NOT len(_done_snaps), so a concurrent pipeline
+        # `mark_done` (branch_ready) can't inflate an active OCR pass (the
+        # "334/322" over-count). Set by mark_tick, cleared by reset.
+        self._tick_mode = False
         # Indeterminate ("activity") mode for progress with no per-item ticks.
         self._indeterminate = False
         self._indet_phase = 0.0
@@ -383,9 +387,15 @@ class PipelineProgressBar(QWidget):
         self._done_t = None
         self._done_times.clear()
         self._tick_count = 0
+        self._tick_mode = False
         self._indeterminate = False
         if self._indet_timer.isActive():
             self._indet_timer.stop()
+
+    def _done_count(self) -> int:
+        """The displayed done-count: the isolated OCR tick counter in tick
+        mode, else the deduped pipeline set."""
+        return self._tick_count if self._tick_mode else len(self._done_snaps)
         self.update()
 
     def set_imported(self, n: int):
@@ -434,14 +444,16 @@ class PipelineProgressBar(QWidget):
         scan_id; OCR mode counts per branch (a multi-branch scan should
         tick twice). This path bypasses the set, using a private
         monotonic counter so the two modes don't collide."""
+        self._tick_mode = True
         self._tick_count += 1
-        # Mirror into `_done_snaps` so `_ratio` / final-state stamping
-        # keep working without splitting their plumbing.
+        # Mirror into `_done_snaps` too (harmless), but the displayed count in
+        # tick mode is `_tick_count` (see _done_count) — isolated from any
+        # concurrent pipeline `mark_done`.
         self._done_snaps.add(-self._tick_count)
         self._stamp_start_if_needed()
         self._done_times.append(time.monotonic())
         if (self._imported > 0
-                and len(self._done_snaps) >= self._imported
+                and self._done_count() >= self._imported
                 and self._done_t is None):
             self._done_t = time.monotonic()
         self.update()
@@ -457,7 +469,7 @@ class PipelineProgressBar(QWidget):
         self._done_times.append(time.monotonic())
         # Freeze the total-elapsed timestamp once we hit 100 %.
         if (self._imported > 0
-                and len(self._done_snaps) >= self._imported
+                and self._done_count() >= self._imported
                 and self._done_t is None):
             self._done_t = time.monotonic()
         self.update()
@@ -465,7 +477,7 @@ class PipelineProgressBar(QWidget):
     def is_finished(self) -> bool:
         """True once the bar has reached (or been snapped to) 100 %."""
         return (self._imported > 0
-                and len(self._done_snaps) >= self._imported
+                and self._done_count() >= self._imported
                 and self._done_t is not None)
 
     def force_complete(self) -> None:
@@ -476,6 +488,13 @@ class PipelineProgressBar(QWidget):
         lost branch_ready event). An idle chain means whatever's on disk is the
         final state, so reconcile the label to 100 %."""
         if self._imported <= 0:
+            return
+        # OCR ("tick") mode owns the bar — the pipeline-idle reconciliation must
+        # NOT snap an in-flight (or partial) OCR pass to 100%. The chain is idle
+        # for the whole OCR run, so this watchdog would otherwise jump the OCR
+        # bar straight to N/N on the first batch. OCR drives its own completion
+        # via mark_tick / _on_ocr_finished.
+        if self._tick_mode:
             return
         pad = self._imported - len(self._done_snaps)
         if pad > 0:
@@ -502,7 +521,7 @@ class PipelineProgressBar(QWidget):
     def _ratio(self) -> float:
         if self._imported <= 0:
             return 0.0
-        return min(1.0, len(self._done_snaps) / self._imported)
+        return min(1.0, self._done_count() / self._imported)
 
     @staticmethod
     def _fmt_duration(seconds: float) -> str:
@@ -528,24 +547,33 @@ class PipelineProgressBar(QWidget):
         return sum(deltas) / len(deltas)
 
     def _build_label(self) -> str:
-        done = len(self._done_snaps)
+        done = self._done_count()
         total = self._imported
         pct = self._ratio() * 100.0
         head = f"{self._label_prefix} · {done}/{total}  ({pct:.0f}%)"
-        # Final state — replace ETA with actual elapsed + s/scan.
+        # Final state — replace ETA with actual elapsed + s/unit. OCR counts per
+        # page (one branch ≈ one page; a 2-up photo is 1 scan but 2 OCR units),
+        # so label it "page" in tick mode; the pipeline counts whole scans.
         if (total > 0 and done >= total and self._start_t is not None
                 and self._done_t is not None):
             elapsed = self._done_t - self._start_t
-            per_scan = elapsed / total if total > 0 else 0.0
-            return self.tr("{head}  ·  {elapsed} · {per_scan:.1f}s/scan").format(
-                head=head, elapsed=self._fmt_duration(elapsed), per_scan=per_scan,
+            per_unit = elapsed / total if total > 0 else 0.0
+            unit = self.tr("page") if self._tick_mode else self.tr("scan")
+            return self.tr("{head}  ·  {elapsed} · {per_unit:.1f}s/{unit}").format(
+                head=head, elapsed=self._fmt_duration(elapsed),
+                per_unit=per_unit, unit=unit,
             )
-        # Running — show ETA from moving-average dt.
-        avg_dt = self._moving_avg_dt()
-        if avg_dt is None or total <= 0 or done >= total:
-            eta_str = "—"
+        # Running — ETA from CUMULATIVE throughput (elapsed-since-start ÷ done).
+        # A small moving-average window lurched wildly because the VLM completes
+        # pages in bursts of 4 (a batch returns all at once, then a gap), so the
+        # windowed rate swung across batch boundaries. The cumulative rate is
+        # smooth and converges to the true pace (it includes the one-time
+        # model-load warmup, so it starts high and settles — honest, not jumpy).
+        if (total > 0 and 0 < done < total and self._start_t is not None):
+            rate = (time.monotonic() - self._start_t) / done
+            eta_str = self._fmt_duration(rate * (total - done))
         else:
-            eta_str = self._fmt_duration(avg_dt * (total - done))
+            eta_str = "—"
         return self.tr("{head}  ·  ETA {eta}").format(head=head, eta=eta_str)
 
     def paintEvent(self, _ev):

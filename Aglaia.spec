@@ -150,7 +150,6 @@ datas = [
     (str(REPO / "aglaia" / "assets" / "brand" / "aglaia-light.png"), "aglaia/assets/brand"),
     (str(REPO / "aglaia" / "assets" / "brand" / "aglaia-dark.png"), "aglaia/assets/brand"),
     (str(REPO / "aglaia" / "assets" / "brand" / "aglaia2-1024.png"), "aglaia/assets/brand"),
-    (str(REPO / "aglaia" / "app_data" / "model-list.json"), "aglaia/app_data"),
     # App + document icons. Kept at the "aglaia/app_data" bundle path the macOS
     # plist (CFBundleIconFile / CFBundleTypeIconFile) + filetype_register
     # reference by name — only the SOURCE path changed.

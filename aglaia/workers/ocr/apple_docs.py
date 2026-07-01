@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 from typing import Any, Optional
 
@@ -58,6 +59,7 @@ import numpy as np
 from .engine import (
     OcrEngine, OcrResult, register, engine_log, get_engine,
     resolve_ocr_dpi, downsample_to_dpi, resolve_confidence_gate,
+    direct_block_engines,
 )
 
 _AVAILABLE: Optional[bool] = None
@@ -70,12 +72,23 @@ _AVAILABLE: Optional[bool] = None
 # SQLite ``KEY_OCR_CONFIDENCE_GATE`` → this default).
 DEFAULT_CONFIDENCE_GATE = 0.7
 
+# When more than this FRACTION of a page's lines are flagged for the complement
+# (low confidence OR unexpected script), Vision is failing on the page as a
+# whole — so one clean whole-page pass by the complement VLM beats dozens of
+# block re-OCRs + splices (the block path is fragile and the VLM reads a full
+# page cleanly anyway). 0.30 balances: below it, targeted block re-OCR keeps
+# Vision's fast/good majority; above it, the page is garbage-dominated.
+FULL_PAGE_COMPLEMENT_FRAC = 0.30
+
 # Pixel padding added around a low-confidence line's bbox before cropping
 # for the complement, as a fraction of the line height (re-OCR likes a
 # little breathing room around the glyphs).
 _CROP_PAD_FRAC = 0.15
 
-_VALID_COMPLEMENTS = ("surya", "paddle_vl", "none")
+# Valid complements = any registered DirectBlockOCR engine (+ "none"), resolved
+# dynamically so a new qualifying engine is eligible with no edit here.
+def _valid_complements() -> set[str]:
+    return set(direct_block_engines()) | {"none"}
 
 
 def _check() -> bool:
@@ -97,13 +110,19 @@ def _check() -> bool:
 
 
 def resolve_complement(explicit: str | None = None) -> str:
-    """Pick the complement engine: explicit arg → env → ``surya``."""
+    """Pick the complement engine: explicit arg → env → default. Validated
+    against the registered DirectBlockOCR engines (+ ``none``). Default is
+    ``surya`` when eligible, else the first registered direct-block engine,
+    else ``none``."""
+    valid = _valid_complements()
     for cand in (explicit, os.environ.get("AGLAIA_OCR_COMPLEMENT")):
         if cand:
             c = str(cand).strip().lower()
-            if c in _VALID_COMPLEMENTS:
+            if c in valid:
                 return c
-    return "surya"
+    if "surya" in valid:
+        return "surya"
+    return next(iter(direct_block_engines()), "none")
 
 
 @register
@@ -565,6 +584,24 @@ def _union_bbox(lines: list[dict]) -> list[int]:
     return [xs0, ys0, xs1, ys1]
 
 
+# A recognition-only VLM (Surya/GLM/…) handed a dense block — e.g. a footnote
+# column — can fall into a repetition loop, emitting the same line with an
+# incremented counter ad nauseam ("(195) Ibid., p. 188." ×100). That output is
+# strictly worse than Vision's, so we must NOT splice it in. Detect it by the
+# two signatures of a loop: an explosion in line count vs the source block, and
+# a collapse in distinct content once a leading enumerator ("(195) ", "12. ")
+# is stripped — real footnotes vary by page number and stay distinct; a loop
+# repeats one line. Fail-safe: on detection we keep Vision's text for the block.
+def _complement_degenerate(text: str, n_source_lines: int) -> bool:
+    parts = [p.strip() for p in text.splitlines() if p.strip()]
+    if len(parts) < 8:
+        return False  # too short to be a runaway loop
+    exploded = len(parts) > max(8, 3 * max(1, n_source_lines))
+    norm = [re.sub(r"^[(\[]?\d+[)\].]?\s*", "", p) for p in parts]
+    collapsed = len(set(norm)) / len(norm) < 0.5
+    return exploded or collapsed
+
+
 def _split_block_text(text: str, n_lines: int) -> list[str]:
     """Split a block's complement text across its ``n_lines`` source lines.
 
@@ -592,8 +629,15 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
     essential — the recognition-only VLM returns nothing on a thin
     one-line strip but reads a multi-line block cleanly. Returns
     ``(n_offloaded, complement_used_or_None)``."""
+    # Offload a line to the complement when Vision is unsure (confidence gate)
+    # OR when it emitted a script the document's languages don't cover — Vision
+    # renders Greek as confusable Cyrillic *with high confidence*, so the
+    # confidence gate alone leaks those. Script anomaly is a near-certain
+    # misread (measured 100% precision here), so it fires regardless of score.
+    from aglaia.workers.ocr.text_scripts import has_unexpected_script
     low = [ln for ln in lines
-           if float(ln.get("confidence", 1.0)) < gate
+           if (float(ln.get("confidence", 1.0)) < gate
+               or has_unexpected_script(ln.get("text", ""), languages))
            and ln.get("bbox")
            and not _is_degenerate(ln.get("text", ""))]
     if not low:
@@ -610,6 +654,27 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
             f"(weights/deps missing) — keeping Vision text for "
             f"{len(low)} low-conf line(s).", "warn")
         return 0, None
+
+    # Whole-page fallback: when Vision fails on most of the page, one clean
+    # complement pass over the WHOLE image beats many block re-OCRs + splices.
+    frac = len(low) / max(len(lines), 1)
+    if frac > FULL_PAGE_COMPLEMENT_FRAC:
+        try:
+            res = engine.recognize(arr, languages)
+            new_lines = res.get("lines") or []
+        except Exception as e:  # noqa: BLE001
+            engine_log(f"[apple_docs] whole-page complement failed: {e} "
+                       f"— falling back to per-block.", "warn")
+            new_lines = []
+        if new_lines:
+            engine_log(
+                f"[apple_docs] {len(low)}/{len(lines)} lines flagged "
+                f"({frac:.0%} > {FULL_PAGE_COMPLEMENT_FRAC:.0%}) → whole-page "
+                f"re-OCR with {comp}", "info")
+            lines[:] = new_lines       # replace Vision's page with the VLM's
+            document.clear()           # VLM has no doc tree → md falls back to lines
+            return len(low), comp
+        # empty VLM result → fall through to the per-block path
 
     blocks = _group_low_blocks(low)
     engine_log(
@@ -635,19 +700,29 @@ def _apply_complement(arr: np.ndarray, lines: list[dict],
         ).strip()
         if not new_text:
             continue
+        if _complement_degenerate(new_text, len(blk_lines)):
+            engine_log(
+                f"[apple_docs] complement {comp!r} returned degenerate/looping "
+                f"output for a {len(blk_lines)}-line block — discarding, "
+                f"keeping Vision text.", "warn")
+            continue
         per_line = _split_block_text(new_text, len(blk_lines))
         # Order block lines top→bottom to align with the VLM's reading order.
         blk_sorted = sorted(blk_lines, key=lambda ln: ln["bbox"][1])
         for ln, txt in zip(blk_sorted, per_line):
-            if not txt:
-                continue
-            engine_log(
-                f"[apple_docs]   conf={ln['confidence']:.2f} "
-                f"{ln['text'][:28]!r} → {txt[:28]!r}", "info")
+            # Set EVERY block line — including the blanks _split_block_text
+            # produces on a line-count mismatch (whole block text lands on the
+            # first line, rest blanked). Those blanks MUST be cleared, not left
+            # as Vision's garbage: the corrected text is already on line 1, so
+            # keeping the old (Cyrillic) text here was the leak that left most
+            # re-OCR'd lines uncorrected.
+            old = ln.get("text", "")
             ln["text"] = txt
             ln["confidence"] = max(float(ln.get("confidence", 0.0)), 0.99)
             ln["complement"] = comp
             if document:
                 _replace_in_document(document, ln["bbox"], txt)
             n += 1
+            if txt:
+                engine_log(f"[apple_docs]   {old[:24]!r} → {txt[:24]!r}", "info")
     return n, (comp if n else None)

@@ -7,8 +7,12 @@ license = { file = "LICENSE" }   # PolyForm Shield License 1.0.0 (source-availab
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "doxapy>=0.9.4",
+    # HTML→Markdown for VLM OCR engines that emit HTML (Surya). Pure Python, no
+    # transitive deps; the engine falls back to a tag-strip if it's ever absent.
+    "html2text>=2024.2.26",
     "jax>=0.9.0",
     "jaxlib>=0.9.0",
+    "langcodes[data]>=3.5.1",
     "ml-dtypes>=0.5.4",
     "numpy>=1.26.0, <2.1.0",
     "opencv-python-headless>=4.8.0",
@@ -37,25 +41,24 @@ dependencies = [
 # pick ONE engine extra. Apple Vision (macos extra) needs no Python OCR dep.
 
 [project.optional-dependencies]
-# OCR engine: Surya (cross-platform, GPU-optional). Pins huggingface-hub<1,
-# so it CANNOT be installed alongside the `paddle` extra in a loose pip
-# resolve — pick one. `pip install "aglaia[surya]"`.
-surya = [
-    "surya-ocr>=0.20.0",
-    # Declared directly (not just transitively via surya-ocr) so the
-    # [tool.uv.sources] pytorch-cpu pin actually applies — uv ignores sources
-    # for purely-transitive deps. Keeps the CUDA nvidia-cu12-* libs (~2-3 GB)
-    # out of the Linux bundle; Surya OCR runs through llama-server, not torch.
-    "torch>=2.7.0,<3",
-]
-# OCR engine: PaddleOCR-VL — the paddleocr orchestrator + CPU paddlepaddle +
-# the MLX vision-language model. Needs huggingface-hub>=1.5 (via mlx-vlm),
-# so it conflicts with `surya` in a loose resolve. `pip install "aglaia[paddle]"`.
+# NOTE: Surya 2 OCR no longer has its own extra. It's a Qwen3.5-VL model now
+# served through the shared local VLM backend (mlx-vlm in `macos`, vLLM in
+# `cuda`) like glm/unlimited — so `--ocr surya` needs no Surya-specific deps,
+# and the old surya-ocr/torch/llama-server/GGUF stack (+ its conflicts) is gone.
+# OCR engine: PaddleOCR-VL — just the paddleocr layout orchestrator + CPU
+# paddlepaddle. The VLM serving backend (mlx-vlm) lives in the `macos` extra, so
+# PaddleOCR-VL needs `--extra macos --extra paddle` — it is Apple-Silicon-only
+# (its pipeline drives the mlx-vlm server). `pip install "aglaia[macos,paddle]"`.
 paddle = [
     "paddleocr[doc-parser]>=3.6.0",
     "paddlepaddle>=3.2.1",
-    "mlx-vlm>=0.6.0",
 ]
+# NOTE: the vLLM serving backend (for the `glm` / `unlimited` OCR engines on
+# CUDA/Linux) is intentionally NOT a managed extra. vLLM hard-pins an exact
+# torch/CUDA build and conflicts with every other OCR stack here, so it must be
+# installed per-box to match the local CUDA (e.g. `uv pip install vllm`). The
+# VllmBackend only needs `vllm` importable. Apple Silicon needs nothing extra —
+# those engines serve via the `mlx-vlm` already in the `paddle` extra.
 # Cross-platform GUI (PySide6 + theme). Decoupled from `macos` so a
 # CLI-only / headless install (the base dependencies) stays slim — no
 # Qt download. The capture GUI on macOS needs `gui` + `macos` together.
@@ -90,6 +93,12 @@ macos = [
     # JAX-CPU host-pool leak (workers ballooning to 14–58 GB during
     # cubic-sheet optimisation). Disabled outside arm64 by the marker.
     "mlx>=0.20; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # MLX VLM serving backend (mlx_vlm.server). The local OCR VLM engines
+    # (`glm` / `unlimited` / `paddle_vl`) serve through it on Apple Silicon, so
+    # `--extra macos` gives a working local VLM backend out of the box. Disjoint
+    # from the `cuda` extra's vLLM by platform marker (avoids their llguidance
+    # clash). arm64-only.
+    "mlx-vlm>=0.6.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -112,6 +121,12 @@ cuda = [
     # aglaia/processors/dewarp_batcher.py + #28). Pure Python on JAX; the batched
     # solver imports it lazily and the CPU per-page path never needs it.
     "optax>=0.2.0",
+    # vLLM serving backend for the local OCR VLM engines (`glm` / `unlimited`) on
+    # Linux — so `--extra cuda` gives a working local VLM backend. GPU when a CUDA
+    # torch is present; CPU otherwise (the bundled torch is the CPU build via the
+    # pytorch-cpu index — the "worst case" path). Disjoint from `macos`'s mlx-vlm
+    # by platform marker. Conflicts with `surya` (declared in [tool.uv]).
+    "vllm>=0.6.0; sys_platform == 'linux'",
 ]
 jbig2 = [
     # Native JBIG2 encoder for PDF export. Build the wheel locally with
@@ -216,4 +231,9 @@ override-dependencies = [
     # wins non-deterministically. Pinning the GUI build to the same version
     # as headless keeps the shared `cv2/` a single consistent payload.
     "opencv-python==4.11.0.86",
+    "opencv-python-headless==4.11.0.86",
+    # paddleocr pulls opencv-contrib-python — a THIRD distribution writing the
+    # same cv2/ dir. Pin it to the same version too, else it clobbers cv2/ to
+    # its own release (e.g. 4.10) and the shared dir goes half-written/skewed.
+    "opencv-contrib-python==4.11.0.86",
 ]

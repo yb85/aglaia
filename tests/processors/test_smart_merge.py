@@ -126,6 +126,32 @@ def test_merge_cap_forces_below_threshold():
     assert len(out) == 2, f"capacity cap must enforce: {out}"
 
 
+def test_merge_speck_absorbed_not_pages_fused():
+    """Capacity-forced merge folds a small fragment into a neighbour rather
+    than fusing the two real pages.
+
+    Regression for the DBnet 2-up mis-split: a detector drops an isolated
+    page-number box a hair left of the body column, so it survives as its own
+    group → 3 groups, max=2. The old code force-merged the highest-scoring
+    pair (the two balanced pages → one giant 'right' page, speck → 'left').
+    The fix absorbs the SMALLEST group into its best neighbour, so the two
+    side-by-side pages stay split and the number rides with the left page."""
+    speck = (340, 90, 354, 98)        # page number, just left of the column
+    left = (354, 77, 874, 975)
+    right = (977, 83, 1510, 914)
+    out = _merge([speck, left, right], max_pages=2, threshold=0.60)
+    assert len(out) == 2, f"two real pages must survive: {out}"
+    out = sorted(out, key=lambda p: p[0])
+    # Left page swallowed the speck (its left edge moved out to the speck).
+    assert out[0][0] <= 354 and out[0][2] >= 874
+    # Right page is untouched — NOT fused with the left.
+    assert out[1][0] >= 970 and out[1][2] >= 1510
+    # Centres stay well separated → a real side-by-side spread.
+    cl = (out[0][0] + out[0][2]) / 2
+    cr = (out[1][0] + out[1][2]) / 2
+    assert cr - cl > 600
+
+
 def test_merge_greedy_collapses_imbalanced_chain():
     """Documents (not regrets) the greedy behavior: a chain of close
     columns telescopes via width-imbalance once any merge widens one

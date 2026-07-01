@@ -34,11 +34,10 @@ from __future__ import annotations
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QCoreApplication, QObject, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
@@ -670,8 +669,8 @@ class _ModelCard(Card):
     def _snapshot_sha1(cls, root: Path) -> str:
         """Deterministic SHA-1 over an entire hf-snapshot directory.
 
-        Algorithm (matches what we use to populate `sha1` in
-        model-list.json):
+        Algorithm (matches what we use to populate `sha1` on a
+        DownloadTarget in the registry):
           1. Walk `root` recursively, sort by POSIX-relative path.
           2. Skip `.cache/` (HF tracking metadata — re-created on every
              download, not part of the model itself).
@@ -791,6 +790,7 @@ class _ModelCard(Card):
         url = self._spec.url
         dest = self._dest()
         dest.parent.mkdir(parents=True, exist_ok=True)
+        self._record_status("downloading")
 
         if self._spec.kind == "hf-snapshot":
             self._worker = SuryaWorker(url, dest)
@@ -801,10 +801,10 @@ class _ModelCard(Card):
             # the bytes coming back from an unencrypted hop.
             if not url.lower().startswith("https://"):
                 self.status_label.setText(self.tr(
-                    "Refusing non-HTTPS URL — edit "
-                    "model-list.json to use https://"
+                    "Refusing non-HTTPS URL for this model."
                 ))
                 self.status_label.setVisible(True)
+                self._record_status("failed")
                 self._refresh_state()
                 return
             self._worker = DownloadWorker(url, dest)
@@ -903,13 +903,26 @@ class _ModelCard(Card):
                 self.progress_bar.setValue(100)
                 self.status_label.setVisible(False)
                 self._needs_restart = True
+                self._record_status("downloaded")
                 self._refresh_state()
             else:
                 self.status_label.setText(vmsg)
+                self._record_status("failed")
                 self._reset_idle(keep_status=True)
         else:
             self.status_label.setText(msg)
+            self._record_status("failed")
             self._reset_idle(keep_status=True)
+
+    def _record_status(self, status: str) -> None:
+        """Mirror the download lifecycle into the central `downloads` table so
+        the registry's persisted status reflects GUI downloads too (the CLI
+        path records the same way). Best-effort — never break a download."""
+        try:
+            from aglaia.app_data import downloads
+            downloads.record_status(self._spec.key, status)
+        except Exception:
+            pass
 
     def _verify_installed(self) -> tuple[bool, str]:
         """Run the same hash check `_is_installed` uses, with a
@@ -1020,10 +1033,10 @@ class ModelDownloaderDialog(QDialog):
         v.setContentsMargins(20, 4, 20, 20)
         v.setSpacing(12)
 
-        # Reload the JSON registry on every dialog open so user edits to
-        # `model-list.json` (or a future remote-pull refresh) take effect
-        # without an app restart. Stale module-level `MODEL_SPECS` would
-        # otherwise hold the values from process startup.
+        # Re-read the registry on every dialog open so targets registered by
+        # drop-in plugins (or a future remote-pull refresh) appear without an
+        # app restart. Stale module-level `MODEL_SPECS` would otherwise hold the
+        # catalogue snapshot from process startup.
         specs = _load_model_specs() or MODEL_SPECS
         rec = [s for s in specs if s.section == "recommended"]
         oth = [s for s in specs if s.section == "other"]

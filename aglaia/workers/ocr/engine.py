@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import abc
 import warnings
-from typing import Callable, Optional, TypedDict
+from typing import TypedDict
 
 
 class OcrLine(TypedDict, total=False):
@@ -59,6 +59,12 @@ class OcrEngine(abc.ABC):
                                     # the batch toggle + Jobs UI on the card
     price_per_page_usd: float = 0.0       # list price for the cost estimate
     price_per_page_usd_batch: float = 0.0  # batch list price (0 = no batch)
+    direct_block: bool = False      # can OCR a cropped text block directly (no
+                                    # layout pass) → eligible as an apple_docs
+                                    # complement; the OCR tab lists these.
+    served_vlm: bool = False        # spins up a local model server (slow first
+                                    # load + minutes/dense-page) → drives the
+                                    # OcrWorker "loading…/VLM OCR" progress hint.
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -75,6 +81,12 @@ class OcrEngine(abc.ABC):
         plugins) override this to consume their own keys; **ignore unknown
         keys** so the same spec stays forward-compatible across engines.
         Values arrive as strings — coerce as needed."""
+
+    def warmup(self, languages: list[str] | None = None) -> None:
+        """Pay the one-off model-load cost up front (spin up a local server,
+        load weights) so the per-page timing that follows is steady-state.
+        Base implementation is a no-op — engines with no load cost (Apple
+        Vision) need nothing; served VLMs override to ensure their server."""
 
     @abc.abstractmethod
     def recognize(self, image_rgb, languages: list[str],
@@ -118,12 +130,29 @@ class BatchableOCR(CloudOCR):
     price_per_page_usd_batch: float = 0.0
 
 
+class DirectBlockOCR:
+    """Trait: the engine recognises text in a *cropped block image* directly —
+    no separate layout-detection pass — so it can serve as an apple_docs
+    **complement** (re-OCR of regions Vision can't read, e.g. Greek). Compose it
+    onto recognisers that take an arbitrary image and return its text (the local
+    VLMs, Surya). The OCR tab lists every available DirectBlockOCR engine in the
+    complement picker, so a new qualifying engine shows up with no UI change."""
+    direct_block = True
+
+
 ENGINE_REGISTRY: dict[str, type[OcrEngine]] = {}
 
 
 def register(cls: type[OcrEngine]) -> type[OcrEngine]:
     ENGINE_REGISTRY[cls.name] = cls
     return cls
+
+
+def direct_block_engines() -> list[str]:
+    """Registered engine names usable as a complement (DirectBlockOCR), in
+    registry order. Availability (weights/deps) is the caller's concern."""
+    return [name for name, cls in ENGINE_REGISTRY.items()
+            if getattr(cls, "direct_block", False)]
 
 
 def get_engine(name: str) -> OcrEngine:
@@ -181,11 +210,13 @@ def engine_log(text: str, level: str = "info") -> None:
 import os as _os
 
 
-def resolve_ocr_dpi(default: int = 150) -> int:
+def resolve_ocr_dpi(default: int = 200) -> int:
     """Resolve the user-picked OCR target DPI.
 
     Lookup order: env var ``AGLAIA_OCR_DPI`` → SQLite config
-    (``KEY_OCR_DPI``) → ``default``.
+    (``KEY_OCR_DPI``) → ``default``. Default 200 matches the GUI and the
+    benchmark ceiling (docs/ocr-benchmark.md): 300 buys nothing over 200,
+    while 200 is safe for the local VLMs. Override per-run with ``--ocr-dpi``.
     """
     env = _os.environ.get("AGLAIA_OCR_DPI", "").strip()
     if env:
