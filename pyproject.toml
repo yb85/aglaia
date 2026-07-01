@@ -92,13 +92,21 @@ macos = [
     # MLX backend for PageDewarper. Required on arm64 macOS to avoid
     # JAX-CPU host-pool leak (workers ballooning to 14–58 GB during
     # cubic-sheet optimisation). Disabled outside arm64 by the marker.
-    "mlx>=0.20; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "mlx>=0.30; sys_platform == 'darwin' and platform_machine == 'arm64'",
     # MLX VLM serving backend (mlx_vlm.server). The local OCR VLM engines
-    # (`glm` / `unlimited` / `paddle_vl`) serve through it on Apple Silicon, so
-    # `--extra macos` gives a working local VLM backend out of the box. Disjoint
-    # from the `cuda` extra's vLLM by platform marker (avoids their llguidance
-    # clash). arm64-only.
-    "mlx-vlm>=0.6.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # (`glm` / `paddle_vl`) serve through it on Apple Silicon; `unlimited` uses
+    # it IN-PROCESS (mlx_vlm.load/generate) for the fused multipage R-SWA path.
+    # Pinned to the upstream commit that first ships the `unlimited_ocr`
+    # model_type (PR Blaizzy/mlx-vlm#1427, merged 2026-07-01) — not on PyPI yet
+    # (latest 0.6.3). mlx-vlm resolves model_type→mlx_vlm.models.{name} with no
+    # external registration hook, so the model must live inside the package →
+    # git pin. Verified: this commit's `mlx_vlm.server` CLI is flag-compatible
+    # with the server-based engines. Relax to a version once a release ships
+    # `unlimited_ocr`. Disjoint from the `cuda` extra's vLLM by platform marker.
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@9909cee70001dcb7a901ce3ec859c2cc5cea80c1 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # `unlimited` builds its repetition-suppression logits processor from
+    # mlx-lm (a mlx-vlm dep, declared explicitly since we import it directly).
+    "mlx-lm>=0.28; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -230,6 +238,10 @@ override-dependencies = [
     # no attribute 'imdecode'`), and PyInstaller bundles whichever payload
     # wins non-deterministically. Pinning the GUI build to the same version
     # as headless keeps the shared `cv2/` a single consistent payload.
+    # NB: the git-pinned mlx-vlm (unlimited_ocr) declares opencv-python>=4.12,
+    # but 4.12+ needs numpy>=2.1 (we hold numpy<2.1) — so we force 4.11.0.86.
+    # Verified functional: mlx-vlm's cv2 use works on 4.11. If a fresh sync
+    # leaves a half-written cv2/, force-reinstall the three opencv distros.
     "opencv-python==4.11.0.86",
     "opencv-python-headless==4.11.0.86",
     # paddleocr pulls opencv-contrib-python — a THIRD distribution writing the
