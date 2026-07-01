@@ -86,11 +86,44 @@ def _sup_and_entries(md: str, mode: str) -> tuple[set[str], set[str]]:
     return sup, (entry_num | entry_sup)
 
 
+def _page_text(page) -> str:
+    """A page's full footnote-bearing text = body markdown + header + footer
+    (Mistral puts note *definitions* in the extracted footer field)."""
+    if isinstance(page, dict):
+        return "\n".join([page.get("markdown", "") or "",
+                          page.get("header", "") or "",
+                          page.get("footer", "") or ""])
+    return str(page or "")
+
+
+def windowed_markers(pages, mode: str = "numeric",
+                     window: int = 1) -> "list[set[str] | None]":
+    """Per-page footnote markers, paired within a ±``window``-page span.
+
+    The ref (``$^{1}$``, body) and its definition (``1.``, footer field) sit on
+    the SAME page, and footnote numbers reset per page — so pairing is LOCAL, not
+    document-wide (a global set would wrongly link page 2's "1" to page 500's
+    "1"). ±1 page tolerates a note spilling to the next page / a ref near a page
+    edge. Returns one marker set per page (``None`` when footnotes are off)."""
+    n = len(pages)
+    if mode not in ("numeric", "alphabetic"):
+        return [None] * n
+    per = [_sup_and_entries(_page_text(p), mode) for p in pages]
+    out: list[set[str] | None] = []
+    for i in range(n):
+        sup: set[str] = set()
+        ent: set[str] = set()
+        for j in range(max(0, i - window), min(n, i + window + 1)):
+            sup |= per[j][0]
+            ent |= per[j][1]
+        out.append({x for x in (sup & ent) if x.lower() not in _ORDINAL})
+    return out
+
+
 def document_markers(mds: "list[str]", mode: str = "numeric") -> set[str]:
     """Doc-wide footnote markers = (∪ superscript refs) ∩ (∪ line-start entries)
-    − ordinals, over ALL pages. A ref (``$^{1}$``) and its definition (``1.``)
-    routinely land on DIFFERENT pages, so the intersection MUST be document-wide
-    — a per-page intersection drops those, leaving refs as ``^1^`` exponents."""
+    − ordinals, over ALL pages. Kept for single-shot / non-paged callers;
+    Mistral pages use ``windowed_markers`` (local pairing) instead."""
     allsup: set[str] = set()
     allent: set[str] = set()
     for md in mds:
@@ -142,6 +175,15 @@ def postprocess_page(md: str, *, footnotes: str | None = "numeric") -> str:
     return md
 
 
+def _split_defs(text: str) -> tuple[str, str]:
+    """(footnote-definition lines ``[^N]: …``, remaining-furniture lines)."""
+    defs: list[str] = []
+    other: list[str] = []
+    for line in text.split("\n"):
+        (defs if re.match(r"^\s*\[\^[^\]]+\]:", line) else other).append(line)
+    return "\n".join(defs).strip(), "\n".join(other).strip()
+
+
 def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
                              headers: bool = True,
                              markers: "set[str] | None" = None) -> str:
@@ -149,24 +191,46 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
     shared by the sync engine (``_assemble_results``) and the batch import
     (``mistral_batch.page_to_result``) — both must produce identical output.
 
-    Footnote lift (LaTeX/Unicode superscript → GFM) + wrap the header/footer
-    Mistral extracted via ``extract_header``/``extract_footer`` in HTML tags.
-    Pass ``markers`` = ``document_markers(all_page_mds, footnotes)`` so footnotes
-    whose ref/definition straddle pages still convert.
+    * Footnote lift (LaTeX/Unicode superscript → GFM ``[^N]``) in the body.
+    * ``extract_header``/``extract_footer`` fields: Mistral lumps the footnote
+      *definitions* into the footer (they sit at the page bottom), so we run the
+      footnote lift there too and emit the resulting ``[^N]:`` definitions as
+      real footnotes (NOT buried inside ``<footer>``, which would break GFM);
+      only genuine furniture (running head, page number) is wrapped.
+
+    ``markers`` = this page's footnote-marker set, paired within a ±1-page
+    window (see ``windowed_markers``) — the ref and its definition are on the
+    same page, and footnote numbers reset per page, so pairing is local.
     """
     if footnotes in ("numeric", "alphabetic"):
         md = convert_footnotes(md, footnotes, markers=markers)
-    if headers and isinstance(page, dict):
-        hd = (page.get("header") or "").strip()
-        ft = (page.get("footer") or "").strip()
-        parts: list[str] = []
-        if hd:
-            parts.append(f'<header class="page-header">\n\n{hd}\n\n</header>')
-        parts.append(md)
-        if ft:
-            parts.append(f'<footer class="page-footer">\n\n{ft}\n\n</footer>')
-        md = "\n\n".join(parts)
-    return md
+    if not headers or not isinstance(page, dict):
+        return md
+
+    defs: list[str] = []
+    furn = {"header": "", "footer": ""}
+    for key in ("header", "footer"):
+        text = (page.get(key) or "").strip()
+        if not text:
+            continue
+        if footnotes in ("numeric", "alphabetic"):
+            text = convert_footnotes(text, footnotes, markers=markers)
+        d, rest = _split_defs(text)
+        if d:
+            defs.append(d)
+        furn[key] = rest
+
+    parts: list[str] = []
+    if furn["header"]:
+        parts.append(
+            f'<header class="page-header">\n\n{furn["header"]}\n\n</header>')
+    parts.append(md)
+    if defs:
+        parts.append("\n".join(defs))   # footnote definitions → real footnotes
+    if furn["footer"]:
+        parts.append(
+            f'<footer class="page-footer">\n\n{furn["footer"]}\n\n</footer>')
+    return "\n\n".join(parts)
 
 
 def mistral_settings() -> tuple[str, bool]:
@@ -182,14 +246,10 @@ def mistral_settings() -> tuple[str, bool]:
         return "numeric", True
 
 
-def batch_markers(pages) -> "set[str] | None":
-    """Document-wide footnote markers for a batch's page objects (honoring the
-    card's footnote toggle). ``None`` when footnotes are off. The batch import
-    loops pages one at a time, so it precomputes this once and passes it to
-    every ``page_to_result`` — refs/definitions straddle pages."""
+def batch_markers(pages) -> "list[set[str] | None]":
+    """Per-page windowed footnote markers for a batch's pages (honoring the
+    card's footnote toggle). The batch import loops pages one at a time, so it
+    precomputes this list once and passes ``markers[i]`` to each
+    ``page_to_result``."""
     fn, _ = mistral_settings()
-    if fn not in ("numeric", "alphabetic"):
-        return None
-    mds = [(p.get("markdown", "") if isinstance(p, dict) else str(p or ""))
-           for p in pages]
-    return document_markers(mds, fn)
+    return windowed_markers(pages, fn)

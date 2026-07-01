@@ -412,9 +412,10 @@ def _check_ocr(db_path: str) -> int:
             if status == "SUCCESS":
                 pages = mistral_batch.fetch_pages(api_key, jid)
                 from aglaia.workers.ocr.md_postprocess import batch_markers
-                _mk = batch_markers(pages)  # doc-wide (refs/defs straddle pages)
+                _mk = batch_markers(pages)  # per-page (±1-page window)
                 for i, rid in enumerate(run_ids):
                     page = pages[i] if i < len(pages) else {}
+                    _mk_i = _mk[i] if i < len(_mk) else None
                     row = conn.execute(
                         "SELECT i.width AS w, i.height AS h FROM ocr_runs r "
                         "JOIN nodes n ON n.id = r.node_id "
@@ -423,7 +424,7 @@ def _check_ocr(db_path: str) -> int:
                     ).fetchone()
                     w, h = (int(row["w"] or 0), int(row["h"] or 0)) if row else (0, 0)
                     ocr.finish(rid, mistral_batch.page_to_result(
-                        page, w, h, [], markers=_mk))
+                        page, w, h, [], markers=_mk_i))
                 repo.mark_imported(jid)
                 imported += 1
                 print(f"  job {jid}: imported {len(run_ids)} page(s)")

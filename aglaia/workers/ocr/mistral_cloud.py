@@ -333,13 +333,10 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         upload order; Mistral page *i* maps to ``dims[i]`` (which is the
         i-th selected scan — page 0,1,2 may be scans 12,45,67). Pages beyond
         ``n_sent`` were truncated and get flagged for OcrWorker."""
-        # Document-wide footnote markers (refs/definitions straddle pages).
-        from aglaia.workers.ocr.md_postprocess import document_markers
-        _markers = None
-        if self._footnotes in ("numeric", "alphabetic"):
-            _all_md = [(p.get("markdown", "") if isinstance(p, dict)
-                        else (p or "")) for p in pages]
-            _markers = document_markers(_all_md, self._footnotes)
+        # Per-page footnote markers, paired within a ±1-page window (ref +
+        # definition are on the same page; footnote numbers reset per page).
+        from aglaia.workers.ocr.md_postprocess import windowed_markers
+        _markers = windowed_markers(pages, self._footnotes)
 
         results: list[OcrResult] = []
         for i, (w, h) in enumerate(dims):
@@ -358,7 +355,9 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
                 page = pages[i] if i < len(pages) else ""
                 md = page.get("markdown", "") if isinstance(page, dict) \
                     else (page or "")
-                md = self._post_process(md, page, markers=_markers)
+                md = self._post_process(
+                    md, page,
+                    markers=(_markers[i] if i < len(_markers) else None))
                 line = {"text": md, "bbox": (0, 0, int(w), int(h)),
                         "confidence": 1.0}
                 base["lines"] = [line] if md else []
