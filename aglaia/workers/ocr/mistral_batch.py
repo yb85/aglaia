@@ -224,18 +224,16 @@ def list_jobs(api_key: str) -> list[dict]:
 
 # ── result shaping ───────────────────────────────────────────────────────
 def page_to_result(page: dict, page_w: int, page_h: int,
-                   languages: list[str], markers: "set | None" = None
+                   languages: list[str], mapping: "dict | None" = None
                    ) -> OcrResult:
     """Build the same OcrResult shape the sync path produces, from one
     Mistral page object — markdown for md_export plus the rich page
     (``meta.mistral_page``) so deferred batch results persist via
     ``ocr_repo.finish`` exactly like a synchronous run, structure intact.
 
-    ``markers`` = the document-wide footnote-marker set (see
-    ``md_postprocess.document_markers``) — footnote refs and their definitions
-    routinely land on different pages, so it must be computed over ALL the
-    batch's pages, not this one. Callers that loop pages should precompute it
-    once and pass it in."""
+    ``mapping`` = this page's ``{number: unique_anchor}`` footnote map (see
+    ``md_postprocess.assign_page_mappings``). Callers that loop pages precompute
+    the list once (``batch_mappings``) and pass ``mappings[i]`` here."""
     md = page.get("markdown", "") if isinstance(page, dict) else (page or "")
     # Same footnote + header/footer post-processing as the sync path, driven by
     # the Mistral card toggles (read from config, since there's no engine
@@ -244,7 +242,7 @@ def page_to_result(page: dict, page_w: int, page_h: int,
         mistral_settings, postprocess_mistral_page)
     _fn, _hdr = mistral_settings()
     md = postprocess_mistral_page(md, page, footnotes=_fn, headers=_hdr,
-                                  markers=markers)
+                                  mapping=mapping)
     base: OcrResult = {
         "engine": "mistral_cloud", "languages": list(languages),
         "page_w": int(page_w), "page_h": int(page_h),

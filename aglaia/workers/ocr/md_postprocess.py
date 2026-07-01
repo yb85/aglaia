@@ -133,37 +133,88 @@ def document_markers(mds: "list[str]", mode: str = "numeric") -> set[str]:
     return {x for x in (allsup & allent) if x.lower() not in _ORDINAL}
 
 
+def _ordered_footnote_numbers(page, mode: str,
+                              markers: "set[str]") -> "list[str]":
+    """Footnote numbers on this page (ref or definition) that ARE markers, in
+    order of first appearance — so anchors are assigned in reading order."""
+    text, _ = _norm_usup(_page_text(page), mode)
+    cls = _marker_class(mode)
+    pat = re.compile(rf"\$\^\{{({cls.pattern})\}}\$|^\s*({cls.pattern})\.",
+                     re.M)
+    seen: list[str] = []
+    s: set[str] = set()
+    for m in pat.finditer(text):
+        n = m.group(1) or m.group(2)
+        if n in markers and n not in s:
+            s.add(n)
+            seen.append(n)
+    return seen
+
+
+def assign_page_mappings(pages, mode: str = "numeric",
+                         window: int = 1) -> "list[dict[str, str] | None]":
+    """Per-page ``{original_number: unique_anchor}`` maps. Footnote numbers reset
+    per chapter, so the SAME number recurs; each occurrence gets a unique anchor
+    that keeps the original number (``1`` first, then ``1-2``, ``1-3``, …) so GFM
+    links every ref to ITS own note instead of collapsing all ``[^1]`` onto the
+    first. Pages are processed in order (stateful occurrence counter)."""
+    n = len(pages)
+    if mode not in ("numeric", "alphabetic"):
+        return [None] * n
+    marker_sets = windowed_markers(pages, mode, window)
+    seen: dict[str, int] = {}
+    out: list[dict[str, str] | None] = []
+    for page, markers in zip(pages, marker_sets):
+        mapping: dict[str, str] = {}
+        for num in _ordered_footnote_numbers(page, mode, markers or set()):
+            k = seen.get(num, 0) + 1
+            seen[num] = k
+            mapping[num] = num if k == 1 else f"{num}-{k}"
+        out.append(mapping)
+    return out
+
+
 def convert_footnotes(md: str, mode: str = "numeric", *,
+                      mapping: "dict[str, str] | None" = None,
                       markers: "set[str] | None" = None) -> str:
     """Superscript refs (LaTeX ``$^{N}$`` **and** Unicode ``¹⁷⁰``) + line-start
-    entries → GFM footnotes. ``markers`` = the confirmed footnote markers; pass
-    a **document-wide** set (see ``document_markers``) so refs/definitions that
-    straddle pages still convert. When ``None``, falls back to a per-page
-    intersection (fine for single-page use)."""
+    entries → GFM footnotes.
+
+    ``mapping`` maps each footnote's original number → its **unique anchor**
+    (e.g. ``{"1": "1", ...}`` first time, ``{"1": "1-2"}`` on the next chapter's
+    reset) so repeated numbers don't collide in GFM while the anchor still shows
+    the original number. ``markers`` (a set) is the back-compat shorthand for an
+    identity mapping. ``None`` → per-page intersection (single-page use)."""
     cls = _marker_class(mode)
     md, _ = _norm_usup(md, mode)   # fold Unicode superscripts into $^{…}$ form
-    if markers is None:
-        sup, entries = _sup_and_entries(md, mode)
-        markers = {x for x in (sup & entries) if x.lower() not in _ORDINAL}
+    if mapping is None:
+        if markers is None:
+            sup, entries = _sup_and_entries(md, mode)
+            markers = {x for x in (sup & entries) if x.lower() not in _ORDINAL}
+        mapping = {x: x for x in markers}
 
+    # Pass 1: line-start ENTRIES ("N. …" or "$^{N}$ …") → "[^anchor]: …".
+    # Done before inline refs so a definition led by its own superscript marker
+    # is treated as a definition, not a reference.
+    out: list[str] = []
+    entry_re = re.compile(
+        rf"^\s*(?:\$\^\{{({cls.pattern})\}}\$|({cls.pattern})\.)\s+(.*)$")
+    for line in md.split("\n"):
+        m = entry_re.match(line)
+        if m:
+            num = m.group(1) or m.group(2)
+            if num in mapping:
+                out.append(f"[^{mapping[num]}]: {m.group(3)}")
+                continue
+        out.append(line)
+    md = "\n".join(out)
+
+    # Pass 2: inline REFS. A mapped number → its anchor; else a bare exponent.
     def repl_sup(m: re.Match[str]) -> str:
         c = m.group(1).strip()
-        return f"[^{c}]" if c in markers else f"^{c}^"
+        return f"[^{mapping[c]}]" if c in mapping else f"^{c}^"
 
-    md = _SUP_RE.sub(repl_sup, md)
-
-    out: list[str] = []
-    for line in md.split("\n"):
-        m = re.match(r"^\s*\[\^([^\]]+)\]\s*[.:]?\s+(.*)$", line)
-        if m and m.group(1) in markers:
-            out.append(f"[^{m.group(1)}]: {m.group(2)}")
-            continue
-        m = re.match(rf"^\s*({cls.pattern})\.\s+(.*)$", line)
-        if m and m.group(1) in markers:
-            out.append(f"[^{m.group(1)}]: {m.group(2)}")
-            continue
-        out.append(line)
-    return "\n".join(out)
+    return _SUP_RE.sub(repl_sup, md)
 
 
 def postprocess_page(md: str, *, footnotes: str | None = "numeric") -> str:
@@ -186,24 +237,25 @@ def _split_defs(text: str) -> tuple[str, str]:
 
 def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
                              headers: bool = True,
-                             markers: "set[str] | None" = None) -> str:
+                             mapping: "dict[str, str] | None" = None) -> str:
     """One Mistral page → post-processed markdown. THE single implementation
     shared by the sync engine (``_assemble_results``) and the batch import
     (``mistral_batch.page_to_result``) — both must produce identical output.
 
-    * Footnote lift (LaTeX/Unicode superscript → GFM ``[^N]``) in the body.
+    * Footnote lift (LaTeX/Unicode superscript → GFM) in the body.
     * ``extract_header``/``extract_footer`` fields: Mistral lumps the footnote
       *definitions* into the footer (they sit at the page bottom), so we run the
       footnote lift there too and emit the resulting ``[^N]:`` definitions as
       real footnotes (NOT buried inside ``<footer>``, which would break GFM);
       only genuine furniture (running head, page number) is wrapped.
 
-    ``markers`` = this page's footnote-marker set, paired within a ±1-page
-    window (see ``windowed_markers``) — the ref and its definition are on the
-    same page, and footnote numbers reset per page, so pairing is local.
+    ``mapping`` = this page's ``{original_number: unique_anchor}`` map (see
+    ``assign_page_mappings``) — the ref and its definition are on the same page,
+    numbers reset per chapter, so each occurrence gets a unique anchor that still
+    carries the original number.
     """
     if footnotes in ("numeric", "alphabetic"):
-        md = convert_footnotes(md, footnotes, markers=markers)
+        md = convert_footnotes(md, footnotes, mapping=mapping)
     if not headers or not isinstance(page, dict):
         return md
 
@@ -214,7 +266,7 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
         if not text:
             continue
         if footnotes in ("numeric", "alphabetic"):
-            text = convert_footnotes(text, footnotes, markers=markers)
+            text = convert_footnotes(text, footnotes, mapping=mapping)
         d, rest = _split_defs(text)
         if d:
             defs.append(d)
@@ -246,10 +298,10 @@ def mistral_settings() -> tuple[str, bool]:
         return "numeric", True
 
 
-def batch_markers(pages) -> "list[set[str] | None]":
-    """Per-page windowed footnote markers for a batch's pages (honoring the
-    card's footnote toggle). The batch import loops pages one at a time, so it
-    precomputes this list once and passes ``markers[i]`` to each
+def batch_mappings(pages) -> "list[dict[str, str] | None]":
+    """Per-page ``{number: unique_anchor}`` maps for a batch's pages (honoring
+    the card's footnote toggle). The batch import loops pages one at a time, so
+    it precomputes this list once and passes ``mappings[i]`` to each
     ``page_to_result``."""
     fn, _ = mistral_settings()
-    return windowed_markers(pages, fn)
+    return assign_page_mappings(pages, fn)

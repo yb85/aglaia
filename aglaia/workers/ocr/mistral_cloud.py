@@ -213,15 +213,15 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         elif h in ("off", "false", "0", "no"):
             self._headers = False
 
-    def _post_process(self, md: str, page, markers=None) -> str:
+    def _post_process(self, md: str, page, mapping=None) -> str:
         """Footnote lift + header/footer wrapping — shared with the batch import
         (``mistral_batch.page_to_result``) so both paths produce identical md.
-        ``markers`` = the document-wide footnote-marker set (refs/defs straddle
-        pages, so it must be computed across the whole doc, not per page)."""
+        ``mapping`` = this page's ``{number: unique_anchor}`` map (see
+        ``assign_page_mappings``)."""
         from aglaia.workers.ocr.md_postprocess import postprocess_mistral_page
         return postprocess_mistral_page(
             md, page, footnotes=self._footnotes, headers=self._headers,
-            markers=markers)
+            mapping=mapping)
 
     # Single-image path delegates to the batch path so callers that only
     # have one page still work.
@@ -333,10 +333,11 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         upload order; Mistral page *i* maps to ``dims[i]`` (which is the
         i-th selected scan — page 0,1,2 may be scans 12,45,67). Pages beyond
         ``n_sent`` were truncated and get flagged for OcrWorker."""
-        # Per-page footnote markers, paired within a ±1-page window (ref +
-        # definition are on the same page; footnote numbers reset per page).
-        from aglaia.workers.ocr.md_postprocess import windowed_markers
-        _markers = windowed_markers(pages, self._footnotes)
+        # Per-page {number: unique_anchor} maps: refs+defs paired within a
+        # ±1-page window, numbers reset per chapter so each occurrence gets a
+        # unique anchor that keeps the original number.
+        from aglaia.workers.ocr.md_postprocess import assign_page_mappings
+        _maps = assign_page_mappings(pages, self._footnotes)
 
         results: list[OcrResult] = []
         for i, (w, h) in enumerate(dims):
@@ -357,7 +358,7 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
                     else (page or "")
                 md = self._post_process(
                     md, page,
-                    markers=(_markers[i] if i < len(_markers) else None))
+                    mapping=(_maps[i] if i < len(_maps) else None))
                 line = {"text": md, "bbox": (0, 0, int(w), int(h)),
                         "confidence": 1.0}
                 base["lines"] = [line] if md else []
