@@ -44,9 +44,19 @@ AGLAIA_OCR_DPI=<dpi> AGLAIA_OCR_COMPLEMENT=<none|surya|glm> \
 | glm | 15.3 | 14.8 | 21.0 | 46.1 | input-size sensitive |
 | paddle_vl | 22.1 | 22.8 | 21.2 | 25.4 | |
 | surya | 43.0 | 39.0 | 40.7 | 46.2 | slowest; output-token-bound (DPI-flat) |
-| unlimited | — | — | — | — | **broken** (HTTP 500, image-token mismatch) |
+| **unlimited** | — | — | — | **10.2** | **DPI-independent** (whole-doc, raw blobs — like Mistral); **per-page** (window=1); ~2.6 s load |
 
-VLM model load ≈ 2–3 s (surya/glm); 0 for Apple, Paddle, Mistral.
+VLM model load ≈ 2–3 s (surya/glm/unlimited); 0 for Apple, Paddle, Mistral.
+
+> **unlimited is a whole-document engine** (`recognize_rows`), so — like Mistral
+> — it OCRs the raw stored page blobs and is **DPI-independent**: `AGLAIA_OCR_DPI`
+> never resamples its input, and 100/150/200/300 produce byte-identical output.
+> It runs **per-page by default** (`window=1`). Its fused **multipage R-SWA** path
+> (`window>1`, `AGLAIA_UNLIMITED_WINDOW`) is numerically **unstable in this
+> mlx-vlm build** — fusing 2+ pages triggers erratic repetition loops (a page
+> balloons to ~30k words; higher `repetition_penalty` makes it *worse*), so it's
+> opt-in until fixed. At `window=1`: **10.2 s/page, 0.899 vs Mistral** — fast and
+> accurate, in the surya/glm band but ~4× faster than surya.
 
 ## Accuracy — word-overlap vs mistral@300
 
@@ -59,6 +69,10 @@ VLM model load ≈ 2–3 s (surya/glm); 0 for Apple, Paddle, Mistral.
 | apple_docs + surya | 0.887 | 0.875 | 0.873 | 0.871 |
 | apple_docs + glm | 0.752 | 0.863 | 0.858 | 0.868 |
 | paddle_vl | 0.766 | 0.671 | 0.675 | 0.714 |
+| **unlimited** (native, window=1) | 0.899 | 0.899 | 0.899 | 0.899 |
+
+*unlimited is DPI-independent (one native value repeated); 0.899 puts it in the
+top band with surya/glm — clean per-page transcription, no Cyrillic hallucination.*
 
 *Even Apple agrees only ~0.87 with Mistral (same content, different
 formatting/footnote handling) — so ~0.87 is the "as good as Apple" band, ~0.90+
@@ -114,8 +128,11 @@ on speed. Trade-off: cloud/paid vs the local engines' free/offline.
   per document.
 - **paddle_vl** — excellent French, **unusable Greek** (garbled + repetition
   loops). Wrong tool for Greek-heavy material. See issue.
-- **unlimited** — **broken** (chat template emits 2 image tokens for 1 image →
-  HTTP 500 on every page). See issue.
+- **unlimited** — now working via our in-process MLX port (../unlimited-ocr-mlx).
+  Whole-doc, **DPI-independent**, **per-page** (window=1): **10.2 s/page, 0.899
+  vs Mistral** — top-band accuracy at ~4× surya's speed, no Cyrillic
+  hallucination. The fused multipage R-SWA path is unstable (repetition loops)
+  and opt-in. A strong local option once the q4 model is published.
 
 ## Caveats
 

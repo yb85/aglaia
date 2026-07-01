@@ -74,10 +74,39 @@ class UnlimitedOcrEngine(OcrEngine):
     # Grounded per-span bboxes → eligible to OCR a cropped block directly.
     direct_block = True
 
+    # Output token budget PER PAGE for the fused multipage path. R-SWA
+    # (RingSlidingKVCache) keeps the full image prefill but ring-buffers decode
+    # KV → output length is UNBOUNDED, so we must NOT cap at a fixed 32768 (that
+    # truncates docs past ~13 dense pages). Scale the cap with page count; dense
+    # grounded pages run ~2000-2600 output tokens. A generous per-page budget
+    # avoids clipping the last pages while still bounding a runaway.
+    PER_PAGE_TOKEN_BUDGET = 3000
+
+    # Pages per fused R-SWA window. DEFAULT 1 (per-page) after measuring the
+    # multipage path: fusing 2+ pages triggers ERRATIC repetition loops (a page
+    # blows up to ~30k words, penalty-resistant — raising repetition_penalty
+    # made it WORSE), whereas single-page base-mode decode is clean, fast
+    # (~10 s/page vs ~39 s/page fused), and accurate (0.90 word-overlap vs
+    # Mistral on the athanase corpus). The fused multipage/R-SWA path is real
+    # but numerically unstable in this mlx-vlm build, so it's OPT-IN: set
+    # window>1 via the ``window`` spec param or AGLAIA_UNLIMITED_WINDOW. Per-page
+    # also sidesteps the 32768 position-window cap on huge docs (delbrel's 333).
+    WINDOW_SIZE = 1
+
     def __init__(self) -> None:
         self._loaded: tuple[Any, Any] | None = None
-        self._max_tokens = 32768
+        self._max_tokens = 32768  # floor / single-page (gundam) cap
+        self._window_size = self._env_window(self.WINDOW_SIZE)
         self.available = self._backend_ready()
+
+    @staticmethod
+    def _env_window(default: int) -> int:
+        import os
+        try:
+            v = int(os.environ.get("AGLAIA_UNLIMITED_WINDOW", "") or default)
+            return v if v > 0 else default
+        except ValueError:
+            return default
 
     @staticmethod
     def _backend_ready() -> bool:
@@ -98,6 +127,14 @@ class UnlimitedOcrEngine(OcrEngine):
         if mt:
             try:
                 self._max_tokens = int(mt)
+            except ValueError:
+                pass
+        w = params.get("window")
+        if w:
+            try:
+                iw = int(w)
+                if iw > 0:
+                    self._window_size = iw
             except ValueError:
                 pass
 
@@ -125,53 +162,67 @@ class UnlimitedOcrEngine(OcrEngine):
         assert self._loaded is not None
         return self._loaded
 
-    # ── whole-document (fused multipage) entry point ─────────────────────
+    # ── whole-document (windowed fused multipage) entry point ────────────
     def recognize_rows(self, rows, languages: list[str]) -> list[OcrResult]:
-        """Fused multipage OCR: one R-SWA generation over ALL pages, split back
-        into one ``OcrResult`` per row by per-page coordinate resets."""
+        """Windowed multipage OCR: process pages in fused R-SWA windows of
+        ``window_size`` (default 4), split each window back into per-page
+        ``OcrResult``s by coordinate resets, concatenate in order.
+
+        One fused call over ALL pages is impractical past a handful (per-token
+        cost grows with the image prefill) and impossible past the 32768
+        position window — so we window. ``doc_markdown`` (the full document) is
+        stitched from every window and attached to page 0.
+        """
         rows = list(rows)
         n = len(rows)
         if n == 0:
             return []
         model, processor = self._ensure()
-        dims = [(int(r.get("width") or 0), int(r.get("height") or 0))
-                for r in rows]
+        w = max(1, self._window_size)
 
+        results: list[OcrResult] = []
+        for start in range(0, n, w):
+            chunk = rows[start:start + w]
+            results.extend(self._recognize_window(model, processor, chunk,
+                                                   languages))
+        doc_md = "\n\n".join(r["meta"]["markdown"] for r in results
+                             if r["meta"].get("markdown")).strip()
+        if results:
+            results[0]["meta"]["doc_markdown"] = doc_md
+        return results
+
+    def _recognize_window(self, model: Any, processor: Any, chunk,
+                          languages: list[str]) -> list[OcrResult]:
+        """One fused R-SWA generation over ``chunk`` pages → per-page results."""
+        n = len(chunk)
+        dims = [(int(r.get("width") or 0), int(r.get("height") or 0))
+                for r in chunk]
         with tempfile.TemporaryDirectory(prefix="aglaia-unlimited-") as td:
             paths: list[str] = []
-            for i, r in enumerate(rows):
+            for i, r in enumerate(chunk):
                 p = Path(td) / f"page{i:04d}.img"
                 p.write_bytes(r["blob"])
                 paths.append(str(p))
+            # Scale the cap with the window's page count (R-SWA → unbounded
+            # output); the 32768 floor already covers a 4-page window.
+            max_tokens = max(self._max_tokens, n * self.PER_PAGE_TOKEN_BUDGET)
             raw = ub.generate_text(
                 model, processor, paths,
-                multi_page=True, max_tokens=self._max_tokens,
+                multi_page=True, max_tokens=max_tokens,
             )
-
         spans = ub.parse_spans(raw)
         pages = ub.segment_pages(spans, n)
-        page_md: list[str] = []
-        parsed: list[ub.PageParse] = []
-        for grp, (w, h) in zip(pages, dims):
-            pp = ub.build_page(grp, w, h)
-            parsed.append(pp)
-            page_md.append(pp.markdown)
-        doc_md = "\n\n".join(m for m in page_md if m).strip()
-
-        results: list[OcrResult] = []
-        for i, ((w, h), pp) in enumerate(zip(dims, parsed)):
-            meta: dict[str, Any] = {
-                "source": "unlimited", "markdown": pp.markdown,
-                "spans": pp.spans,
-            }
-            if i == 0:
-                meta["doc_markdown"] = doc_md  # whole-doc R-SWA output, once
-            results.append({
+        out: list[OcrResult] = []
+        for (ww, hh), grp in zip(dims, pages):
+            pp = ub.build_page(grp, ww, hh)
+            out.append({
                 "engine": self.name, "languages": list(languages),
-                "page_w": int(w), "page_h": int(h),
-                "lines": pp.lines, "meta": meta,
+                "page_w": int(ww), "page_h": int(hh),
+                "lines": pp.lines,
+                "meta": {"source": "unlimited", "markdown": pp.markdown,
+                         "spans": pp.spans},
             })
-        return results
+        return out
 
     # ── single-page entry point (abstract-method contract) ───────────────
     def recognize(self, image_rgb, languages: list[str],
