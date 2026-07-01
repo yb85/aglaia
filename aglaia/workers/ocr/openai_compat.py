@@ -148,6 +148,14 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
     vllm_target_key: str = ""  # download key for vLLM weights (CUDA)
     prompt: str = "Convert this document image to Markdown."
     extra_body: dict = {}  # merged into the chat request (model knobs)
+    # Anti-repetition: greedy decoding (temp 0) with no penalty lets the model
+    # fall into a token loop on low-context crops (e.g. an apple_docs complement
+    # block), emitting the same line until it exhausts max_tokens — the #56
+    # degeneration. A moderate penalty over a short window breaks the loop while
+    # leaving OCR's legitimate short repeats (spaces, digits, "Ibid.") intact.
+    # 0 disables. The MLX server honours both fields (make_logits_processors).
+    repetition_penalty: float = 1.15
+    repetition_context_size: int = 64
     coord_scale: float = 1000.0  # det-coordinate normalisation
     fallback_full_page: bool = True
     output_html: bool = False  # model emits HTML (e.g. Surya) → convert to Markdown
@@ -319,8 +327,11 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
             ],
             "temperature": 0.0,
             "max_tokens": self._max_tokens,
-            **self.extra_body,
         }
+        if self.repetition_penalty and self.repetition_penalty != 1.0:
+            body["repetition_penalty"] = float(self.repetition_penalty)
+            body["repetition_context_size"] = int(self.repetition_context_size)
+        body.update(self.extra_body)  # per-engine knobs win
         req = urllib.request.Request(
             base_url.rstrip("/") + "/v1/chat/completions",
             data=json.dumps(body).encode("utf-8"),
