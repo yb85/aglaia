@@ -216,20 +216,18 @@ class OcrTab(QWidget):
         )
 
         outer.addSpacing(4)
-        self._lang_label = QLabel(self.tr("Languages (Apple only)"))
+        self._lang_label = QLabel(self.tr("Languages"))
         self._lang_label.setObjectName("FieldLabel")
         outer.addWidget(self._lang_label)
+        # Whole-ISO catalogue: the chosen languages drive Apple's recognition,
+        # the served VLMs' prompt hint, AND the complement's unexpected-script
+        # garbage gate — so it's no longer Apple-only, and not restricted to
+        # Vision's supported set. LanguageTagInput's completer is comprehensive
+        # and it accepts any valid BCP-47 tag.
         self.lang_input = LanguageTagInput()
-        # The picker only affects Apple engines — restrict it to Vision's
-        # ACTUAL supported set (queried at runtime; no Greek/Latin).
-        try:
-            from aglaia.workers.ocr.apple_vision import supported_languages
-            self.lang_input.set_allowed_languages(supported_languages())
-        except Exception:
-            pass
         outer.addWidget(self.lang_input)
-        # Shown instead of the picker for engines that auto-detect language
-        # (Cloud OCR / Surya / Paddle) — they ignore the language list.
+        # Shown instead of the picker only for cloud engines that auto-detect
+        # and ignore the language list (Mistral).
         self._lang_auto = QLabel(self.tr("Auto — detected by the engine"))
         self._lang_auto.setStyleSheet(
             f"color: {COLOR_FONT_DIM}; font-style: italic; padding: 2px 0;")
@@ -1173,16 +1171,18 @@ class OcrTab(QWidget):
     _APPLE_ENGINES = ("apple_vision", "apple_docs")
 
     def _refresh_language_state(self) -> None:
-        """Language selection only affects the Apple engines. For the
-        auto-detecting engines (Cloud OCR / Surya / Paddle) hide the picker
-        and show 'Auto' instead of the language tags."""
+        """The language picker now feeds Apple (recognition), the served VLMs
+        (prompt hint + the complement's unexpected-script gate), so it's shown
+        for every engine EXCEPT cloud engines that auto-detect and ignore it
+        (Mistral) — those show 'Auto' instead."""
         li = getattr(self, "lang_input", None)
         if li is None:
             return
-        is_apple = self.engine_group.current_key() in self._APPLE_ENGINES
-        li.setVisible(is_apple)
+        eng = self._current_engine()
+        uses_lang = not (eng is not None and getattr(eng, "cloud", False))
+        li.setVisible(uses_lang)
         if getattr(self, "_lang_auto", None) is not None:
-            self._lang_auto.setVisible(not is_apple)
+            self._lang_auto.setVisible(not uses_lang)
 
     def _refresh_cost_estimate(self) -> None:
         """Show the red cloud-cost estimate when the Cloud engine is active.

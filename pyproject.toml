@@ -12,6 +12,7 @@ dependencies = [
     "html2text>=2024.2.26",
     "jax>=0.9.0",
     "jaxlib>=0.9.0",
+    "langcodes[data]>=3.5.1",
     "ml-dtypes>=0.5.4",
     "numpy>=1.26.0, <2.1.0",
     "opencv-python-headless>=4.8.0",

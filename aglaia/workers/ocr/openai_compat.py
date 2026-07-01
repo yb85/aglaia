@@ -280,12 +280,13 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
         target_dpi = _target_dpi()
         if src_dpis is None:
             src_dpis = [0.0] * len(images_rgb)
+        prompt = self._prompt_with_langs(languages)
         out: list[OcrResult] = []
         for img, dpi in zip(images_rgb, src_dpis):
             scaled = _downsample(img, dpi or 0, target_dpi)
             h, w = scaled.shape[:2]
             try:
-                raw = self._chat_completion(base_url, model_name, scaled)
+                raw = self._chat_completion(base_url, model_name, scaled, prompt)
                 markdown, lines = self.parse_output(raw, w, h)
             except Exception as e:  # noqa: BLE001 — surface, don't crash the run
                 _log(f"[{self.name}] page {w}x{h} failed: {e}", level="error")
@@ -307,9 +308,22 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
             )
         return out
 
+    def _prompt_with_langs(self, languages: List[str] | None) -> str:
+        """Append the chosen languages to the prompt so the VLM knows which
+        scripts to expect — helps it transcribe the right script (and reduces
+        the chance of a confusable-script guess). No-op when languages are
+        empty/auto (the VLMs are multilingual and cope without a hint)."""
+        from aglaia.workers.ocr.text_scripts import language_hint
+        hint = language_hint(languages)
+        if not hint:
+            return self.prompt
+        return (f"{self.prompt} The document is written in {hint}; "
+                f"transcribe every script faithfully in its own alphabet.")
+
     # ── HTTP ─────────────────────────────────────────────────────────
     def _chat_completion(
-        self, base_url: str, model_name: str, image_rgb: np.ndarray
+        self, base_url: str, model_name: str, image_rgb: np.ndarray,
+        prompt: str | None = None,
     ) -> str:
         body = {
             "model": model_name,
@@ -317,7 +331,7 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self.prompt},
+                        {"type": "text", "text": prompt or self.prompt},
                         {
                             "type": "image_url",
                             "image_url": {"url": to_data_url(image_rgb)},
