@@ -192,41 +192,11 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         # checked at run time so the card stays selectable (and the user
         # can be pointed at the key field) even before a key is set.
         self.available = _mistralai_available()
-        # Post-processing (defaults ON, per the Mistral card): convert LaTeX/
-        # Unicode superscript footnotes → GFM ([^N]); extract header/footer via
-        # the OCR API's extract_header/extract_footer params → wrapped in HTML.
-        # Read the GUI toggles (config DB); ``configure`` (CLI spec) can override.
-        self._footnotes = "numeric"   # "numeric" | "alphabetic" | "off"
-        self._headers = True
-        try:
-            from aglaia.app_data import db as _cfg
-            with _cfg.session() as _c:
-                self._footnotes = str(_cfg.get(
-                    _c, _cfg.KEY_MISTRAL_FOOTNOTES, "numeric"))
-                self._headers = bool(_cfg.get(
-                    _c, _cfg.KEY_MISTRAL_HEADERS, True))
-        except Exception:
-            pass
-
-    def configure(self, params: dict[str, str]) -> None:
-        fn = (params.get("footnotes") or "").strip().lower()
-        if fn in ("numeric", "alphabetic", "off", "none", ""):
-            self._footnotes = "off" if fn in ("none",) else (fn or self._footnotes)
-        h = (params.get("headers") or "").strip().lower()
-        if h in ("on", "true", "1", "yes"):
-            self._headers = True
-        elif h in ("off", "false", "0", "no"):
-            self._headers = False
-
-    def _post_process(self, md: str, page, mapping=None) -> str:
-        """Footnote lift + header/footer wrapping — shared with the batch import
-        (``mistral_batch.page_to_result``) so both paths produce identical md.
-        ``mapping`` = this page's ``{number: unique_anchor}`` map (see
-        ``assign_page_mappings``)."""
-        from aglaia.workers.ocr.md_postprocess import postprocess_mistral_page
-        return postprocess_mistral_page(
-            md, page, footnotes=self._footnotes, headers=self._headers,
-            mapping=mapping)
+        # Footnote / header-footer post-processing is NOT done here — it now
+        # runs at markdown-export time (``md_export`` + ``md_postprocess``), so
+        # re-exporting picks up the current toggles without re-OCR. This engine
+        # only stores the RAW Mistral markdown + the rich page (header/footer
+        # included, since we always request extraction below).
 
     # Single-image path delegates to the batch path so callers that only
     # have one page still work.
@@ -338,12 +308,6 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         upload order; Mistral page *i* maps to ``dims[i]`` (which is the
         i-th selected scan — page 0,1,2 may be scans 12,45,67). Pages beyond
         ``n_sent`` were truncated and get flagged for OcrWorker."""
-        # Per-page {number: unique_anchor} maps: refs+defs paired within a
-        # ±1-page window, numbers reset per chapter so each occurrence gets a
-        # unique anchor that keeps the original number.
-        from aglaia.workers.ocr.md_postprocess import assign_page_mappings
-        _maps = assign_page_mappings(pages, self._footnotes)
-
         results: list[OcrResult] = []
         for i, (w, h) in enumerate(dims):
             base: OcrResult = {
@@ -359,17 +323,17 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
                 }
             else:
                 page = pages[i] if i < len(pages) else ""
+                # Store the RAW markdown — post-processing (footnotes / header-
+                # footer) happens at export time from meta.mistral_page.
                 md = page.get("markdown", "") if isinstance(page, dict) \
                     else (page or "")
-                md = self._post_process(
-                    md, page,
-                    mapping=(_maps[i] if i < len(_maps) else None))
                 line = {"text": md, "bbox": (0, 0, int(w), int(h)),
                         "confidence": 1.0}
                 base["lines"] = [line] if md else []
                 meta = {"source": "mistral", "model": MODEL, "markdown": md}
                 if isinstance(page, dict):
-                    # Persist the rich OCR-4 page (blocks/bboxes/confidence).
+                    # Persist the rich OCR-4 page (blocks/bboxes/confidence +
+                    # header/footer). Export re-derives the final markdown here.
                     meta["mistral_page"] = page
                 base["meta"] = meta
             results.append(base)
@@ -432,12 +396,12 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
             model=MODEL,
             document={"type": "document_url", "document_url": signed.url},
             include_image_base64=False,
+            # Always split running heads / page numbers into the page's
+            # header/footer fields (Mistral OCR API). Free extra data; the
+            # export toggle decides whether to wrap or inline them.
+            extract_header=True,
+            extract_footer=True,
         )
-        if self._headers:
-            # Split running heads / page numbers into the page's header/footer
-            # fields instead of the main markdown (Mistral OCR API).
-            kw["extract_header"] = True
-            kw["extract_footer"] = True
         try:
             resp = client.ocr.process(**kw)
         except TypeError:

@@ -833,14 +833,12 @@ def _render_page_blocks(items: list[dict], ctx: dict, origin: dict,
 
 # ── Per-row classification ─────────────────────────────────────────
 
-def _classify_row(result_json: str | None) -> dict | None:
-    """Inspect one stored OCR run and return either an assembled-MD page
-    (Paddle / Surya) or a parsed line page (Apple Vision &c)."""
-    if not result_json:
-        return None
-    try:
-        data = json.loads(result_json)
-    except Exception:
+def _classify_data(data: dict | None) -> dict | None:
+    """Inspect one parsed OCR-run result and return either an assembled-MD page
+    (Paddle / Surya) or a parsed line page (Apple Vision &c). Mistral rows are
+    handled upstream in ``write_markdown`` (post-processed from
+    ``meta.mistral_page``) and never reach here."""
+    if not data:
         return None
     meta = data.get("meta") or {}
     md = meta.get("markdown")
@@ -977,7 +975,7 @@ def _merge_paragraphs(blocks: list[dict]) -> list[dict]:
 def _inline_marker(b: dict) -> str:
     bp = b.get("branch_path") or ""
     if bp:
-        return f"<!-- scan #{b['scan_id']} · {bp} -->"
+        return f"<!-- branch {b['scan_id']}.{bp} -->"
     return f"<!-- scan #{b['scan_id']} -->"
 
 
@@ -1054,15 +1052,47 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
     if not rows:
         return False
 
-    # Parse + classify every row into an ordered list of pages.
-    pages: list[dict] = []
+    # Mistral post-processing (footnotes + header/footer) runs HERE, at export
+    # time, from the stored raw ``meta.mistral_page`` — so re-exporting reflects
+    # the current Markdown-card toggles + code without re-running (paid) OCR.
+    from aglaia.workers.ocr.md_postprocess import (
+        assign_page_mappings, mistral_settings, postprocess_mistral_page)
+    fn_mode, wrap_hf = mistral_settings()
+
+    # Parse each row once; collect Mistral pages in row order so footnote anchors
+    # are assigned document-wide (numbers reset per chapter → each occurrence
+    # gets a unique anchor that keeps the original number).
+    parsed: list[dict | None] = []
+    mpages: list[dict | None] = []
     for r in rows:
-        cls = _classify_row(r["result_json"])
+        raw = r["result_json"]
+        try:
+            data = json.loads(raw) if raw else None
+        except Exception:
+            data = None
+        parsed.append(data)
+        mp = (data.get("meta") or {}).get("mistral_page") \
+            if isinstance(data, dict) else None
+        mpages.append(mp if isinstance(mp, dict) else None)
+    present = [mp for mp in mpages if mp is not None]
+    _maps = assign_page_mappings(present, fn_mode) if present else []
+    _mi = iter(_maps)
+    row_maps = [next(_mi) if mp is not None else None for mp in mpages]
+
+    # Classify every row into an ordered list of pages.
+    pages: list[dict] = []
+    for r, data, mp, mmap in zip(rows, parsed, mpages, row_maps):
+        if mp is not None:
+            raw_md = mp.get("markdown", "") or ""
+            text = postprocess_mistral_page(
+                raw_md, mp, footnotes=fn_mode, headers=wrap_hf, mapping=mmap)
+            cls: dict | None = {"kind": "assembled", "text": text.rstrip()}
+        else:
+            cls = _classify_data(data)
         if cls is None:
             continue
-        origin = {"scan_id": r["scan_id"], "scan_idx": r["scan_idx"],
-                  "branch_path": r["branch_path"] or ""}
-        cls["origin"] = origin
+        cls["origin"] = {"scan_id": r["scan_id"], "scan_idx": r["scan_idx"],
+                         "branch_path": r["branch_path"] or ""}
         pages.append(cls)
     if not pages:
         return False
@@ -1091,12 +1121,14 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
     in_list = False
     for b in blocks:
         if b["scan_id"] != cur_scan:
-            out_lines.append(f"<!-- scan #{b['scan_id']} · page {b['scan_idx']} -->")
+            out_lines.append(f"<!-- scan #{b['scan_id']} -->")
             cur_scan = b["scan_id"]
             cur_branch = None
         bp = b.get("branch_path") or ""
         if bp and bp != cur_branch:
-            out_lines.append(f"<!-- branch {bp} -->")
+            # Branch comment carries the whole scan.branch coordinate (a scan
+            # is not a page) so the branch line is self-contained.
+            out_lines.append(f"<!-- branch {b['scan_id']}.{bp} -->")
             cur_branch = bp
 
         is_list = b["type"] == "list"

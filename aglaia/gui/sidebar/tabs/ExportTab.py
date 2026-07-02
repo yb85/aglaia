@@ -128,11 +128,59 @@ class ExportTab(QWidget):
         )
 
         # ── Markdown card — disabled until OCR data lands ──────────
+        # Post-processing knobs for Mistral OCR output (applied at export
+        # time, from the stored raw page — no re-OCR needed to change them).
+        md_extras = QWidget()
+        md_extras_l = QVBoxLayout(md_extras)
+        md_extras_l.setContentsMargins(0, 4, 0, 0)
+        md_extras_l.setSpacing(4)
+
+        from aglaia.app_data import db as _cfg
+        try:
+            with _cfg.session() as _c:
+                _fn = str(_cfg.get(_c, _cfg.KEY_MISTRAL_FOOTNOTES, "numeric"))
+                _hdr = bool(_cfg.get(_c, _cfg.KEY_MISTRAL_HEADERS, True))
+        except Exception:
+            _fn, _hdr = "numeric", True
+
+        _fn_row = QHBoxLayout()
+        _fn_row.setSpacing(6)
+        self.chk_footnotes = ToggleSwitch(self.tr("Convert footnotes"))
+        self.chk_footnotes.setChecked(_fn in ("numeric", "alphabetic"))
+        self.chk_footnotes.setToolTip(self.tr(
+            "Footnote refs (LaTeX $^{N}$, Unicode ⁹⁸, or (N)) → GFM [^N]; "
+            "line-start entries → [^N]:. Footnote definitions in the extracted "
+            "footer are lifted out as real footnotes."))
+        self.chk_footnotes.toggled.connect(self._on_footnotes_toggled)
+        _fn_row.addWidget(self.chk_footnotes)
+        self.combo_footnote_style = QComboBox()
+        self.combo_footnote_style.addItems(["numeric", "alphabetic"])
+        self.combo_footnote_style.setCurrentText(
+            _fn if _fn in ("numeric", "alphabetic") else "numeric")
+        self.combo_footnote_style.setEnabled(self.chk_footnotes.isChecked())
+        self.combo_footnote_style.setStyleSheet(
+            f"color: {COLOR_FONT_DIM}; font-size: 10px;")
+        self.combo_footnote_style.currentTextChanged.connect(
+            self._on_footnote_style_changed)
+        _fn_row.addWidget(self.combo_footnote_style)
+        _fn_row.addStretch(1)
+        md_extras_l.addLayout(_fn_row)
+
+        self.chk_wrap_hf = ToggleSwitch(self.tr("Wrap headers / footers"))
+        self.chk_wrap_hf.setChecked(_hdr)
+        self.chk_wrap_hf.setToolTip(self.tr(
+            "Wrap the page's running head / page number in <header>/<footer> "
+            "tags. Off → keep them as plain inline text. Either way the text "
+            "is preserved."))
+        self.chk_wrap_hf.toggled.connect(self._on_wrap_hf_toggled)
+        md_extras_l.addWidget(self.chk_wrap_hf)
+
         self.format_group.add_card(
             "markdown", self.tr("Markdown"),
             self.tr("Plain text extracted from OCR. Needs an OCR run."),
             icon_name="markdown",
             enabled=False,
+            extras=md_extras,
         )
 
         # ── Slim project card ──────────────────────────────────────
@@ -189,6 +237,32 @@ class ExportTab(QWidget):
         lbl = QLabel(text)
         lbl.setObjectName("FieldLabel")
         return lbl
+
+    # ── Markdown post-processing toggles (persisted to config) ──────
+    @staticmethod
+    def _set_cfg(key: str, value) -> None:
+        from aglaia.app_data import db as cfg
+        try:
+            with cfg.session() as conn:
+                cfg.set(conn, key, value)
+                conn.commit()
+        except Exception:
+            pass
+
+    def _on_footnotes_toggled(self, on: bool) -> None:
+        from aglaia.app_data import db as cfg
+        self.combo_footnote_style.setEnabled(on)
+        self._set_cfg(cfg.KEY_MISTRAL_FOOTNOTES,
+                      self.combo_footnote_style.currentText() if on else "off")
+
+    def _on_footnote_style_changed(self, style: str) -> None:
+        from aglaia.app_data import db as cfg
+        if self.chk_footnotes.isChecked():
+            self._set_cfg(cfg.KEY_MISTRAL_FOOTNOTES, style)
+
+    def _on_wrap_hf_toggled(self, on: bool) -> None:
+        from aglaia.app_data import db as cfg
+        self._set_cfg(cfg.KEY_MISTRAL_HEADERS, bool(on))
 
     # ── MainWindow-facing API ──────────────────────────────────────
 

@@ -262,16 +262,20 @@ def _split_defs(text: str) -> tuple[str, str]:
 def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
                              headers: bool = True,
                              mapping: "dict[str, str] | None" = None) -> str:
-    """One Mistral page → post-processed markdown. THE single implementation
-    shared by the sync engine (``_assemble_results``) and the batch import
-    (``mistral_batch.page_to_result``) — both must produce identical output.
+    """One raw Mistral page → post-processed markdown. Applied at **markdown
+    export** time (``md_export.write_markdown``), NOT at OCR import — so
+    re-exporting a project always reflects the current toggles and code without
+    re-running (paid) OCR. Reads ``page`` = the stored ``meta.mistral_page``.
 
-    * Footnote lift (LaTeX/Unicode superscript → GFM) in the body.
-    * ``extract_header``/``extract_footer`` fields: Mistral lumps the footnote
-      *definitions* into the footer (they sit at the page bottom), so we run the
-      footnote lift there too and emit the resulting ``[^N]:`` definitions as
-      real footnotes (NOT buried inside ``<footer>``, which would break GFM);
-      only genuine furniture (running head, page number) is wrapped.
+    * Footnote lift (LaTeX/Unicode superscript / ``(N)`` → GFM) in the body.
+    * ``extract_header``/``extract_footer`` fields (Mistral is always asked for
+      them at OCR time): Mistral lumps the footnote *definitions* into the
+      footer (they sit at the page bottom), so we run the footnote lift there
+      too and emit the resulting ``[^N]:`` definitions as real footnotes (NOT
+      buried inside ``<footer>``, which would break GFM). ``headers`` controls
+      only whether the remaining furniture (running head, page number) is
+      *wrapped* in ``<header>``/``<footer>`` tags — the furniture text is kept
+      either way, so turning the toggle off never drops content.
 
     ``mapping`` = this page's ``{original_number: unique_anchor}`` map (see
     ``assign_page_mappings``) — the ref and its definition are on the same page,
@@ -280,7 +284,7 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
     """
     if footnotes in ("numeric", "alphabetic"):
         md = convert_footnotes(md, footnotes, mapping=mapping)
-    if not headers or not isinstance(page, dict):
+    if not isinstance(page, dict):
         return md
 
     defs: list[str] = []
@@ -299,20 +303,22 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
     parts: list[str] = []
     if furn["header"]:
         parts.append(
-            f'<header class="page-header">\n\n{furn["header"]}\n\n</header>')
+            f'<header class="page-header">\n\n{furn["header"]}\n\n</header>'
+            if headers else furn["header"])
     parts.append(md)
     if defs:
         parts.append("\n".join(defs))   # footnote definitions → real footnotes
     if furn["footer"]:
         parts.append(
-            f'<footer class="page-footer">\n\n{furn["footer"]}\n\n</footer>')
+            f'<footer class="page-footer">\n\n{furn["footer"]}\n\n</footer>'
+            if headers else furn["footer"])
     return "\n\n".join(parts)
 
 
 def mistral_settings() -> tuple[str, bool]:
-    """(footnotes_mode, headers) from the config DB — the Mistral card toggles.
-    Best-effort; defaults ``("numeric", True)``. Used by the batch import path,
-    which has no engine instance to read the toggles from."""
+    """(footnotes_mode, wrap_headers) from the config DB — the Markdown export
+    card toggles. Best-effort; defaults ``("numeric", True)``. Read at export
+    time by ``md_export.write_markdown``."""
     try:
         from aglaia.app_data import db as _cfg
         with _cfg.session() as _c:
@@ -320,12 +326,3 @@ def mistral_settings() -> tuple[str, bool]:
                     bool(_cfg.get(_c, _cfg.KEY_MISTRAL_HEADERS, True)))
     except Exception:
         return "numeric", True
-
-
-def batch_mappings(pages) -> "list[dict[str, str] | None]":
-    """Per-page ``{number: unique_anchor}`` maps for a batch's pages (honoring
-    the card's footnote toggle). The batch import loops pages one at a time, so
-    it precomputes this list once and passes ``mappings[i]`` to each
-    ``page_to_result``."""
-    fn, _ = mistral_settings()
-    return assign_page_mappings(pages, fn)

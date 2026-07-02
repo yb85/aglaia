@@ -701,45 +701,9 @@ class OcrTab(QWidget):
         self._batch_toggle.toggled.connect(self._on_batch_toggled)
         col.addWidget(self._batch_toggle)
 
-        # ── Mistral post-processing (footnotes + header/footer) ──────────
-        from PySide6.QtWidgets import QComboBox
-        try:
-            with _cfg.session() as _c:
-                _fn = str(_cfg.get(_c, _cfg.KEY_MISTRAL_FOOTNOTES, "numeric"))
-                _hdr = bool(_cfg.get(_c, _cfg.KEY_MISTRAL_HEADERS, True))
-        except Exception:
-            _fn, _hdr = "numeric", True
-        _fn_row = QHBoxLayout()
-        _fn_row.setSpacing(6)
-        self._fn_toggle = QCheckBox(self.tr("Convert footnotes"))
-        self._fn_toggle.setChecked(_fn in ("numeric", "alphabetic"))
-        self._fn_toggle.setStyleSheet(
-            f"color: {COLOR_FONT_DIM}; font-size: 10px;")
-        self._fn_toggle.setToolTip(self.tr(
-            "Superscript refs (LaTeX $^{N}$ or Unicode ⁹⁸) → GFM footnotes "
-            "[^N]; line-start entries → [^N]:. Per page."))
-        self._fn_toggle.toggled.connect(self._on_footnotes_toggled)
-        _fn_row.addWidget(self._fn_toggle)
-        self._fn_style = QComboBox()
-        self._fn_style.addItems(["numeric", "alphabetic"])
-        self._fn_style.setCurrentText(
-            _fn if _fn in ("numeric", "alphabetic") else "numeric")
-        self._fn_style.setEnabled(self._fn_toggle.isChecked())
-        self._fn_style.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
-        self._fn_style.currentTextChanged.connect(self._on_footnote_style_changed)
-        _fn_row.addWidget(self._fn_style)
-        _fn_row.addStretch(1)
-        col.addLayout(_fn_row)
-
-        self._hdr_toggle = QCheckBox(self.tr("Extract headers / footers"))
-        self._hdr_toggle.setChecked(_hdr)
-        self._hdr_toggle.setStyleSheet(
-            f"color: {COLOR_FONT_DIM}; font-size: 10px;")
-        self._hdr_toggle.setToolTip(self.tr(
-            "Split running heads / page numbers into the page's header/footer "
-            "(OCR API) → wrapped in <header>/<footer> tags."))
-        self._hdr_toggle.toggled.connect(self._on_headers_toggled)
-        col.addWidget(self._hdr_toggle)
+        # Footnote + header/footer post-processing now lives on the Markdown
+        # export card (ExportTab) — it's an export-time transform of the stored
+        # raw Mistral output, not an OCR-time setting.
 
         # Pending-job state — hidden unless this project has a pending batch.
         self._batch_pending_box = QWidget()
@@ -797,30 +761,6 @@ class OcrTab(QWidget):
             pass
         # Batch is ~half price — refresh the $ estimate.
         self._refresh_cost_estimate()
-
-    def _set_cfg(self, key: str, value) -> None:
-        from aglaia.app_data import db as cfg
-        try:
-            with cfg.session() as conn:
-                cfg.set(conn, key, value)
-                conn.commit()
-        except Exception:
-            pass
-
-    def _on_footnotes_toggled(self, on: bool) -> None:
-        from aglaia.app_data import db as cfg
-        self._fn_style.setEnabled(on)
-        self._set_cfg(cfg.KEY_MISTRAL_FOOTNOTES,
-                      self._fn_style.currentText() if on else "off")
-
-    def _on_footnote_style_changed(self, style: str) -> None:
-        from aglaia.app_data import db as cfg
-        if self._fn_toggle.isChecked():
-            self._set_cfg(cfg.KEY_MISTRAL_FOOTNOTES, style)
-
-    def _on_headers_toggled(self, on: bool) -> None:
-        from aglaia.app_data import db as cfg
-        self._set_cfg(cfg.KEY_MISTRAL_HEADERS, bool(on))
 
     def _current_engine(self):
         """Instantiate the selected engine — the capability source the UI

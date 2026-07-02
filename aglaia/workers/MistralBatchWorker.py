@@ -126,14 +126,11 @@ class MistralBatchWorker(QThread):
                             f"{type(e).__name__}: {e}")
                         pending += 1
                         continue
-                    from aglaia.workers.ocr.md_postprocess import batch_mappings
-                    _mk = batch_mappings(pages)  # per-page {num: unique_anchor}
                     for i, rid in enumerate(run_ids):
                         page = pages[i] if i < len(pages) else {}
                         w, h = _dims_for_run(conn, rid)
                         ocr_repo.finish(rid, mistral_batch.page_to_result(
-                            page, w, h, [],
-                            mapping=(_mk[i] if i < len(_mk) else None)))
+                            page, w, h, []))
                     repo.mark_imported(jid)
                     imported += 1
                     self.log_line.emit(

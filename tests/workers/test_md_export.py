@@ -13,8 +13,6 @@ data (no DB, no OCR engine), one test per heuristic from issue #52.
 """
 from __future__ import annotations
 
-import pytest
-
 from aglaia.workers import md_export as mx
 
 
@@ -327,8 +325,7 @@ def test_render_document_prose_not_heading():
     assert out[0] == txt
 
 
-def test_classify_row_prefers_document_tree():
-    import json
+def test_classify_data_prefers_document_tree():
     data = {
         "engine": "apple_docs",
         "page_w": 1000, "page_h": 1400,
@@ -338,13 +335,12 @@ def test_classify_row_prefers_document_tree():
             {"type": "block", "text": "Structured paragraph wins."},
         ]},
     }
-    cls = mx._classify_row(json.dumps(data))
+    cls = mx._classify_data(data)
     assert cls["kind"] == "assembled"
     assert "Structured paragraph wins." in cls["text"]
 
 
-def test_classify_row_falls_back_to_lines_without_document():
-    import json
+def test_classify_data_falls_back_to_lines_without_document():
     data = {
         "engine": "apple_docs",
         "page_w": 1000, "page_h": 1400,
@@ -352,5 +348,5 @@ def test_classify_row_falls_back_to_lines_without_document():
                    "confidence": 0.99}],
         "meta": {},
     }
-    cls = mx._classify_row(json.dumps(data))
+    cls = mx._classify_data(data)
     assert cls["kind"] == "lines"
