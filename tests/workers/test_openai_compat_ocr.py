@@ -90,12 +90,16 @@ def test_unlimited_configure_knobs():
 
 
 def test_targets_registered():
+    import aglaia.workers.ocr  # noqa: F401 — engines register their targets
     from aglaia.app_data import downloads as D
 
     keys = {t.key for t in D.registry()}
-    # Surya ships through the download registry; the local VLM engines (glm /
-    # unlimited) fetch their weights outside it.
-    assert {"surya_mlx", "surya_vllm"} <= keys
+    # Surya + the local VLMs register download targets. unlimited is MLX-only
+    # (in-process) → it has no vLLM variant.
+    assert {"surya_mlx", "surya_vllm", "glm_ocr_mlx", "glm_ocr_vllm",
+            "unlimited_ocr_mlx"} <= keys
+    assert "paddle_vl" not in keys            # removed engine → no dead target
+    assert "unlimited_ocr_vllm" not in keys
 
 
 # ── availability + backend/target wiring ─────────────────────────────

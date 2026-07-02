@@ -66,7 +66,7 @@ class OcrWorker(QThread):
         # upload, and leave them pending for a later "Check result" import.
         self._batch = bool(batch)
         # Only meaningful for the apple_docs engine — the confidence-gated
-        # complement engine ("surya" / "paddle_vl" / "none"). "" leaves the
+        # complement engine ("surya" / "glm" / "unlimited" / "none"). "" leaves the
         # engine on its own default.
         self._complement = complement or ""
         self._cancel = False

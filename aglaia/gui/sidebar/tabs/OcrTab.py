@@ -147,8 +147,8 @@ class OcrTab(QWidget):
     """
 
     # engine, languages, mode, complement. ``complement`` is only
-    # meaningful for the ``apple_docs`` engine ("surya" / "paddle_vl" /
-    # "none"); for every other engine it is "".
+    # meaningful for the ``apple_docs`` engine ("surya" / "glm" /
+    # "unlimited" / "none"); for every other engine it is "".
     run_requested = Signal(str, list, str, str)
     # bool — emitted whenever the user flips the Live-OCR toggle so
     # MainWindow can install / tear down its branch_ready hook.
@@ -374,7 +374,6 @@ class OcrTab(QWidget):
         # gold-tier accuracy on mixed-script pages.
         "apple_docs":   (("rabbit", COLOR_SUCCESS), ("medal", _MEDAL_SILVER)),
         "apple_vision": (("rabbit", COLOR_SUCCESS), ("medal", _MEDAL_BRONZE)),
-        "paddle_vl":    (("turtle", COLOR_WARNING), ("medal", _MEDAL_SILVER)),
         "surya":        (("turtle", COLOR_ERROR), ("medal", _MEDAL_GOLD)),
         # Cloud — network glyph (latency depends on the wire) + gold-tier
         # accuracy. Reads any script, off-device.
@@ -383,33 +382,34 @@ class OcrTab(QWidget):
 
     # The Apple Document engine is the default pick on a capable Mac.
     _DEFAULT_ENGINE = "apple_docs"
-    # Card order: Apple Document leads, then Mistral cloud, the VLMs
-    # (paddle, surya), with the legacy Apple Vision engine last.
-    _ENGINE_ORDER = ("apple_docs", "mistral_cloud", "paddle_vl", "surya",
-                     "apple_vision")
+    # Card order: Apple Document leads, then Mistral cloud, the local VLMs
+    # (glm, unlimited, surya), with the legacy Apple Vision engine last.
+    _ENGINE_ORDER = ("apple_docs", "mistral_cloud", "glm", "unlimited",
+                     "surya", "apple_vision")
     # Per-engine card icon (bundled SVGs in assets/icons/). Apple engines →
     # apple mark, Mistral → Mistral mark, generic VLMs → an OCR glyph.
     _ENGINE_ICONS = {
         "apple_docs": "apple",
         "apple_vision": "apple",
         "surya": "ocr",
-        "paddle_vl": "ocr",
+        "glm": "ocr",
+        "unlimited": "ocr",
         "mistral_cloud": "mistral",
     }
 
     def _populate_engines(self) -> None:
         from aglaia.workers.ocr import ENGINE_REGISTRY
 
-        # Card order per _ENGINE_ORDER: Apple doc, Mistral, paddle, surya,
+        # Card order per _ENGINE_ORDER: Apple doc, Mistral, the local VLMs,
         # then legacy Apple Vision. Unknown engines append after.
         names = [n for n in self._ENGINE_ORDER if n in ENGINE_REGISTRY]
         names += [n for n in ENGINE_REGISTRY if n not in names]
 
         # Drop engines the platform can't run at all — no point showing an
         # Install button for an unreachable backend. Apple engines need
-        # macOS; paddle_vl is mlx-only → Apple Silicon. Removed outright
-        # (the macOS-26 sub-gating for apple_docs still happens in
-        # _apply_engine_gating for the cards that survive here).
+        # macOS; the in-process MLX VLM (unlimited) is Apple-Silicon-only.
+        # Removed outright (the macOS-26 sub-gating for apple_docs still
+        # happens in _apply_engine_gating for the cards that survive here).
         import sys
         import platform as _plat
         from aglaia.workers.ocr.apple_caps import probe_apple_caps
@@ -420,7 +420,7 @@ class OcrTab(QWidget):
         def _platform_ok(name: str) -> bool:
             if name in ("apple_docs", "apple_vision"):
                 return _is_macos
-            if name == "paddle_vl":
+            if name == "unlimited":
                 return _is_apple_silicon
             return True
 

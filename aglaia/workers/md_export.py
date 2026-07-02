@@ -258,7 +258,6 @@ def _project_slug(conn: sqlite3.Connection) -> str:
 _ENGINE_SUFFIXES = {
     "apple_vision": "_appleOCR",
     "surya":         "_suryaOCR",
-    "paddle_vl":     "_paddleOCR",
 }
 
 

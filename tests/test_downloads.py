@@ -50,10 +50,11 @@ def _materialise(dl, key):
 
 def test_core_targets_registered(reg):
     keys = {t.key for t in reg.registry()}
-    assert {"vosk_en", "east", "surya_mlx", "paddle_vl", "dbnet"} <= keys
-    paddle = reg.target_for("paddle_vl")
-    assert paddle.platform == "darwin-arm64"
-    assert len(paddle.required_files) == 4
+    assert {"vosk_en", "east", "surya_mlx", "surya_vllm", "dbnet"} <= keys
+    assert "paddle_vl" not in keys          # engine removed → target gone
+    surya = reg.target_for("surya_mlx")
+    assert surya.platform == "darwin-arm64"
+    assert surya.required_files             # snapshot lists its completeness files
 
 
 def test_shim_aliases_resolve(reg):
@@ -61,7 +62,7 @@ def test_shim_aliases_resolve(reg):
 
     assert M.ModelSpec is reg.DownloadTarget
     assert {s.key for s in M._load_model_specs()} == {t.key for t in reg.registry()}
-    assert M.is_model_installed("paddle_vl") is False
+    assert M.is_model_installed("surya_mlx") is False
 
 
 def test_plugin_can_register(reg):
@@ -89,29 +90,29 @@ def test_not_downloaded_initially(reg):
 
 
 def test_presence_marks_downloaded_in_db(reg):
-    _materialise(reg, "paddle_vl")
-    assert reg.is_downloaded("paddle_vl") is True
+    _materialise(reg, "surya_mlx")
+    assert reg.is_downloaded("surya_mlx") is True
     # download_status records the reconciled 'downloaded' row.
-    assert reg.download_status("paddle_vl") == reg.STATUS_DOWNLOADED
+    assert reg.download_status("surya_mlx") == reg.STATUS_DOWNLOADED
     from aglaia.app_data import db
 
     with db.session() as conn:
-        assert db.get_download_status(conn, "paddle_vl") == "downloaded"
+        assert db.get_download_status(conn, "surya_mlx") == "downloaded"
 
 
 def test_deleting_files_reconciles_status_down(reg):
-    t = _materialise(reg, "paddle_vl")
-    assert reg.download_status("paddle_vl") == reg.STATUS_DOWNLOADED  # row written
+    t = _materialise(reg, "surya_mlx")
+    assert reg.download_status("surya_mlx") == reg.STATUS_DOWNLOADED  # row written
     from aglaia.app_data import models_dir
 
     (models_dir() / t.filename / t.required_files[0][0]).unlink()
     # Stale 'downloaded' row must be cleared and the verdict drop.
-    assert reg.is_downloaded("paddle_vl") is False
-    assert reg.download_status("paddle_vl") == reg.STATUS_NONE
+    assert reg.is_downloaded("surya_mlx") is False
+    assert reg.download_status("surya_mlx") == reg.STATUS_NONE
     from aglaia.app_data import db
 
     with db.session() as conn:
-        assert db.get_download_status(conn, "paddle_vl") is None
+        assert db.get_download_status(conn, "surya_mlx") is None
 
 
 def test_failed_status_persists_without_disk(reg):

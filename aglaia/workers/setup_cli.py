@@ -22,17 +22,24 @@ import sys
 # (Vosk), which only drives live capture and is useless headless. dbnet is the
 # default detector (required off-macOS) and the only pre-ticked model.
 _EXCLUDE_KEYS = {"vosk_en"}        # capture-only, no headless use
-_MAC_ONLY_KEYS = {"paddle_vl"}     # MLX 4-bit — Apple Silicon only
 _DEFAULT_KEYS = {"dbnet"}          # pre-ticked recommendation
-_ORDER = ["dbnet", "east", "surya_mlx", "paddle_vl"]   # display order; rest appended
+_ORDER = ["dbnet", "east", "surya_mlx"]   # display order; rest appended
 
 
 def _offered_specs(is_mac: bool) -> list:
     """Registry specs offered by --setup, in display order, minus excludes
     (Vosk always; MLX-only models off macOS — they can't run there)."""
     from aglaia.app_data.models import _load_model_specs
-    skip = _EXCLUDE_KEYS if is_mac else _EXCLUDE_KEYS | _MAC_ONLY_KEYS
-    specs = {s.key: s for s in _load_model_specs() if s.key not in skip}
+    # Drop capture-only assets always; drop Apple-Silicon (MLX) models off
+    # macOS — they can't run there. Platform comes from each target, so new
+    # darwin-arm64 models are filtered without touching a hardcoded list.
+    specs = {}
+    for s in _load_model_specs():
+        if s.key in _EXCLUDE_KEYS:
+            continue
+        if not is_mac and getattr(s, "platform", "any") == "darwin-arm64":
+            continue
+        specs[s.key] = s
     ordered = [specs[k] for k in _ORDER if k in specs]
     ordered += [s for k, s in specs.items() if k not in _ORDER]
     return ordered

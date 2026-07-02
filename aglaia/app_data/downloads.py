@@ -50,7 +50,7 @@ class DownloadTarget:
     """One fetchable asset. Field names match the legacy ``ModelSpec`` so the
     GUI Model Downloader and onboarding wizard keep working unchanged."""
 
-    key: str  # stable id (e.g. "paddle_vl", "glm_ocr_mlx")
+    key: str  # stable id (e.g. "surya_mlx", "glm_ocr_mlx")
     title: str  # short card title
     filename: str  # on-disk dir/file name under models_dir()
     url: str  # HTTPS URL (kind="file") or HF repo id (kind="hf-snapshot")
@@ -370,26 +370,6 @@ def _register_core_targets() -> None:
             purpose="OCR",
             project="datalab-to/surya-ocr-2",
             platform="cuda",
-        )
-    )
-    register_download(
-        DownloadTarget(
-            key="paddle_vl",
-            title="PaddleOCR-VL 1.5 (MLX 4-bit)",
-            filename="PaddleOCR-VL-1.5-4bit",
-            url="aglaia-models/paddleocr-vl-1.5-4bit",
-            approx_size_mb=720,
-            kind="hf-snapshot",
-            section="recommended",
-            purpose="OCR",
-            project="aglaia-models/paddleocr-vl-1.5-4bit",
-            platform="darwin-arm64",
-            required_files=(
-                ("model.safetensors", 703562711),
-                ("processor_config.json", 843),
-                ("config.json", 2483),
-                ("tokenizer.json", 11189060),
-            ),
         )
     )
     register_download(

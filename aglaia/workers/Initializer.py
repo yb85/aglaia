@@ -124,25 +124,6 @@ def probe_capabilities() -> list[tuple[str, bool, str]]:
     else:
         caps.append(("vosk", False, "uv sync --extra voice"))
 
-    # PaddleOCR-VL — needs the python orchestrator (paddleocr) + the
-    # mlx-vlm server backend. The actual weights live under the user's
-    # models dir; missing weights only block runtime, not the probe.
-    if _probe_import("paddleocr") and _probe_import("mlx_vlm"):
-        try:
-            from aglaia.workers.ocr.paddle_vl import _paddle_weights_dir
-            weights = _paddle_weights_dir()
-        except Exception:
-            weights = None
-        if weights is not None and weights.exists():
-            caps.append(("paddle", True,
-                          f"PaddleOCR-VL + mlx-vlm ({weights})"))
-        else:
-            caps.append(("paddle", True,
-                          "PaddleOCR-VL + mlx-vlm (weights not downloaded)"))
-    else:
-        caps.append(("paddle", False,
-                      "pip install paddleocr[doc-parser] paddlepaddle mlx-vlm"))
-
     # Surya OCR — needs the python package AND a usable llama-server
     # binary (bundled inside the frozen .app, vendored in dev checkouts
     # under vendor/llama-server/<plat>/, or installed via brew).

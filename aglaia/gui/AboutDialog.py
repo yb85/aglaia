@@ -100,7 +100,7 @@ def build_about_html() -> str:
         "doxapy — binarization (Wolf / Sauvola)",
         "pikepdf · pypdfium2 — PDF I/O",
         "aglaia_jbig2 — JBIG2 compression",
-        "Apple Vision · Surya · PaddleOCR · Mistral — OCR / layout",
+        "Apple Vision · Surya · GLM-OCR · Unlimited-OCR · Mistral — OCR / layout",
         "Vosk — offline voice control",
     ]
     stack_items = "\n".join(f"    <li>{escape(s)}</li>" for s in stack)
