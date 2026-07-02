@@ -38,6 +38,11 @@ import re
 #   • Unicode superscript glyphs:  ¹⁷⁰   (⁰¹²³⁴⁵⁶⁷⁸⁹, incl. ¹²³ from Latin-1)
 # We normalise both to a plain marker before deciding footnote-hood.
 _SUP_RE = re.compile(r"\$\^\{([^}]*)\}\$")
+# Parenthesized numeric footnotes — "(7)" inline refs and "(7) …" line-start
+# entries. 1–3 digits keeps 4-digit years like "(2011)" out; the ref∩entry
+# intersection is the real guard against false positives anyway.
+_PAREN_RE = re.compile(r"\((\d{1,3})\)")
+_PAREN_ENTRY_RE = re.compile(r"^\s*\((\d{1,3})\)\s", re.M)
 _USUP_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 _USUP_MAP = str.maketrans(_USUP_DIGITS, "0123456789")
 # Unicode superscript LETTERS (for alphabetic footnotes / ordinals): map the
@@ -75,7 +80,9 @@ def _norm_usup(md: str, mode: str) -> tuple[str, set[str]]:
 
 
 def _sup_and_entries(md: str, mode: str) -> tuple[set[str], set[str]]:
-    """One page's (superscript refs, line-start entries) after Unicode folding."""
+    """One page's (footnote refs, line-start entries) after Unicode folding.
+    Refs = LaTeX/Unicode superscripts + (numeric) parenthesized ``(7)``;
+    entries = line-start ``N.`` / ``$^{N}$`` / ``(N)``."""
     cls = _marker_class(mode)
     md, _ = _norm_usup(md, mode)
     sup = {m.group(1).strip() for m in _SUP_RE.finditer(md)
@@ -83,7 +90,11 @@ def _sup_and_entries(md: str, mode: str) -> tuple[set[str], set[str]]:
     entry_num = set(re.findall(rf"^\s*({cls.pattern})\.\s", md, re.M))
     entry_sup = {m.strip() for m in re.findall(
         rf"^\s*\$\^\{{({cls.pattern})\}}\$", md, re.M)}
-    return sup, (entry_num | entry_sup)
+    entries = entry_num | entry_sup
+    if mode == "numeric":
+        sup |= set(_PAREN_RE.findall(md))
+        entries |= set(_PAREN_ENTRY_RE.findall(md))
+    return sup, entries
 
 
 def _page_text(page) -> str:
@@ -139,13 +150,15 @@ def _ordered_footnote_numbers(page, mode: str,
     order of first appearance — so anchors are assigned in reading order."""
     text, _ = _norm_usup(_page_text(page), mode)
     cls = _marker_class(mode)
-    pat = re.compile(rf"\$\^\{{({cls.pattern})\}}\$|^\s*({cls.pattern})\.",
-                     re.M)
+    parts = [rf"\$\^\{{({cls.pattern})\}}\$", rf"^\s*({cls.pattern})\."]
+    if mode == "numeric":
+        parts.append(r"\((\d{1,3})\)")   # parenthesized refs/entries
+    pat = re.compile("|".join(parts), re.M)
     seen: list[str] = []
     s: set[str] = set()
     for m in pat.finditer(text):
-        n = m.group(1) or m.group(2)
-        if n in markers and n not in s:
+        n = next((g for g in m.groups() if g), None)
+        if n and n in markers and n not in s:
             s.add(n)
             seen.append(n)
     return seen
@@ -193,28 +206,39 @@ def convert_footnotes(md: str, mode: str = "numeric", *,
             markers = {x for x in (sup & entries) if x.lower() not in _ORDINAL}
         mapping = {x: x for x in markers}
 
-    # Pass 1: line-start ENTRIES ("N. …" or "$^{N}$ …") → "[^anchor]: …".
-    # Done before inline refs so a definition led by its own superscript marker
-    # is treated as a definition, not a reference.
+    # Pass 1: line-start ENTRIES ("N. …", "$^{N}$ …", or "(N) …") → "[^anchor]:
+    # …". Done before inline refs so a definition led by its own marker is
+    # treated as a definition, not a reference.
+    paren_alt = r"|\((\d{1,3})\)" if mode == "numeric" else ""
     out: list[str] = []
     entry_re = re.compile(
-        rf"^\s*(?:\$\^\{{({cls.pattern})\}}\$|({cls.pattern})\.)\s+(.*)$")
+        rf"^\s*(?:\$\^\{{({cls.pattern})\}}\$|({cls.pattern})\.{paren_alt})"
+        rf"\s+(.*)$")
     for line in md.split("\n"):
         m = entry_re.match(line)
         if m:
-            num = m.group(1) or m.group(2)
-            if num in mapping:
-                out.append(f"[^{mapping[num]}]: {m.group(3)}")
+            g = m.groups()
+            num = g[0] or g[1] or (g[2] if mode == "numeric" else None)
+            text = g[-1]
+            if num and num in mapping:
+                out.append(f"[^{mapping[num]}]: {text}")
                 continue
         out.append(line)
     md = "\n".join(out)
 
-    # Pass 2: inline REFS. A mapped number → its anchor; else a bare exponent.
+    # Pass 2: inline REFS. A mapped number → its anchor; else a bare exponent
+    # (superscripts) / left untouched (parentheses).
     def repl_sup(m: re.Match[str]) -> str:
         c = m.group(1).strip()
         return f"[^{mapping[c]}]" if c in mapping else f"^{c}^"
 
-    return _SUP_RE.sub(repl_sup, md)
+    md = _SUP_RE.sub(repl_sup, md)
+    if mode == "numeric":
+        def repl_paren(m: re.Match[str]) -> str:
+            c = m.group(1)
+            return f"[^{mapping[c]}]" if c in mapping else m.group(0)
+        md = _PAREN_RE.sub(repl_paren, md)
+    return md
 
 
 def postprocess_page(md: str, *, footnotes: str | None = "numeric") -> str:
