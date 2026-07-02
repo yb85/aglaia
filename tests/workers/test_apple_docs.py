@@ -56,7 +56,7 @@ def test_resolve_complement_default():
 
 def test_resolve_complement_explicit_overrides_env(monkeypatch):
     monkeypatch.setenv("AGLAIA_OCR_COMPLEMENT", "surya")
-    assert ad.resolve_complement("paddle_vl") == "paddle_vl"
+    assert ad.resolve_complement("glm") == "glm"
 
 
 def test_resolve_complement_env(monkeypatch):
@@ -94,6 +94,12 @@ def test_gate_offloads_only_low_conf(monkeypatch):
     lines = [
         _line("bon français", 1.0, (10, 10, 500, 40)),       # keep
         _line("Greek garble here please", 0.30, (10, 60, 500, 100)),  # offload
+        # High-conf padding: keeps the flagged fraction under the whole-page
+        # complement threshold (>30% flagged → the WHOLE page is re-OCR'd,
+        # replacing every line). Here we exercise the per-block splice path.
+        _line("deuxième ligne correcte", 1.0, (10, 120, 500, 160)),
+        _line("troisième ligne correcte", 1.0, (10, 180, 500, 220)),
+        _line("quatrième ligne correcte", 1.0, (10, 240, 500, 280)),
     ]
     n, used = ad._apply_complement(_img(), lines, [], "surya", ["fr-FR"])
     assert n == 1
@@ -254,7 +260,15 @@ def test_gate_splices_into_document(monkeypatch):
         "bbox": [10, 60, 500, 100],
         "lines": [{"text": "garble line text here", "bbox": [10, 60, 500, 100]}],
     }]
-    lines = [_line("garble line text here", 0.30, (10, 60, 500, 100))]
+    lines = [
+        _line("garble line text here", 0.30, (10, 60, 500, 100)),
+        # Padding keeps the flagged fraction under the whole-page threshold so
+        # the per-block → document splice path runs (not the whole-page reset,
+        # which clears the document tree).
+        _line("ligne correcte une", 1.0, (10, 120, 500, 160)),
+        _line("ligne correcte deux", 1.0, (10, 180, 500, 220)),
+        _line("ligne correcte trois", 1.0, (10, 240, 500, 280)),
+    ]
     n, _ = ad._apply_complement(_img(), lines, doc, "surya", [])
     assert n == 1
     assert doc[0]["lines"][0]["text"] == "CORRECTED"

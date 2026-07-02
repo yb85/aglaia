@@ -63,7 +63,7 @@ def _text_image(text: str, w: int = 1000, h: int = 300) -> np.ndarray:
     return np.array(img, dtype=np.uint8)
 
 
-@pytest.mark.parametrize("engine_name", ["glm", "unlimited", "paddle_vl"])
+@pytest.mark.parametrize("engine_name", ["glm", "unlimited"])
 def test_local_vlm_ocr_roundtrip(engine_name):
     from aglaia.workers.ocr import get_engine
 

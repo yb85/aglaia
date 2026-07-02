@@ -18,7 +18,7 @@ from aglaia.workers.ocr.engine import direct_block_engines
 def test_direct_block_membership():
     dbe = set(direct_block_engines())
     # The local recognisers (VLMs + Surya) qualify…
-    assert {"surya", "glm", "unlimited", "paddle_vl"} <= dbe
+    assert {"surya", "glm", "unlimited"} <= dbe
     # …the Vision engines (what apple_docs complements) and cloud do not.
     assert "apple_docs" not in dbe
     assert "apple_vision" not in dbe

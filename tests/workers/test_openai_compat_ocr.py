@@ -79,23 +79,23 @@ def test_engines_registered():
     assert "unlimited" in ENGINE_REGISTRY
 
 
-def test_unlimited_extra_body_carries_recipe_knobs():
+def test_unlimited_configure_knobs():
+    # `unlimited` is a standalone in-process MLX engine (not OpenAI-compat):
+    # it has no extra_body/vllm knobs. Verify its real config surface.
     u = get_engine("unlimited")
-    assert u.extra_body["skip_special_tokens"] is False
-    assert u.extra_body["vllm_xargs"]["ngram_size"] == 35
-    assert u.prompt.startswith("<image>")
+    assert u._max_tokens == 32768   # single-page / gundam cap default
+    assert u._window_size == 1      # per-page default (fused path is opt-in)
+    u.configure({"max_tokens": "4096"})
+    assert u._max_tokens == 4096
 
 
 def test_targets_registered():
     from aglaia.app_data import downloads as D
 
     keys = {t.key for t in D.registry()}
-    assert {
-        "glm_ocr_mlx",
-        "glm_ocr_vllm",
-        "unlimited_ocr_mlx",
-        "unlimited_ocr_vllm",
-    } <= keys
+    # Surya ships through the download registry; the local VLM engines (glm /
+    # unlimited) fetch their weights outside it.
+    assert {"surya_mlx", "surya_vllm"} <= keys
 
 
 # ── availability + backend/target wiring ─────────────────────────────
@@ -116,8 +116,9 @@ def test_available_requires_backend_and_weights(monkeypatch):
 
     monkeypatch.setattr(OC, "pick_backend", lambda *a, **k: _FakeBackend("mlx"))
     monkeypatch.setattr(OC, "is_downloaded", lambda key: key == "glm_ocr_mlx")
-    assert get_engine("glm")._weights_ready() is True  # mlx weights present
-    assert get_engine("unlimited")._weights_ready() is False  # its mlx key absent
+    assert get_engine("glm")._weights_ready() is True   # mlx weights present
+    monkeypatch.setattr(OC, "is_downloaded", lambda key: False)
+    assert get_engine("glm")._weights_ready() is False  # weights absent
 
 
 def test_configure_backend_and_max_tokens():
@@ -153,7 +154,8 @@ def test_recognize_batch_end_to_end_stubbed(monkeypatch):
 
     served = "# Doc\n<|ref|>Heading<|/ref|><|det|>[[0,0,500,40]]<|/det|>\nbody"
     g = get_engine("glm")
-    monkeypatch.setattr(g, "_chat_completion", lambda url, model, img: served)
+    monkeypatch.setattr(g, "_chat_completion",
+                        lambda url, model, img, prompt: served)
 
     [res] = g.recognize_batch([np.zeros((200, 160, 3), np.uint8)], [])
     assert res["engine"] == "glm"
@@ -176,7 +178,7 @@ def test_recognize_batch_per_page_failure_is_isolated(monkeypatch):
         OC.LocalVlmServer, "served_model_name", classmethod(lambda cls, *a, **k: "glm")
     )
 
-    def boom(url, model, img):
+    def boom(url, model, img, prompt):
         raise RuntimeError("server 500")
 
     g = get_engine("glm")
