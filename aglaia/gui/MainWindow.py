@@ -1926,14 +1926,21 @@ class MainWindow(QMainWindow):
             box.exec()
 
     def _stop_voice(self):
-        if self.voice_thread is not None:
-            try:
-                self.voice_thread.stop()
-            except Exception:
-                pass
-            self.voice_thread.quit()
-            self.voice_thread.wait(500)
+        t = self.voice_thread
         self.voice_thread = None
+        if t is None:
+            return
+        # Signal the audio loop to exit, then RETAIN the QThread until it
+        # actually finishes (via _track_worker → deleteLater). It runs a
+        # custom run() with no event loop, so quit() is a no-op, and its
+        # blocking mic read / one-time model load can outlast any short
+        # wait(): dropping the reference here would GC a running QThread →
+        # the fatal 'QThread: Destroyed while thread is still running' abort.
+        try:
+            t.stop()
+        except Exception:
+            pass
+        self._track_worker(t)
 
     # ── Freehand SIFT-tracked capture ──────────────────────────────
     def _on_freehand_clicked(self, checked: bool) -> None:

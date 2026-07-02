@@ -54,7 +54,10 @@ class VoskVoiceWorker(QThread):
     def __init__(self, config=None):
         super().__init__()
         self.config = config
-        self._running = False
+        # True from construction so a stop() during the (slow) model load is
+        # honoured — run() must NOT re-set this to True after loading, else a
+        # deactivate mid-load is silently overwritten and the loop runs on.
+        self._running = True
         self._recent: list[tuple[str, str]] = []  # rolling (word, state)
 
     def _commands(self) -> dict[str, str]:
@@ -84,7 +87,6 @@ class VoskVoiceWorker(QThread):
         rec = vosk.KaldiRecognizer(model, _SAMPLE_RATE, grammar)
         rec.SetWords(True)   # per-word confidences in the final result
         last_fire = 0.0
-        self._running = True
 
         # Only fire on FINAL results above this acoustic confidence. The
         # constrained grammar already routes true out-of-vocabulary speech to
@@ -123,6 +125,8 @@ class VoskVoiceWorker(QThread):
             if results:
                 self.transcription_update.emit(_vt.words_html(self._recent))
 
+        if not self._running:   # stopped during model load — don't open the mic
+            return
         with sounddevice.RawInputStream(
                 samplerate=_SAMPLE_RATE, blocksize=8000, dtype="int16",
                 channels=1) as stream:
