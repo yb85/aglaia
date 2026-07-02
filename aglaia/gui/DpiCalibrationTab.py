@@ -65,19 +65,19 @@ class _PickLabel(QLabel):
         self._image_size = image_size
         self._img_clicks = []
         self._drag_idx = None
-        self._repaint()
+        self.update()
         self._emit_change()
 
     def set_corners(self, corners) -> None:
         self._img_clicks = [(float(x), float(y)) for x, y in corners]
         self._drag_idx = None
-        self._repaint()
+        self.update()
         self._emit_change()
 
     def clear_clicks(self) -> None:
         self._img_clicks = []
         self._drag_idx = None
-        self._repaint()
+        self.update()
         self._emit_change()
 
     def corners(self) -> list[tuple[float, float]]:
@@ -123,7 +123,7 @@ class _PickLabel(QLabel):
         if ip is None:
             return
         self._img_clicks.append(ip)
-        self._repaint()
+        self.update()
         self._emit_change()
 
     def mouseMoveEvent(self, ev):  # noqa: N802
@@ -144,15 +144,23 @@ class _PickLabel(QLabel):
             ip = (max(0.0, min(iw - 1.0, ip[0])),
                   max(0.0, min(ih - 1.0, ip[1])))
         self._img_clicks[self._drag_idx] = ip
-        self._repaint()
+        self.update()
 
     def mouseReleaseEvent(self, _ev):  # noqa: N802
         if self._drag_idx is not None:
             self._drag_idx = None
             self._emit_change()
 
-    def _repaint(self) -> None:
+    def paintEvent(self, ev):  # noqa: N802
+        # Paint DIRECTLY onto the widget — never build a pixmap and call
+        # setPixmap(). A QLabel carrying a pixmap reports minimumSizeHint =
+        # pixmap size, so with an Expanding policy the layout grows the widget
+        # → resize → bigger canvas → bigger hint → runaway width + a frozen UI
+        # and unbounded QPixmap allocations (GUI RAM blow-up). Painting in
+        # paintEvent (like the sibling _LivePreviewLabel/_LineMeasureLabel)
+        # keeps the size hint independent of content.
         if self._base_pixmap is None:
+            super().paintEvent(ev)
             return
         w = self.width() or self._base_pixmap.width()
         h = self.height() or self._base_pixmap.height()
@@ -167,10 +175,9 @@ class _PickLabel(QLabel):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        canvas = QPixmap(w, h)
-        canvas.fill(QColor(0, 0, 0))
-        p = QPainter(canvas)
+        p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillRect(self.rect(), QColor(0, 0, 0))
         ox, oy = self._offset
         p.drawPixmap(int(ox), int(oy), scaled)
 
@@ -199,11 +206,6 @@ class _PickLabel(QLabel):
             p.drawText(int(cx) + self.HANDLE_R + 4,
                        int(cy) - self.HANDLE_R - 2, str(i + 1))
         p.end()
-        self.setPixmap(canvas)
-
-    def resizeEvent(self, ev):  # noqa: N802
-        super().resizeEvent(ev)
-        self._repaint()
 
 
 class DpiCalibrationTab(QWidget):
