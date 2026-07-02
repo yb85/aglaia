@@ -4,6 +4,67 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc2] — 2026-07-02
+
+Second release candidate. A large body of work landed since rc1: a subcommand
+CLI, a phone-handoff bridge, a warm-pool job server, and a full OCR-engine
+overhaul (local VLMs + cloud Mistral post-processing), plus many capture/GUI
+stability fixes.
+
+### Added
+
+- **Subcommand CLI (Typer).** `aglaia [gui] [PROJECT]` (default), `run`, `ocr`,
+  `server`, `setup`, `list`, `version`. `aglaia ocr` OCRs PDFs/images (or
+  re-OCRs a `.agl`) with **no** processing chain — for already-clean docs.
+- **Receive from phone.** A TLS receiver (QR-pinned, token-gated `/import`)
+  plus an `.aglbundle` reader for the iOS handoff — capture on the phone, finish
+  on the desktop.
+- **Job server** (`server` extra). Warm-pool HTTP job API: run/list/check/get/
+  delete/admin, processing, Mistral-batch backoff, downloads, email + admin.
+- **Local VLM OCR.** An OCR-agnostic local VLM server layer with two engines —
+  GLM-OCR and Baidu Unlimited-OCR (in-process MLX on macOS, vLLM on CUDA) — and
+  a `DirectBlockOCR` trait so any block recogniser can complement `apple_docs`.
+- **Per-engine OCR layers + export layer selection.** Keep multiple engines'
+  results per page; pick which layer to export (PDF text layer + Markdown).
+- **Mistral markdown post-processing.** Footnote conversion (LaTeX/Unicode
+  superscripts and `(N)` → GFM `[^N]`, unique anchors that keep the original
+  number) and header/footer extraction — with toggles on the Markdown export
+  card, applied at export time (re-export reflects changes without re-OCR).
+- **Central download registry** with resumable CLI downloads (retires
+  `model-list.json`).
+- **Dewarp warm-start** (curl seeded from recent same-side fits) and automatic
+  discard of a degenerate trapezoid keystone.
+
+### Changed
+
+- **OCR post-processing is tied to markdown export, not OCR.** The raw engine
+  output is stored; footnote/header-footer transforms run at export.
+- **Surya** moved off its torch/GGUF stack onto the local VLM server layer.
+- **Dropped the PaddleOCR-VL (`paddle_vl`) engine** — weak on Greek, heavy deps.
+- Local VLM backend is **bundled by platform** (MLX / vLLM).
+- Default `ocr_dpi` is **200** (matches the GUI); added `--ocr-dpi`.
+- Cloud whole-document engines route through **one request** (fixes Mistral
+  per-page billing); markdown export scan/branch markers are now
+  `<!-- scan #N -->` + `<!-- branch N.A -->`.
+
+### Fixed
+
+- **QThread teardown crashes** ("Destroyed while thread is still running") on
+  Mistral batch-check and on **deactivating voice control** — workers are now
+  retained until they actually finish.
+- **DPI-calibration "Trace manually" froze the window** (runaway width) and blew
+  GUI RAM into the GBs — the trace canvas now paints directly instead of
+  driving the layout via `setPixmap`.
+- A fresh **capture session opens on the Capture tab** instead of the last-used
+  sidebar tab.
+- **Served-VLM degeneration loops** (repetition penalty), a **Cyrillic
+  block-splice leak**, and script-anomaly garbage detection for complements.
+- OCR **progress/ETA**: over-count (334/322), jumpy ETA, `s/page` labelling, and
+  an idle watchdog that snapped the bar to 100%.
+- **XY-cut page splitter** + absorb-smallest merge for DBnet 2-up scans; layout
+  overlay renderer; per-page step toggle dead after reprocess; CLI now passes
+  the page DPI so OCR honours the configured `ocr_dpi`.
+
 ## [0.1.0rc1] — 2026-06-27
 
 First release candidate. Linux and Windows builds confirmed working; macOS
@@ -164,6 +225,7 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0rc2]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc2
 [0.1.0rc1]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc1
 [0.1.0a6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a5
