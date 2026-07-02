@@ -104,8 +104,13 @@ def make_mistral_client(api_key: str):
         existing = request.headers.get("user-agent", "")
         request.headers["user-agent"] = f"{existing} {ua}".strip()
 
+    # Explicit timeouts so a flaky network can't wedge a worker thread forever
+    # (the batch-check QThread was hanging in a timeout-less socket connect →
+    # "Check result" never completed). connect 10s / read 60s / total 120s.
     return Mistral(api_key=api_key,
-                   client=httpx.Client(event_hooks={"request": [_tag_ua]}))
+                   client=httpx.Client(
+                       event_hooks={"request": [_tag_ua]},
+                       timeout=httpx.Timeout(120.0, connect=10.0, read=60.0)))
 
 
 def _is_bitonal(arr: np.ndarray) -> bool:

@@ -3343,6 +3343,25 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _track_worker(self, w) -> None:
+        """Keep a QThread worker referenced until it actually finishes, then let
+        Qt delete it. Without this, dropping the last Python reference (e.g. a
+        re-press reassigning the owning attribute) can GC the QThread mid-run →
+        the fatal 'QThread: Destroyed while thread is still running' abort."""
+        workers = getattr(self, "_live_workers", None)
+        if workers is None:
+            workers = self._live_workers = []
+        workers.append(w)
+
+        def _done() -> None:
+            try:
+                workers.remove(w)
+            except ValueError:
+                pass
+            w.deleteLater()
+
+        w.finished.connect(_done)
+
     def _on_batch_check_requested(self) -> None:
         from aglaia.workers.MistralBatchWorker import MistralBatchWorker
         if getattr(self, "_batch_worker", None) is not None \
@@ -3350,6 +3369,7 @@ class MainWindow(QMainWindow):
             return
         self._batch_worker = MistralBatchWorker(
             action="check", db_path=str(self.db_path))
+        self._track_worker(self._batch_worker)
         self._batch_worker.log_line.connect(self._on_log_line)
         self._batch_worker.check_done.connect(self._on_batch_check_done)
         self.toast(self.tr("Checking Mistral batch job(s)…"))
@@ -3376,12 +3396,11 @@ class MainWindow(QMainWindow):
         if not jids:
             self._refresh_batch_card()
             return
-        self._batch_cancel_workers = []
         for jid in jids:
             w = MistralBatchWorker(action="cancel", db_path=str(self.db_path),
                                    job_id=jid)
             w.cancel_done.connect(lambda *_: self._refresh_batch_card())
-            self._batch_cancel_workers.append(w)
+            self._track_worker(w)
             w.start()
         self.toast(self.tr("Cancelling {n} batch job(s)…").format(n=len(jids)))
 
