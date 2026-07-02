@@ -39,7 +39,7 @@ jobs:
       - name: Sync deps + CUDA (jax[cuda12] for GPU dewarp)
         run: >-
           uv sync --extra gui --extra voice --extra dev --extra package
-          --extra cloud --extra surya --extra cuda
+          --extra cloud --extra cuda
 
       - name: Build onedir (PyInstaller)
         run: uv run pyinstaller Aglaia.spec --clean --noconfirm

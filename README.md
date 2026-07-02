@@ -167,9 +167,10 @@ uv sync --extra gui                 # Windows / Linux GUI
 uv sync                             # headless: CLI pipeline, no Qt
 ```
 
-Optional extras: `--extra cloud` (Mistral OCR), `--extra surya` (Surya OCR),
-`--extra paddle` (PaddleOCR-VL — needs `--extra macos` too), `--extra voice`
-(Vosk), `--extra server` (FastAPI + uvicorn HTTP job server).
+Optional extras: `--extra cloud` (Mistral OCR), `--extra macos` (Apple Silicon:
+MLX-served local VLM OCR — GLM-OCR / Unlimited-OCR / Surya), `--extra cuda`
+(NVIDIA: vLLM-served local VLM OCR), `--extra voice` (Vosk), `--extra server`
+(FastAPI + uvicorn HTTP job server).
 
 **Local VLM OCR** (`--ocr glm` / `--ocr unlimited`, also PaddleOCR-VL) serves
 through a bundled-by-platform backend: `--extra macos` ships the MLX backend

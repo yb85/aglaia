@@ -341,7 +341,8 @@ uv sync --extra gui --extra macos   # macOS GUI: Vision, Speech, MLX dewarp
 uv sync --extra gui                 # Windows / Linux GUI (Qt only)
 uv sync                             # headless: CLI pipeline, no Qt
 # add any of:
-#   --extra surya --extra paddle    # OCR engines — uv installs BOTH
+#   --extra macos    # Apple-Silicon local VLM OCR (GLM / Unlimited / Surya, MLX)
+#   --extra cuda     # NVIDIA local VLM OCR (vLLM) + GPU dewarp
 #   --extra voice    # offline voice control (Vosk, cross-platform)
 #   --extra cloud    # Mistral cloud OCR
 #   --extra cuda     # NVIDIA GPU dewarp (Linux)
@@ -353,10 +354,9 @@ pip install aglaia                  # lean base: headless pipeline, no Qt
 pip install "aglaia[gui]"           # Windows / Linux GUI (Qt)
 pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
 
-# OCR engines: pip can't install both (conflicting huggingface-hub pins),
-# so pick one. This limit is pip-only — uv and the .app/installer ship both.
-#   pip install "aglaia[surya]"     # Surya OCR (cross-platform)
-#   pip install "aglaia[paddle]"    # PaddleOCR-VL
+# Local VLM OCR (GLM / Unlimited / Surya) rides the platform backend:
+#   pip install "aglaia[macos]"     # Apple Silicon (MLX)
+#   pip install "aglaia[cuda]"      # NVIDIA (vLLM)
 # Apple Vision OCR needs no extra — it ships with [macos].
 # pip install "aglaia[server]"      # HTTP job API (`aglaia server`)
 

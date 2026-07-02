@@ -61,7 +61,6 @@ jobs:
         run: >-
           uv sync --extra gui --extra voice --extra macos --extra dev --extra package
           --extra jbig2 --extra cloud --extra keyring-bitwarden --extra keyring-1password
-          --extra surya --extra paddle
 
       - name: Tests (release gate)
         run: uv run pytest -q
@@ -167,15 +166,15 @@ jobs:
         run: uv run --no-project python scripts/fetch_llama_server.py --platform windows-x64
 
       - name: Sync deps (no macos/cuda — Apple + Linux-GPU extras are off-target)
-        # `gui` (PySide6) is mandatory or the frozen app can't import Qt. `surya`
-        # is the cross-platform OCR engine; the apple_vision layout/OCR backend is
-        # macOS-only and auto-falls back to EAST/heuristic here. `paddle` is left
-        # out for now (heavy/fragile Windows wheels) — add `--extra paddle` once
-        # validated; `jbig2` (Rust/maturin) likewise omitted, output falls back to
-        # G4 PDF compression.
+        # `gui` (PySide6) is mandatory or the frozen app can't import Qt. The
+        # local VLM OCR engines (glm / unlimited / Surya) ride the `macos` (MLX)
+        # and `cuda` (vLLM) backends, so they're not built here — Windows OCR
+        # uses cloud (Mistral) + the EAST/heuristic layout fallback (apple_vision
+        # is macOS-only). `jbig2` (Rust/maturin) is omitted too; PDF output falls
+        # back to G4 compression.
         run: >-
           uv sync --extra gui --extra voice --extra dev --extra package
-          --extra cloud --extra surya
+          --extra cloud
 
       - name: Tests (release gate)
         run: uv run pytest -q
@@ -275,7 +274,7 @@ jobs:
       - name: Sync deps (no macos/cuda — Apple + Linux-GPU extras are off-target)
         run: >-
           uv sync --extra gui --extra voice --extra dev --extra package
-          --extra cloud --extra surya
+          --extra cloud
 
       - name: Tests (release gate)
         env:
@@ -349,7 +348,7 @@ jobs:
       - name: Sync deps + CUDA (jax[cuda12] for GPU dewarp)
         run: >-
           uv sync --extra gui --extra voice --extra dev --extra package
-          --extra cloud --extra surya --extra cuda
+          --extra cloud --extra cuda
 
       - name: Build onedir (PyInstaller)
         env:
