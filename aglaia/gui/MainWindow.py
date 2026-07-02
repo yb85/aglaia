@@ -1411,9 +1411,15 @@ class MainWindow(QMainWindow):
                 )
         except Exception:
             pass
-        # Fall back to capture (if available) → pipeline.
-        default_tab = "capture" if is_capture else "pipeline"
-        active = stored_tab if stored_tab in self.sidebar._tabs else default_tab
+        # A fresh capture session always opens on the Capture tab — the camera
+        # controls are the whole point of entering capture mode. The stored-tab
+        # restore is for *reopening a project* (viewer mode), where landing back
+        # on the last tab (Export, OCR, …) is what the user wants; there, fall
+        # back to pipeline when nothing is stored.
+        if is_capture:
+            active: Optional[str] = "capture"
+        else:
+            active = stored_tab if stored_tab in self.sidebar._tabs else "pipeline"
         self.sidebar.set_active(active)
         if stored_collapsed:
             self.sidebar.set_collapsed(True)
