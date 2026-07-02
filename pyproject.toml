@@ -25,6 +25,11 @@ dependencies = [
     "python-slugify>=8.0.0",
     "pyyaml>=6.0.0",
     "questionary>=2.1.1",
+    # Unicode script-property regexes (\p{L}, V1 set ops) for the OCR
+    # script-anomaly gate (aglaia/workers/ocr/text_scripts.py) — stdlib `re`
+    # can't do these. Core OCR path, so it belongs in base (was only present
+    # transitively via the platform VLM extras → Windows/Linux imports broke).
+    "regex>=2024.5.15",
     "rich>=13.0.0",
     "scipy>=1.11.0",
     # Subcommand CLI (gui/run/setup/…). Lightweight pure-Python (Click + the
