@@ -42,8 +42,14 @@ class ReceiverInfo:
     token: str
     fingerprint: str
 
-    def qr_uri(self) -> str:
-        return f"aglaia://v1?h={self.host}&p={self.port}&t={self.token}&fp={self.fingerprint}"
+    def qr_uri(self, mode: str | None = None) -> str:
+        """Pairing URI. ``mode`` (e.g. ``"live"``) is appended as ``&m=…``
+        only when set; the one-shot push receiver omits it, and an old phone
+        app harmlessly ignores an unknown ``m`` value."""
+        uri = f"aglaia://v1?h={self.host}&p={self.port}&t={self.token}&fp={self.fingerprint}"
+        if mode:
+            uri += f"&m={mode}"
+        return uri
 
 
 def lan_ip() -> str:
