@@ -1,3 +1,11 @@
+[build-system]
+# Explicit so `uv sync` installs the `aglaia` package (and its console script)
+# into the dev venv, and `uv build` / `pip install` use setuptools rather than
+# the PEP 517 legacy fallback. Without this, `uv run aglaia …` fails from a
+# clean checkout ("No module named 'aglaia'") — only `python -m aglaia` works.
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "aglaia"
 version = "0.1.0rc2"
