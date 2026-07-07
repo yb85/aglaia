@@ -134,6 +134,30 @@ in `keycontrols`.
 
 `WebcamThread.set_transform(str)` parses a string like `"180+mirror"`: rotation in {0, 90, 180, 270}, plus optional `mirror` (horizontal) and `flip` (vertical). The GUI transform buttons mutate this state live.
 
+## Bridge tab (phone as a live camera)
+
+The **Bridge** sidebar tab (`smartphone` icon) pairs a phone running
+[AglaiaBridge](https://github.com/yb85/aglaia-bridge) and uses it as a live
+camera — the phone streams a low-res preview and, on a desktop shutter, snaps a
+full-res still. Full protocol + trust model: **[bridge.md](bridge.md)**.
+
+- Opening the tab **arms** a pairing QR (`BridgeLiveController.arm()` →
+  `BridgeLiveServer`, a fresh ephemeral cert + token each time). Leaving the tab
+  before a phone connects **disarms** it; a *live* session survives tab switches
+  (so voice capture from other tabs keeps working).
+- On connect, MainWindow builds a live `CaptureTab` (`_make_live_capture_tab(bridge=True)`
+  — camera/format pickers and freehand hidden, Deactivate → "End bridge session")
+  backed by `BridgeCameraThread`, which duck-types `WebcamThread`. So the shutter,
+  voice, zoom, transform, and DPI-calibration paths are **identical** to the
+  webcam — `capture()` just tags the scan `source_ref="bridge#<device>"`.
+- **Zoom** is a desktop-side digital crop (no wire command); `effective_dpi =
+  base × zoom` is unchanged.
+- **DPI calibration** uses the low-res preview for live framing and pulls a
+  single full-res still only to measure (see [bridge.md](bridge.md) + the
+  `_grab_measure_frame` note in `CalibrationDialogs.py`).
+- **Mutual exclusion**: bridge and the local webcam can't run at once. Device-free
+  testing: `tools/fake_bridge_phone.py` (right-click the QR → "Copy pairing URI").
+
 ## OCR tab
 
 The sidebar **OCR** tab (`aglaia/gui/sidebar/tabs/OcrTab.py`) picks an engine via a

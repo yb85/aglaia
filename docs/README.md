@@ -12,6 +12,7 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | [processors.md](./processors.md) | DPIfixer, SkewFinder, PageDetector, Binarizer, PageDewarper — options, behavior, extension points, **drop-in user plugins** |
 | [imagebuffer.md](./imagebuffer.md) | Standard image envelope, meta keys, write logic |
 | [gui.md](./gui.md) | Capture GUI (aglaia), threads, key/voice bindings, calibration buttons |
+| [bridge.md](./bridge.md) | Phone bridge — one-shot `.aglbundle` push (#47) + live phone-as-camera (#49): `bridge-live/1` protocol, trust model, failure matrix, device-free E2E |
 | [calibration.md](./calibration.md) | Camera calibration workflow, DPI calibration, camera_params.json |
 | [configuration.md](./configuration.md) | Config layers (defaults / YAML / CLI), `args.options` shape, path resolution |
 | [development.md](./development.md) | Env setup, module map, multiprocessing constraints, adding processors, conventions |
