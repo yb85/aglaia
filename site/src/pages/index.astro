@@ -12,6 +12,9 @@ const DOWNLOADS = {
 };
 const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
+// iOS: launching on the App Store — set the real product id once approved
+// (currently in TestFlight review). https://apps.apple.com/app/idXXXXXXXXXX
+const APPSTORE = 'https://apps.apple.com/app/id0000000000';
 // Comparison-table check / cross marks.
 const CHK = '<svg class="ic ic--ok" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="yes"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
 const NO  = '<svg class="ic ic--no" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="no"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
@@ -46,7 +49,7 @@ const powers = [
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Aglaïa — powerful, fast & free book scanner</title>
-    <meta name="description" content="From your phone camera to a curated, searchable PDF — at your desk, in the library, or wherever you are. No flatbed, no scanning rig. Just you, your laptop and your phone." />
+    <meta name="description" content="From your phone camera to a curated, searchable PDF — at your desk, in the library, or wherever you are. No flatbed, no scanning rig. Just you and your phone." />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
@@ -85,8 +88,78 @@ const powers = [
           <p class="lede reveal">
             <span class="lede__l1">From your phone camera to a curated, searchable PDF</span>
             <span class="lede__l2">At your desk, in the library, or wherever you are.</span>
-            <span class="lede__l3">No flatbed, no bulky rig: just you, your laptop and your phone.</span>
+            <span class="lede__l3">No flatbed, no bulky rig: <span class="hl">just you and your phone.</span></span>
           </p>
+          <!-- iOS is the primary, phone-first CTA -->
+          <div class="cta cta--ios reveal">
+            <a class="appstore" href={APPSTORE} aria-label="Download Aglaïa on the App Store">
+              <svg class="appstore__logo" viewBox="0 0 384 512" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M318.7 268c-.3-40.5 18.1-71 55.3-93.4-20.8-29.8-52.2-46.2-93.7-49.4-39.3-3.1-82.2 23-98 23-16.7 0-54.7-21.9-84.6-21.9C39.3 127.2 0 165.1 0 240.4c0 22.2 4.1 45.1 12.2 68.7 10.9 31.6 50.2 108.9 91.2 107.6 21.4-.5 36.6-15.2 64.5-15.2 27 0 41.1 15.2 64.9 15.2 41.4-.6 77-70.9 87.4-102.6-55.6-26.2-52.7-76.8-52.5-79.1zM255.1 79.5c30.4-36.1 27.6-68.9 26.7-80.7-26.8 1.5-57.8 18.2-75.5 38.8-19.5 22-30.9 49.2-28.4 78.6 28.9 2.2 55.3-12.6 77.2-36.7z"/></svg>
+            <span class="appstore__txt"><small>Download on the</small><b>App Store</b></span>
+              <span class="appstore__soon">Coming soon</span>
+            </a>
+          </div>
+          <!-- our single biggest advantage: genuinely, fully free -->
+          <p class="freebadge reveal">
+            <span class="freebadge__big">FREE</span>
+            <span class="freebadge__sub">No paywall<br />no in-app purchase<br />no subscription</span>
+          </p>
+          <!-- iOS showcase: a horizontal gallery centred on an interactive
+               before/after slider (real scan 8B), flanked by the Projects
+               and Markdown screens. Drag the centre to see the pipeline. -->
+          <div class="phones reveal">
+            <div class="phones__track" data-phones>
+              <figure class="phone phone--side">
+                <div class="phone__frame">
+                  <span class="phone__island" aria-hidden="true"></span>
+                  <div class="phone__screen">
+                    <img class="phone__shot" src="/landing/ios-capture.webp" width="440" height="953"
+                         alt="The Aglaïa point-and-shoot capture screen on iPhone" loading="lazy" decoding="async" />
+                  </div>
+                </div>
+                <figcaption>Point &amp; shoot capture<br /><small>Use a remote, your voice, or let Aglaïa do it for you</small></figcaption>
+              </figure>
+              <figure class="phone phone--hero">
+                <div class="phone__frame">
+                  <span class="phone__island" aria-hidden="true"></span>
+                  <div class="phone__screen">
+                    <img class="phone__topbar" src="/landing/ios-inspect-top.webp" width="540" height="158"
+                         alt="" aria-hidden="true" loading="lazy" decoding="async" />
+                    <div class="ba ba--phone" style="--pos:52%">
+                      <img class="ba__img" src="/landing/ios-8b-before.webp" width="512" height="821"
+                           alt="A page photographed under uneven light — grey and skewed." loading="lazy" decoding="async" />
+                      <div class="ba__after">
+                        <img class="ba__img" src="/landing/ios-8b-after.webp" width="512" height="821"
+                             alt="The same page after Aglaïa — flat, clean, deskewed." loading="lazy" decoding="async" />
+                      </div>
+                      <span class="ba__divider" aria-hidden="true"></span>
+                      <span class="ba__tag ba__tag--l">before</span>
+                      <span class="ba__tag ba__tag--r">after</span>
+                      <input class="ba__range" type="range" min="0" max="100" value="52" aria-label="Drag to reveal the processed page" />
+                    </div>
+                  </div>
+                </div>
+                <figcaption><b>Fully automatic processing</b><br /><small>Drag slider to compare</small></figcaption>
+              </figure>
+              <figure class="phone phone--side">
+                <div class="phone__frame">
+                  <span class="phone__island" aria-hidden="true"></span>
+                  <div class="phone__screen">
+                    <img class="phone__shot" src="/landing/ios-markdown.webp" width="440" height="953"
+                         alt="Searchable Markdown export on iPhone" loading="lazy" decoding="async" />
+                  </div>
+                </div>
+                <figcaption>Searchable Markdown &amp; PDF<br /><small>Apple OCR or Mistral OCR (API key)</small></figcaption>
+              </figure>
+            </div>
+          </div>
+          <!-- tip sits right under the gallery captions: free app, word of mouth -->
+          <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
+            <span class="tip__heart" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
+            </span>
+            <span class="tip__label">Tip the developer</span>
+          </a>
+          <p class="cta__alt reveal">You can use your computer if you prefer</p>
           <div class="cta reveal">
             <div class="dl">
               <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
@@ -108,13 +181,7 @@ const powers = [
             </a>
           </div>
           <p class="cta__note reveal">Linux NVIDIA users get a ready-to-run CUDA AppImage. On Windows, CUDA acceleration is available only via <a href="#install">CLI install</a> on WSL2.</p>
-          <p class="fineprint reveal">macOS · Windows · Linux — free &amp; source-available.</p>
-          <a class="tip reveal" href={KOFI} target="_blank" rel="noopener">
-            <span class="tip__heart" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>
-            </span>
-            <span class="tip__label">Tip the developer</span>
-          </a>
+          <p class="fineprint reveal">The <b>macOS · Windows · Linux desktop app</b> is free &amp; <a href={GITHUB}>source-available</a>. The iOS app is free too, but closed-source.</p>
         </div>
       </section>
 
@@ -416,11 +483,11 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
               <tr>
                 <th>Extendable?</th>
                 <td><span class="cmp__inline"><Fragment set:html={NO} /> Closed source / proprietary</span></td>
-                <td class="cmp__hot"><span class="cmp__inline"><Fragment set:html={CHK} /> Sources available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a></span></td>
+                <td class="cmp__hot"><span class="cmp__inline"><Fragment set:html={CHK} /> Desktop source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a></span></td>
               </tr>
             </tbody>
           </table>
-          <p class="versus__foot">* Personal modifications and contributions welcome; competitive redistribution (SaaS, repackaging) prohibited.</p>
+          <p class="versus__foot">* The desktop app (macOS · Windows · Linux) is source-available: personal modifications and contributions welcome; competitive redistribution (SaaS, repackaging) prohibited.</p>
         </div>
       </section>
 
@@ -428,7 +495,7 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
       <section class="final">
         <div class="final__inner reveal">
           <h2>Digitize your shelf.</h2>
-          <p>Free, source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, and yours to extend.</p>
+          <p>Free — and the desktop app is source-available<a class="asterisk" href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">*</a>, yours to extend.</p>
           <div class="cta">
             <div class="dl">
               <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
@@ -632,6 +699,45 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
         sync();
       });
 
+      // Centre the iOS gallery on its hero (the interactive slider) so the
+      // Projects / Markdown screens peek at the left/right extremities.
+      const phones = document.querySelector<HTMLElement>('[data-phones]');
+      const hero = phones?.querySelector<HTMLElement>('.phone--hero');
+      if (phones && hero) {
+        const centre = () => {
+          phones.scrollLeft = hero.offsetLeft
+            - (phones.clientWidth - hero.clientWidth) / 2;
+        };
+        centre();
+        window.addEventListener('resize', centre, { passive: true });
+        const targetFor = (p: HTMLElement) =>
+          p.offsetLeft - (phones.clientWidth - p.clientWidth) / 2;
+        // When the hero (slider) is scrolled off-centre, disable its compare
+        // slider — `.is-off` sets pointer-events:none on the range — so a tap
+        // ANYWHERE on it recentres instead of dragging. Re-enabled once centred.
+        const scrollable = () => phones.scrollWidth - phones.clientWidth > 1;
+        const syncHeroState = () => {
+          // only "off-centre" when the track actually scrolls — on desktop the
+          // three phones fit (no scroll) so the slider must stay enabled
+          hero.classList.toggle('is-off',
+            scrollable() && Math.abs(targetFor(hero) - phones.scrollLeft) > 12);
+        };
+        syncHeroState();
+        phones.addEventListener('scroll', syncHeroState, { passive: true });
+        window.addEventListener('resize', syncHeroState, { passive: true });
+        // Tap a phone to bring it to centre (only when the track scrolls). Side
+        // phones always recentre; the hero recentres only when off-centre.
+        phones.querySelectorAll<HTMLElement>('.phone').forEach((p) => {
+          p.addEventListener('click', () => {
+            if (!scrollable()) return;
+            const off = Math.abs(targetFor(p) - phones.scrollLeft);
+            const isHero = p.classList.contains('phone--hero');
+            if (off < (isHero ? 12 : 4)) return;
+            phones.scrollTo({ left: targetFor(p), behavior: 'smooth' });
+          });
+        });
+      }
+
       // Smooth scroll + parallax — progressive enhancement; a failure here
       // must never block the reveal above, so it's dynamically imported and
       // fully guarded.
@@ -819,7 +925,10 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
         background: radial-gradient(circle at 50% 38%, rgba(79,143,208,.32), rgba(79,143,208,0) 60%);
         filter: blur(20px); z-index: 0; pointer-events: none;
       }
-      .hero__inner { position: relative; z-index: 2; max-width: 880px; text-align: center; }
+      /* width:100% + min-width:0 pin the hero to the grid area so its content
+         (the phone scroller) can't grow it past the viewport — without this
+         the centred grid sizes it to max-content and nothing clips */
+      .hero__inner { position: relative; z-index: 2; width: 100%; max-width: 880px; min-width: 0; text-align: center; }
       .hero__logo {
         width: clamp(240px, 38vw, 420px); height: auto; margin: 0 auto 26px;
         filter: drop-shadow(0 0 28px rgba(120,180,240,.45)) drop-shadow(0 0 60px rgba(79,143,208,.25));
@@ -833,6 +942,123 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
       .lede__l1, .lede__l3 { color: #cfddec; }
       .lede__l2 { color: #8ea2b7; }
       .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+      /* iOS is the primary CTA — the App Store badge, phone-first. */
+      .cta--ios { margin-top: 30px; }
+      .appstore { position: relative; display: inline-flex; align-items: center; gap: 11px;
+        padding: 12px 22px; border-radius: 13px; background: #000; color: #fff;
+        border: 1px solid #2a2a2a; text-decoration: none;
+        transition: transform .2s, box-shadow .2s; }
+      /* "Coming soon" ribbon — the app is in TestFlight, not yet public */
+      .appstore__soon { position: absolute; top: -11px; right: -12px;
+        background: linear-gradient(90deg, #f5a623, #f7b955); color: #201400;
+        font-size: .66rem; font-weight: 800; letter-spacing: .05em;
+        text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+        transform: rotate(4deg); box-shadow: 0 5px 16px -4px rgba(0,0,0,.7);
+        white-space: nowrap; }
+      .appstore:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -12px rgba(0,0,0,.7); }
+      .appstore__logo { flex: none; }
+      .appstore__txt { display: flex; flex-direction: column; line-height: 1.05; text-align: left; }
+      .appstore__txt small { font-size: .62rem; letter-spacing: .02em; opacity: .9; }
+      .appstore__txt b { font-size: 1.28rem; font-weight: 600; letter-spacing: -.01em; }
+      /* FREE — our biggest advantage, vibrant green with a soft glow pulse */
+      .freebadge { margin: 20px 0 4px; text-align: center; line-height: 1.12; }
+      .freebadge__big { display: block; font-size: clamp(1.7rem, 5vw, 2.3rem);
+        font-weight: 900; letter-spacing: .08em;
+        background: linear-gradient(90deg, #4ade80, #22d3a7);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        animation: freeGlow 3.2s ease-in-out infinite; }
+      @keyframes freeGlow {
+        0%, 100% { filter: drop-shadow(0 0 9px rgba(74,222,128,.35)); }
+        50%      { filter: drop-shadow(0 0 20px rgba(52,211,167,.7)); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .freebadge__big { animation: none; filter: drop-shadow(0 0 12px rgba(74,222,128,.5)); }
+      }
+      .freebadge__sub { display: block; margin-top: 8px; font-size: .95rem;
+        font-weight: 600; color: #93e6c0; letter-spacing: .01em; }
+      /* secondary line steering desktop users below the badge */
+      .cta__alt { margin: 22px 0 12px; font-size: .95rem; color: #8ea2b7; }
+
+      /* ── iOS phone gallery (interactive slider centred) ─────────── */
+      .phones { margin: 30px auto 4px; max-width: 940px; display: flex; }
+      /* min-width:0 on the flex-item track is what stops its fixed-width phones
+         from reporting a huge min-content and dragging the whole hero wider
+         than the viewport — the track scrolls internally instead */
+      .phones__track { flex: 1 1 auto; min-width: 0; display: flex; gap: clamp(14px, 3vw, 30px);
+        justify-content: center; align-items: center; overflow-x: auto;
+        scroll-snap-type: x mandatory; padding: 12px 24px 6px;
+        -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+      .phones__track::-webkit-scrollbar { display: none; }
+      .phone { flex: 0 0 auto; margin: 0; scroll-snap-align: center; }
+      .phone figcaption { text-align: center; color: #a6b6c8; font-size: .82rem; margin-top: 14px; }
+      .phone figcaption b { color: #e8eef5; }
+      .phone figcaption small { display: block; margin-top: 2px;
+        font-size: .78em; font-weight: 400; color: #8194a8; }
+      /* device: brushed-titanium rim padding a black screen (iPhone Pro) */
+      .phone__frame { position: relative; width: clamp(168px, 24vw, 220px);
+        aspect-ratio: 9 / 19.5; padding: 4px; border-radius: 40px;
+        background: linear-gradient(145deg, #55585d 0%, #2a2b2e 20%, #45474c 38%,
+          #202124 60%, #4a4c51 82%, #1c1d20 100%);
+        box-shadow: 0 30px 78px -30px rgba(0,0,0,.9), 0 1px 2px rgba(255,255,255,.14) inset,
+          0 0 0 1px rgba(0,0,0,.55); }
+      /* side buttons — volume pair (left) via ::before, power (right) via ::after */
+      .phone__frame::before { content: ""; position: absolute; left: -2px; top: 26%;
+        width: 3px; height: 15%; border-radius: 2px 0 0 2px;
+        background: linear-gradient(90deg, #4a4c51, #202124); }
+      .phone__frame::after { content: ""; position: absolute; right: -2px; top: 30%;
+        width: 3px; height: 11%; border-radius: 0 2px 2px 0;
+        background: linear-gradient(270deg, #4a4c51, #202124); }
+      .phone__screen { position: relative; width: 100%; height: 100%;
+        border-radius: 36px; overflow: hidden; background: #000;
+        display: flex; flex-direction: column;
+        box-shadow: 0 0 0 1.5px #050506 inset; }
+      /* Dynamic Island — floats over the screen top; the real status bar in
+         the screenshots leaves the centre black, so the pill lands cleanly */
+      .phone__island { position: absolute; z-index: 6; top: 3.1%; left: 50%;
+        transform: translateX(-50%); width: 30%; height: 3%; min-height: 15px;
+        background: #000; border-radius: 999px;
+        box-shadow: 0 0 0 1px rgba(255,255,255,.05), 0 1px 2px rgba(0,0,0,.6); }
+      .phone__shot { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+      /* the centre (slider) is larger + lifted so it reads as the focus */
+      .phone--hero .phone__frame { width: clamp(196px, 28vw, 258px); }
+      /* lock each figure to its frame width so a long caption WRAPS inside it
+         instead of stretching the figure (which broke the gallery spacing) */
+      .phone--hero { transform: translateY(-6px); z-index: 2; width: clamp(196px, 28vw, 258px); }
+      .phone--side { opacity: .94; width: clamp(168px, 24vw, 220px); }
+      /* slider chrome: the REAL Inspect top bar cropped from a device
+         screenshot (status bar + floating Done / Scan 8·B / tools) */
+      .phone__topbar { flex: none; display: block; width: 100%; height: auto; }
+      /* the page sits de-zoomed on the same dark grey as the top bar, so it
+         letterboxes top & bottom and blends into the chrome (device parity) */
+      .ba--phone { flex: 1 1 auto; border-radius: 0; background: #1c1c1e; }
+      /* BOTH layers must de-zoom — the after img is `.ba__after .ba__img`, so it
+         needs its own (higher-specificity) rule or the base cover rule wins */
+      .ba--phone .ba__img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
+      .ba--phone .ba__after .ba__img { object-fit: contain; object-position: center; }
+      .ba--phone .ba__tag { font-size: .6rem; bottom: 8px; }
+      /* off-centre: kill the slider input so a tap recentres the phone; the
+         whole frame reads as a button */
+      .phone--hero.is-off .ba__range { pointer-events: none; }
+      .phone--hero.is-off .phone__frame { cursor: pointer; }
+      /* divider + knob matched to the real Inspect handle: pale-white hairline
+         with a soft drop shadow, white puck (not the site's blue accent) */
+      .ba--phone .ba__divider { width: 3px; transform: translateX(-1.5px);
+        background: rgba(255,255,255,.96);
+        box-shadow: 0 0 5px rgba(0,0,0,.55), 0 0 1px rgba(0,0,0,.4); }
+      .ba--phone .ba__divider::after { width: 27px; height: 27px;
+        background-color: #fff; background-size: 15px 15px;
+        box-shadow: 0 2px 8px -1px rgba(0,0,0,.5); }
+      @media (max-width: 720px) {
+        /* The scroller fills the hero's content box (min-width:0 on the track
+           keeps it from forcing the page wider). The slider starts centred
+           (JS); the capture & markdown phones peek at the sides and centre
+           when tapped. Side padding lets the edge phones reach the centre. */
+        .phones__track { justify-content: flex-start;
+          padding-inline: calc((100% - 168px) / 2);
+          scroll-padding-inline: calc((100% - 168px) / 2); }
+        .phone--hero { transform: none; }
+        .phone--side { opacity: 1; }
+      }
       .cta__note { margin-top: 14px; text-align: center; font-size: .82rem; color: #6c7c90; }
       .cta__note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
       .fineprint { margin-top: 18px; color: #6c7c90; font-size: .9rem; }
