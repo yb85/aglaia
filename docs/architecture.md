@@ -109,6 +109,7 @@ In the GUI, `ProcessMonitor` (`aglaia/workers/ProcessMonitor.py`) drains the que
 ### Producers
 
 - **GUI (`aglaia`)**: `MainWindow.capture()` reads a frame from `WebcamThread`, applies undistortion if a calibration exists, builds an `ImageBuffer`, and `processing_queue.put(img_buf)`.
+- **Bridge (phone as camera, #49)**: `aglaia/workers/bridge_live.py` (`BridgeLiveServer`) runs a persistent token-gated HTTPS session — the phone streams preview frames and returns a full-res still on demand (protocol: [bridge.md](bridge.md)). `aglaia/gui/BridgeCameraThread.py` wraps it as a `WebcamThread` look-alike, so `MainWindow.capture()` (above) is the producer unchanged — same `ImageBuffer`, same queue, only `source_ref="bridge#<device>"`. Distinct from the one-shot `.aglbundle` receiver (`bridge_server.py`, #47), which is an *import* producer.
 - **Imports (GUI import panel / `aglaia run`)**: `aglaia/workers/ImportHelpers.py` (`enqueue_pdf_files` / `enqueue_image_files`) extracts or renders pages via `PDFprocessor`, wraps each in an `ImageBuffer`, and feeds the same chain.
 
 ## Process tree at runtime

@@ -238,7 +238,12 @@ class CaptureTab(QWidget):
         # restarts the webcam on change. The format list exposes a
         # Continuity Camera's several modes so the user can pick the full,
         # un-cropped view if the auto-pick (widest FOV / full sensor) is off.
-        cam_row = QHBoxLayout()
+        # Rows are wrapped in container widgets (``camera_row`` / ``format_row``)
+        # so the bridge/live-phone tab can hide device selection wholesale
+        # (the phone owns its camera — there's nothing to pick).
+        self.camera_row = QWidget()
+        cam_row = QHBoxLayout(self.camera_row)
+        cam_row.setContentsMargins(0, 0, 0, 0)
         cam_row.setSpacing(6)
         cam_lbl = QLabel(self.tr("Camera"))
         cam_lbl.setObjectName("FieldLabel")
@@ -246,9 +251,11 @@ class CaptureTab(QWidget):
         self.camera_combo.setToolTip(self.tr("Capture device"))
         cam_row.addWidget(cam_lbl)
         cam_row.addWidget(self.camera_combo, 1)
-        outer.addLayout(cam_row)
+        outer.addWidget(self.camera_row)
 
-        fmt_row = QHBoxLayout()
+        self.format_row = QWidget()
+        fmt_row = QHBoxLayout(self.format_row)
+        fmt_row.setContentsMargins(0, 0, 0, 0)
         fmt_row.setSpacing(6)
         fmt_lbl = QLabel(self.tr("Format"))
         fmt_lbl.setObjectName("FieldLabel")
@@ -257,7 +264,7 @@ class CaptureTab(QWidget):
             self.tr("Resolution / field of view. Widest is listed first."))
         fmt_row.addWidget(fmt_lbl)
         fmt_row.addWidget(self.format_combo, 1)
-        outer.addLayout(fmt_row)
+        outer.addWidget(self.format_row)
 
         # ── Current DPI readout ─────────────────────────────────────
         # Always-visible scan resolution at the live zoom. MainWindow

@@ -37,6 +37,8 @@ from aglaia.gui.sidebar import SidebarPanel
 from aglaia.gui.sidebar.tabs import (
     CaptureTab, ExportTab, ImportTab, OcrTab, PipelineTab,
 )
+from aglaia.gui.sidebar.tabs.BridgeTab import BridgeTab
+from aglaia.gui.bridge_live_controller import BridgeLiveController
 from aglaia.gui.colors import (
     COLOR_BG,
     COLOR_BG_BUTTON,
@@ -1293,6 +1295,121 @@ class MainWindow(QMainWindow):
             self._capture_stack.setCurrentIndex(0)
         self.toast("Capture deactivated — camera released.")
 
+    # ── Bridge: phone as a live camera (#49) ───────────────────────
+    def _on_sidebar_tab_changed(self, name: str) -> None:
+        """Arm the pairing QR when the Bridge tab is first shown; disarm when
+        leaving it while still unpaired. A *live* session survives tab switches
+        so voice-triggered capture from other tabs keeps working."""
+        if name == "bridge":
+            if not getattr(self, "_bridge_live", False) and self._bridge_controller.server is None:
+                self._bridge_arm()
+        elif not getattr(self, "_bridge_live", False) and self._bridge_controller.server is not None:
+            self._bridge_controller.disarm()
+            self._bridge_tab.show_pairing(
+                None, self.tr("Open the Bridge tab to pair a phone."))
+
+    def _bridge_arm(self) -> None:
+        """Start a fresh live server (new cert + token) and render its QR."""
+        from aglaia.workers.bridge_server import qr_png
+        try:
+            info = self._bridge_controller.arm()
+        except Exception as exc:  # noqa: BLE001 — surface startup failure in the tab
+            self._bridge_tab.show_pairing(
+                None, self.tr("Couldn't start pairing: %s") % exc)
+            return
+        uri = info.qr_uri(mode="live")
+        pix = QPixmap()
+        pix.loadFromData(qr_png(uri))
+        self._bridge_tab.show_pairing(
+            pix,
+            self.tr("Open aglaia-bridge on your phone, tap Connect, and scan this "
+                    "code.\nWaiting on %s:%d…\n"
+                    "(If your Wi-Fi blocks device-to-device traffic, share a hotspot.)")
+            % (info.host, info.port),
+            uri=uri,
+        )
+
+    def _bridge_restart_pairing(self) -> None:
+        if getattr(self, "_bridge_live", False):
+            self._on_bridge_session_ended("restart")
+        else:
+            self._bridge_arm()
+
+    def _on_bridge_session_started(self, device: str) -> None:
+        """A phone connected: build the live capture UI backed by a
+        ``BridgeCameraThread`` — unless a local webcam is already running."""
+        if getattr(self, "webcam_thread", None) is not None:
+            # Mutual exclusion — refuse rather than fight over webcam_thread.
+            self._bridge_controller.disarm()
+            self.toast("Deactivate the local camera before using Bridge.")
+            self._bridge_arm()
+            return
+        from aglaia.gui.BridgeCameraThread import BridgeCameraThread
+        server = self._bridge_controller.server
+        if server is None:
+            return
+        # Repoint _capture_tab (update_image + DPI routing) at the bridge's live
+        # tab; stash the prior value so teardown restores it.
+        self._bridge_prev_capture_tab = getattr(self, "_capture_tab", None)
+        thread = BridgeCameraThread(server)
+        thread.change_pixmap_signal.connect(self.update_image)
+        thread.session_lost.connect(self._on_bridge_session_ended)
+        thread.still_failed.connect(
+            lambda: self.toast("Phone didn't return a still — try again."))
+        thread.set_overlay_fn(self._freehand_overlay)
+        self.webcam_thread = thread
+        self._active_cam_id = f"bridge:{device}"
+        ct = self._make_live_capture_tab(bridge=True)
+        self._capture_tab = ct
+        self._bridge_tab.show_live(ct)
+        self._bridge_live = True
+        thread.start()
+        self.toast(f"Bridge connected — {device}.")
+
+    def _end_bridge_session(self) -> None:
+        self._on_bridge_session_ended("user")
+
+    def _on_bridge_session_ended(self, reason: str) -> None:
+        """Tear the live bridge UI + thread down, then re-arm a fresh QR if the
+        Bridge tab is still showing. Idempotent — a user End and a ``session_lost``
+        signal can race."""
+        if not getattr(self, "_bridge_live", False):
+            return
+        self._bridge_live = False
+        wt = getattr(self, "webcam_thread", None)
+        if wt is not None:
+            try:
+                wt.change_pixmap_signal.disconnect(self.update_image)
+            except Exception:
+                pass
+            try:
+                wt.stop()
+            except Exception:
+                pass
+            self.webcam_thread = None
+        ct = getattr(self, "_capture_tab", None)
+        if ct is not None and hasattr(ct, "btn_voice"):
+            try:
+                if ct.btn_voice.isChecked():
+                    ct.btn_voice.setChecked(False)
+            except Exception:
+                pass
+        live = self._bridge_tab.clear_live()
+        if live is not None:
+            live.deleteLater()
+        # Restore _capture_tab to whatever it pointed at before the session.
+        self._capture_tab = getattr(self, "_bridge_prev_capture_tab", None)
+        self.btn_full_calibrate = None
+        self.btn_dpi_calibrate = None
+        self.btn_freehand = None
+        self._bridge_controller.disarm()
+        if self.sidebar.active() == "bridge":
+            self._bridge_arm()  # fresh QR, ready to reconnect
+        else:
+            self._bridge_tab.show_pairing(
+                None, self.tr("Session ended. Open the Bridge tab to reconnect."))
+        self.toast(f"Bridge session ended ({reason}).")
+
     def _build_sidebar(self, is_capture: bool) -> None:
         """Construct the right-side activity bar + tab content stack.
 
@@ -1384,6 +1501,17 @@ class MainWindow(QMainWindow):
                               icon_name="scan-text", tooltip=self.tr("OCR"))
         self.sidebar.add_tab("export", self._export_tab,
                               icon_name="export", tooltip=self.tr("Export"))
+        # Bridge — pair a phone and use it as a live camera (#49). Arming
+        # (start the QR server) is deferred until the tab is first shown, via
+        # the tab_changed handler below.
+        self._bridge_tab = BridgeTab()
+        self._bridge_tab.restart_requested.connect(self._bridge_restart_pairing)
+        self._bridge_controller = BridgeLiveController(self)
+        self._bridge_controller.session_started.connect(self._on_bridge_session_started)
+        self._bridge_controller.session_ended.connect(self._on_bridge_session_ended)
+        self.sidebar.add_tab("bridge", self._bridge_tab,
+                             icon_name="smartphone", tooltip=self.tr("Bridge"))
+        self.sidebar.tab_changed.connect(self._on_sidebar_tab_changed)
         # Bottom toolbox, top-to-bottom: close project, report bug, settings.
         self.sidebar.add_bottom_action(
             "close_project", "square-x", self.tr("Close project (⌘W)"),
@@ -1460,12 +1588,18 @@ class MainWindow(QMainWindow):
         if idx >= 0:
             combo.setCurrentIndex(idx)
 
-    def _make_live_capture_tab(self) -> "CaptureTab":
+    def _make_live_capture_tab(self, *, bridge: bool = False) -> "CaptureTab":
         """Build a live ``CaptureTab``, wire its handlers, show + connect
         the Deactivate button, refresh the legacy button aliases, and kick
         off the max-zoom probe. Shared by launch-from-camera and the
         late-activation (open-from-disk) path. Does NOT touch the webcam
-        thread or the stack — callers own that."""
+        thread or the stack — callers own that.
+
+        ``bridge=True`` builds the tab for a phone session: the camera/format
+        pickers are hidden (no local device to choose), freehand/SIFT is hidden
+        (it would spam remote stills), and Deactivate becomes "End bridge
+        session". Everything else — shutter, voice, zoom, transform, DPI
+        calibrate — wires identically."""
         from aglaia.gui.theme import icon as _icon
         ct = CaptureTab()
         for ico_name, label, _ in self._transform_items:
@@ -1507,7 +1641,11 @@ class MainWindow(QMainWindow):
         # Primary capture button — same action as SPACE / voice "photo".
         ct.btn_capture.clicked.connect(self.capture)
         ct.btn_deactivate.show()
-        ct.btn_deactivate.clicked.connect(self._deactivate_capture_clicked)
+        if bridge:
+            ct.btn_deactivate.setText(self.tr("End bridge session"))
+            ct.btn_deactivate.clicked.connect(self._end_bridge_session)
+        else:
+            ct.btn_deactivate.clicked.connect(self._deactivate_capture_clicked)
         # Legacy button aliases so other call sites keep working.
         self.btn_full_calibrate = ct.btn_full_calibrate
         self.btn_dpi_calibrate = ct.btn_dpi_calibrate
@@ -1521,10 +1659,17 @@ class MainWindow(QMainWindow):
         self._zoom_init_timer.setSingleShot(True)
         self._zoom_init_timer.timeout.connect(self._init_zoom_range)
         self._zoom_init_timer.start(1500)
-        # Camera + format pickers (Continuity Camera exposes several modes).
-        self._populate_capture_devices(ct)
-        ct.camera_combo.currentIndexChanged.connect(self._on_capture_device_changed)
-        ct.format_combo.currentIndexChanged.connect(self._on_capture_format_changed)
+        if bridge:
+            # No local device to pick, and freehand/SIFT would fire a remote
+            # still per tracked motion — hide both. The phone owns its camera.
+            ct.camera_row.hide()
+            ct.format_row.hide()
+            ct.btn_freehand.hide()
+        else:
+            # Camera + format pickers (Continuity Camera exposes several modes).
+            self._populate_capture_devices(ct)
+            ct.camera_combo.currentIndexChanged.connect(self._on_capture_device_changed)
+            ct.format_combo.currentIndexChanged.connect(self._on_capture_format_changed)
         # Seed the DPI readout (uncalibrated default until calibration runs).
         try:
             ct.set_dpi(self.effective_dpi(),
@@ -2202,10 +2347,18 @@ class MainWindow(QMainWindow):
             # Encode the camera id in source_ref ("webcam#<id>") so the
             # Fix-input-DPI view can show "capture #<id>" without a schema
             # change. Legacy scans carry the bare "webcam".
-            _cam_id = getattr(self, "_active_cam_id", getattr(self.args, "camera_id", 0))
+            # Tag the origin: a bridge (phone) still vs. a local webcam frame.
+            # Both keep source="capture" so downstream stays uniform; only the
+            # source_ref prefix differs (bridge#<device> vs webcam#<id>).
+            if getattr(self.webcam_thread, "is_bridge", False):
+                _dev = getattr(self.webcam_thread, "device_name", None) or "phone"
+                _source_ref = f"bridge#{_dev}"
+            else:
+                _cam_id = getattr(self, "_active_cam_id", getattr(self.args, "camera_id", 0))
+                _source_ref = f"webcam#{_cam_id}"
             scan_id = scan_repo.create(
                 "capture", self.pipeline_version_id,
-                source_ref=f"webcam#{_cam_id}", capture_dpi=capture_dpi,
+                source_ref=_source_ref, capture_dpi=capture_dpi,
             )
             idx_str = f"{scan_repo.get(scan_id)['idx']:03d}"
             filestem = f"{self.slug_name}_{idx_str}"
@@ -4614,6 +4767,14 @@ class MainWindow(QMainWindow):
         self._log_tab = viewer
 
     def closeEvent(self, event):
+        # Tell a paired phone the desktop is going away (queues "bye") and shut
+        # the pairing server down before the webcam_thread stop below.
+        bc = getattr(self, "_bridge_controller", None)
+        if bc is not None:
+            try:
+                bc.disarm()
+            except Exception:
+                pass
         if self.webcam_thread is not None:
             self.webcam_thread.stop()
         self.monitor_thread.stop()
