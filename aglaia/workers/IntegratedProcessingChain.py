@@ -419,6 +419,9 @@ class IntegratedProcessingChain:
         no scan is lost. Each entry is a small DB ref (node_id + start_idx); the
         consuming worker re-decodes from the project DB. Retry-capped."""
         try:
+            # The busy marker is bookkeeping, not resumable work — drop it so a
+            # dead worker can't leave the chain permanently "not idle".
+            self._inflight.pop(f"{worker_name}::busy", None)
             entry = self._inflight.pop(worker_name, None)
         except Exception:
             entry = None
@@ -609,8 +612,11 @@ class IntegratedProcessingChain:
         Best-effort: ``multiprocessing.Queue.empty()`` is only approximate, so
         callers should debounce across a few checks before treating the
         pipeline as finished. ``_inflight`` (a Manager dict the workers update
-        as they pick up / finish items) is the authoritative "a worker is busy"
-        signal; the queue checks catch work that's queued but not yet picked up."""
+        as they pick up / finish items — including a ``::busy`` marker held for
+        the whole of a page's processing, and ``::p`` entries for pipelines
+        parked on the batched solver) is the authoritative "a worker is busy"
+        signal; the queue checks catch work that's queued but not yet picked
+        up. Headless completion gates on this (#64)."""
         try:
             if len(self._inflight) > 0:
                 return False
@@ -1352,6 +1358,18 @@ class IntegratedProcessingChain:
                     # the old full-buffer pickle cost ~70 MB of memcpy +
                     # manager RPC per item just for crash bookkeeping.
                     _worker_name = multiprocessing.current_process().name
+                    # Unconditional busy marker. The resumable reference below
+                    # needs a parent_node_id and so is CONDITIONAL, which left
+                    # `is_idle()` reading "nothing in flight" while a worker
+                    # was mid-page (#64). This key carries no payload — it only
+                    # answers "is someone working?". `_reenqueue_inflight`
+                    # skips it (it matches the bare name and `::p` keys only)
+                    # and clears it when a worker dies.
+                    if inflight is not None:
+                        try:
+                            inflight[f"{_worker_name}::busy"] = b"1"
+                        except Exception:
+                            pass
                     if (inflight is not None
                             and buf_to_process.parent_node_id is not None):
                         try:
@@ -1372,6 +1390,7 @@ class IntegratedProcessingChain:
                     if inflight is not None:
                         try:
                             inflight.pop(_worker_name, None)
+                            inflight.pop(f"{_worker_name}::busy", None)
                         except Exception:
                             pass
                     # Drop refs + force GC to break JAX-side reference cycles.

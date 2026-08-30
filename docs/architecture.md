@@ -152,5 +152,23 @@ flowchart TD
 ## Shutdown
 
 - GUI: `closeEvent` stops `WebcamThread`, `ProcessMonitor`, `VoiceWorker`, then `chain.stop()` terminates worker processes.
-- Headless: `_wait_for_chain` drains until every expected `branch_ready` arrives (or timeout), then `chain.stop()`.
+- Headless: `_LogDrainer.wait_for_completion` returns in two phases, then `chain.stop()`:
+  1. every expected scan has emitted at least one `branch_ready` (a scan's
+     branch count is dynamic — PageDetector emits 1–N layouts — so the total
+     isn't known up front), then
+  2. **the chain reports no work in flight** (`is_idle`), confirmed over
+     several consecutive polls.
+
+  Phase 2 used to be a *silence timer* — return once no branch event had
+  arrived for `quiesce_s`. **Silence is not the same as finished**: a page
+  whose step outlived that window was still being processed when the chain was
+  stopped, and it vanished with no node, no error and exit code 0 (#64;
+  measured as 2 of 4 pages lost under the ~75 s/page `powell` backend). Any new
+  completion check must ask the chain, not the clock.
+
+  `is_idle` reads `_inflight` — a Manager dict carrying a `::busy` marker for
+  the whole of a page's processing, plus `::p` entries for pipelines parked on
+  the batched solver — and both queues. It is best-effort (`mp.Queue.empty()`
+  is approximate, and a worker between two items reads idle for an instant),
+  hence the debounce.
 - `SIGTERM` is hooked to raise `KeyboardInterrupt` for clean shutdown.

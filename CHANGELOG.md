@@ -43,6 +43,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl clamp), which is why `principal_point` defaults on and a rejected LM
   fit now retries on Powell instead of falling straight through to grayscale.
 
+### Fixed
+
+- **A headless run no longer abandons a page whose step outlives it** (#64).
+  Completion decided the run had settled from a *silence timer*: once every
+  scan had emitted one `branch_ready` and no further branch event arrived for
+  8 s, it returned and the caller stopped the chain — with workers still
+  mid-page. Those pages vanished: no node, no error, exit code 0. It now waits
+  for the chain to report no work in flight (`is_idle`, debounced), and the
+  worker holds an unconditional busy marker so that signal can't under-report
+  (the resumable in-flight reference it used to rely on is only recorded for
+  buffers carrying a `parent_node_id`).
+
+  Measured on the same two spreads with the ~75 s/page `powell` backend:
+  before, 2 of 4 pages lost in a 30 s "successful" run; after, 4 of 4 in 60 s.
+
 ### Removed
 
 - **The twist/spline sheet models** (`sine_twist`, `bspline_twist`,
