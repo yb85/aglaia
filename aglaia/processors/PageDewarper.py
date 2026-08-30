@@ -386,6 +386,15 @@ class DewarpOption(AbstractProcessorOption):
     # (footers, captions). Applied by the LM backend (as IRLS weights) and
     # by MLX / padded JAX; the library's own Powell path keeps plain L2.
     huber_delta: float = 0.005
+    # Slope-based x decompression (iOS #86): weight the output-grid measure
+    # by (1+z'^2)^(k/2) so the steep, foreshortened gutter zone claims more
+    # output width. 0 = the plain arc-length grid (exact pre-#70 geometry).
+    # Default 1.0, matching the iOS port — device-validated there, and Yann's
+    # call on the desktop. Note the local A/B metric (baseline straightness)
+    # is structurally blind to this: it scores a VERTICAL property and this
+    # changes only horizontal scale. Stamps written before this option carry
+    # no key and replay at 0.0, i.e. exactly the surface they were fitted on.
+    slope_emphasis: float = 1.0
     # Which page edge carries the binding/gutter. auto = read the
     # PageDetector page_side meta (left page → binding right, and vice
     # versa); explicit left/right for single-page scans. Unresolvable auto
@@ -488,6 +497,16 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     JAX_CLEAR_EVERY = 10
     _dewarps_since_clear = 0
     OPTIONS = {
+        "slope_emphasis": _f(1.0, 0.0, 3.0, 0.25,
+                             "Slope-based x decompression: weight the output "
+                             "grid by (1+z'²)^(k/2) so the steep, "
+                             "foreshortened gutter zone gets more output "
+                             "width. The arc-length grid already corrects the "
+                             "surface-length term; this addresses projective "
+                             "foreshortening on top of it. 0 = off (exact "
+                             "arc-length geometry). The effect scales with "
+                             "z'², so it is negligible on a flat page and "
+                             "large on a strongly curled one.", advanced=True),
         "binding_side": _e("auto", ["auto", "left", "right"],
                            "Page edge carrying the binding. auto reads the "
                            "PageDetector page_side meta (left page of a spread "
@@ -618,8 +637,37 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         return SampleMapTransform(lambda in_hw: cls._replay_sample_map(in_hw, params))
 
     @staticmethod
+    def _emphasise(arc_xs, arc_s, k: float):
+        """Re-weight the arc-length measure by (1 + z′²)^(k/2) — "slope-based x
+        decompression" (iOS #86).
+
+        The arc-length grid corrects the SURFACE-LENGTH term: paper is
+        inextensible, so sampling uniformly in x stretches text by √(1+z′²)
+        where the sheet is steep. It does NOT correct projective
+        foreshortening — where the page recedes steeply near the spine the
+        camera sees those glyphs compressed however the surface is
+        parameterised, and arc length alone gives them no extra output pixels.
+        Weighting the measure lets steep regions claim proportionally more
+        width.
+
+        z′ is recovered per segment from the measure itself
+        (ds/dx = √(1+z′²)), so this works for any sheet model without needing
+        its derivative. k = 0 returns the input untouched — the parity path
+        every already-stamped project replays through."""
+        k = float(k or 0.0)
+        if k <= 0.0:
+            return arc_s
+        ds = np.diff(arc_s)
+        dx = np.abs(np.diff(arc_xs))
+        zp2 = np.where(dx > 1e-12,
+                       np.maximum(0.0, (ds / np.maximum(dx, 1e-12)) ** 2 - 1.0),
+                       0.0)
+        return np.concatenate([[0.0], np.cumsum(ds * (1.0 + zp2) ** (k / 2.0))])
+
+    @staticmethod
     def _sample_grid(ref_h, ref_w, *, params, page_dims_w, page_dims_h,
-                     decimate, zoom, focal, n_cam=8, spine=None):
+                     decimate, zoom, focal, n_cam=8, spine=None,
+                     slope_emphasis: float = 0.0):
         """The arc-length-uniform backward sampling grid, shared by the
         forward remap and by replay so both build pixel-identical geometry.
 
@@ -636,6 +684,9 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # x samples spaced uniformly in s (else the steep gutter side comes
         # out horizontally stretched by sqrt(1+z'^2)).
         arc_xs, arc_s = arclength_x(params, page_dims_w, spine=spine)
+        # …and optionally weight that measure toward the steep zones, so the
+        # gutter's foreshortened glyphs get output pixels of their own.
+        arc_s = PageDewarper._emphasise(arc_xs, arc_s, slope_emphasis)
         arc_total = float(arc_s[-1])
         target_w = round_nearest_multiple(
             target_h * arc_total / page_dims_h, decimate)
@@ -677,7 +728,9 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # Pre-#60 stamps carry neither key: default to the 8-param pinhole
             # with no spine term, i.e. exactly the surface they were fitted on.
             n_cam=int(params.get("camera_np", 8)),
-            spine=SpineCurl.from_dict(params.get("spine")))
+            spine=SpineCurl.from_dict(params.get("spine")),
+            # Absent on pre-#70 stamps → 0.0, i.e. the grid they were built on.
+            slope_emphasis=float(params.get("slope_emphasis", 0.0) or 0.0))
         im_x = image_points[:, 0, 0].reshape(shp)
         im_y = image_points[:, 0, 1].reshape(shp)
         im_x = cv2.resize(im_x, (target_w, target_h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
@@ -720,6 +773,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         # LM camera/objective knobs (issue #60) — LM only, so they are
         # neutralised on the other backends below.
+        self.slope_emphasis = max(
+            float(getattr(options, "slope_emphasis", 1.0) or 0.0), 0.0)
         self.binding_side = str(getattr(options, "binding_side", "auto")
                                 or "auto").lower()
         if self.binding_side not in ("auto", "left", "right"):
@@ -1612,7 +1667,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                 img.shape[0], img.shape[1], params=params,
                 page_dims_w=page_dims[0], page_dims_h=page_dims[1],
                 decimate=decimate, zoom=zoom, focal=self.focal_length,
-                n_cam=ctx.n_cam, spine=ctx.spine)
+                n_cam=ctx.n_cam, spine=ctx.spine,
+                slope_emphasis=self.slope_emphasis)
 
         im_x_dec = image_points[:, 0, 0].reshape(grid_shape).astype(np.float32)
         im_y_dec = image_points[:, 0, 1].reshape(grid_shape).astype(np.float32)
@@ -1751,6 +1807,9 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # curl term the fit won on. Replay MUST rebuild the same surface.
             "camera_np": int(ctx.n_cam),
             "spine": ctx.spine.as_dict() if ctx.spine is not None else None,
+            # Grid measure weighting (#70) — replay must size the page the
+            # same way the live remap did.
+            "slope_emphasis": float(self.slope_emphasis),
         }
 
         # Only max_oob (above) gates status. Sub-threshold fringe OOB is

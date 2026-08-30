@@ -74,6 +74,9 @@ pipeline:
     spine_weight_zone: 0.25
     spine_gammas: 0.02, 0.05, 0.10
     spine_gamma_scale: 0.15
+    # Slope-based x decompression: give the steep, foreshortened gutter zone
+    # its own output width. Scales with z'² — inert on a flat page.
+    slope_emphasis: 1.0
     max_oob: 400
     min_spans: 4
     min_span_width_ratio: 0.2
