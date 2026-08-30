@@ -169,6 +169,29 @@ def test_passthrough_when_too_few_lines():
     assert out.buffer.shape == buf.buffer.shape
 
 
+@pytest.mark.parametrize("min_lines, expect_success", [(4, True), (50, False)])
+def test_page_side_survives_the_correction(min_lines, expect_success):
+    """`page_side` must reach PageDewarper, on BOTH the rectify and the
+    passthrough path.
+
+    This processor returns a FRESH ImageBuffer, so anything not explicitly
+    forwarded is dropped. `page_side` was, and because it is read one step
+    later, three features failed silently rather than loudly: flat_spline's
+    binding flip + outer penalty, PageDewarper's spine-zone weighting and
+    spine-curl grid, and the per-side warm-start ring (which collapsed both
+    halves of every spread into one shared "single" history). Measured on the
+    fixture corpus: the spine-curl term went from winning on 0/12 pages to
+    winning on most of them once this was forwarded.
+    """
+    img = _make_text_page(lines=8 if not expect_success else 22)
+    buf = _wrap_bw(img)
+    buf.meta["page_side"] = "left"
+    out = TrapezoidalCorrection(
+        TrapezoidalOption(min_line_count=min_lines)).process(buf)
+    assert out.meta.get("trapezoid_success") is expect_success
+    assert out.meta.get("page_side") == "left"
+
+
 def test_chain_registry_includes_processor():
     from aglaia.workers.IntegratedProcessingChain import processor_registry
     assert processor_registry()["TrapezoidalCorrection"] is TrapezoidalCorrection

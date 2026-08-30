@@ -175,31 +175,32 @@ def _curvature(img):
     return float(np.mean(devs))
 
 
-def test_rejected_lm_fit_retries_on_powell_before_the_gray_fallback():
-    """LM can park a shape DOF on the curl clamp at a competitive objective
-    but a wild remap. Conceding straight to grayscale would lose a page that
-    Powell still dewarps — so an OOB rejection must retry, not give up."""
-    d = _lm()
+def test_rejected_lm_fit_backs_off_to_the_plain_cubic():
+    """The γ grid selects on objective alone, and the objective cannot see a
+    wild remap — on one fixture page γ = −0.10 scored below γ = 0 and blew the
+    OOB gate. Conceding straight to grayscale would lose a page the plain
+    cubic still dewarps, so a rejection must back off, not give up."""
+    d = _lm(spine_gammas="0.02, 0.05, 0.10")
     d.max_oob = 0.0                    # force the gate to reject any remap
     calls = []
-    real = d._retry_with_powell
+    real = d._retry_without_spine
 
     def spy(buf, orig, roi):
-        calls.append(d.backend)
+        calls.append(tuple(d.spine_gammas))
         return real(buf, orig, roi)
 
-    d._retry_with_powell = spy
+    d._retry_without_spine = spy
     out = d.process(_buf())
-    # First entry retries under Powell; the nested rejection sees backend
-    # "powell", has nothing left to offer and returns None — that is what
-    # stops the retry from recursing forever.
-    assert calls == ["lm", "powell"]
-    assert d.backend == "lm", "the backend must be restored for the next page"
+    # First entry retries with the grid off; the nested rejection sees an
+    # empty grid, has nothing left to back off to and returns None — that is
+    # what stops the retry from recursing forever.
+    assert calls == [(0.02, 0.05, 0.10), ()]
+    assert d.spine_gammas == (0.02, 0.05, 0.10), "must be restored for the next page"
     # The gate rejects everything here, so the page still ends in the gray
-    # fallback — what matters is that Powell was given its turn.
+    # fallback — what matters is that the plain cubic was given its turn.
     assert out.meta["success"] is False
 
 
-def test_powell_backend_has_no_retry_to_offer():
-    d = PageDewarper(DewarpOption(**BASE, backend="powell"))
-    assert d._retry_with_powell(_buf(), None, None) is None
+def test_no_spine_grid_means_nothing_to_back_off_to():
+    d = _lm(spine_gammas="")
+    assert d._retry_without_spine(_buf(), None, None) is None

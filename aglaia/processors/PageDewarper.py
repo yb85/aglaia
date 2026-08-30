@@ -1077,23 +1077,29 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                   flush=True)
         return side
 
-    def _retry_with_powell(self, img_buf, orig_buffer, orig_roi):
-        """An LM fit whose remap blew the OOB gate — re-run this page on
-        Powell before giving up to the gray fallback.
+    def _retry_without_spine(self, img_buf, orig_buffer, orig_roi):
+        """An LM fit whose remap blew the OOB gate — re-run this page with the
+        spine-curl grid off (plain cubic) before giving up to the gray
+        fallback. Returns None when there is nothing to back off to.
 
-        The objective has a near-flat curl/pose valley, and LM occasionally
-        parks a shape DOF ON the ±0.5 clamp bound: same objective as the sane
-        region, wild remap (measured on iOS: obj 0.00785 vs Powell 0.00791,
-        oob 2190 vs 108). Powell, being derivative-free, wanders out of that
-        corner. Costs ~80 s on this class of page, but the alternative is a
-        page that fails to dewarp at all. Returns None when the backend isn't
-        LM (nothing to retry with)."""
-        if self.backend != "lm":
+        The γ grid keeps the candidate with the lowest objective, and the
+        objective does not see this pathology: on one fixture page γ = −0.10
+        (the grid edge) scored BELOW γ = 0 while producing a remap that blew
+        the gate. Backing off to the plain cubic costs ~125 ms and recovers the
+        page.
+
+        The iOS port retries on Powell here instead, which is right on a
+        platform where Powell is ~540 ms. On the desktop it is 25-80 s per
+        page — 100× more — and the chain drops a page whose step outlives the
+        run (see #64), so a Powell retry loses the very page it is meant to
+        save. Measured: Powell retry 25.4 s, γ = 0 retry 0.125 s, both
+        recovering the page."""
+        if self.backend != "lm" or not self.spine_gammas:
             return None
-        saved = self.backend
+        saved = self.spine_gammas
         print("[PageDewarper] LM fit rejected (out of bounds) — retrying this "
-              "page on Powell.", flush=True)
-        self.backend = "powell"
+              "page with the spine-curl term off.", flush=True)
+        self.spine_gammas = ()
         img_buf.buffer = orig_buffer
         if orig_roi is not None:
             img_buf.meta["roi"] = orig_roi
@@ -1102,7 +1108,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         try:
             return self.process(img_buf)
         finally:
-            self.backend = saved
+            self.spine_gammas = saved
 
     def _fallback_to_bspline(self, img_buf, orig_buffer, orig_roi):
         """Cylindrical fit diverged — retry this page with bspline_twist
@@ -1987,10 +1993,10 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         if oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
             success = False
-            # LM can park a shape DOF on the curl clamp at an objective the
-            # sane region matches; Powell wanders out of that corner. Try it
-            # before conceding the page to the gray fallback.
-            retried = self._retry_with_powell(img_buf, _orig_buffer, _orig_roi)
+            # The γ grid selects on objective alone, which can prefer a
+            # surface whose remap is wild. Back off to the plain cubic before
+            # conceding the page to the gray fallback.
+            retried = self._retry_without_spine(img_buf, _orig_buffer, _orig_roi)
             if retried is not None:
                 return retried
 
