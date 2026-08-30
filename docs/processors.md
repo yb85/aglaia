@@ -166,26 +166,22 @@ re-projects it flat, recovering straight lines. The chain runs deskew first
 
 | | Deskew | Dewarp |
 |---|---|---|
-| Model | single rotation angle | 3-D sheet (cubic / sine / B-spline) |
+| Model | single rotation angle | 3-D cylindrical sheet (cubic + spine curl) |
 | Fixes | whole-page tilt | curvature **and** perspective |
-| Cost | cheap | optimisation (MLX / JAX / Powell) |
+| Cost | cheap | optimisation (LM; MLX / JAX / Powell available) |
 | When | flat sheets, light skew | bound books, curled pages |
 
-> **Twist is off by default.** A free twist gain invents phantom curl on pages
-> that are actually flat, so it is disabled unless a page genuinely needs it.
-
 Sheet-model dewarping built on the `page-dewarp` library. Optimizer backend
-(`backend: auto`) resolves to **LM** for the cylindrical model and
-**MLX (Apple Metal) → padded JAX → SciPy Powell** for the spline models.
+(`backend: auto`) resolves to **LM**.
 
 ### Optimizer backends
 
 | backend | what it is | models | notes |
 |---|---|---|---|
-| `lm` | Levenberg-Marquardt, analytic Jacobians, Schur complement over per-span *arrowhead* blocks (`aglaia/processors/lm_solver.py`) | cylindrical only | CPU, no GPU pool to babysit. ~10-60 iterations replace Powell's 10⁴-10⁵ objective evaluations — measured 28 s → 0.25 s per page on the test fixture at a *better* final objective. The only backend carrying the camera upgrades below. |
-| `mlx` | MLX value+grad, Apple Metal | all | Needs `clear_pool()` between pages (unified-memory allocator). |
-| `jax` | padded JAX L-BFGS-B (fixed shapes, batchable) | all | Unresolved host-pool growth on Apple silicon; prefer MLX. |
-| `powell` | SciPy Powell, derivative-free | all | Reference oracle. Slowest by ~100×. |
+| `lm` | Levenberg-Marquardt, analytic Jacobians, Schur complement over per-span *arrowhead* blocks (`aglaia/processors/lm_solver.py`) | cylindrical | CPU, no GPU pool to babysit. ~10-60 iterations replace Powell's 10⁴-10⁵ objective evaluations — measured 28 s → 0.25 s per page on the test fixture at a *better* final objective. The only backend carrying the camera upgrades below. |
+| `mlx` | MLX value+grad, Apple Metal | cylindrical | Needs `clear_pool()` between pages (unified-memory allocator). |
+| `jax` | padded JAX L-BFGS-B (fixed shapes, batchable) | cylindrical | Unresolved host-pool growth on Apple silicon; prefer MLX. The CUDA build batches through it. |
+| `powell` | SciPy Powell, derivative-free | cylindrical | Reference oracle. Slowest by ~100×. |
 
 The LM problem is bipartite: 8 (or 10) *global* camera params against S span
 heights `y_i` and N per-keypoint abscissae `x_ij`. Points in a span share only
@@ -267,41 +263,25 @@ removes the degeneracy, which is why it is on by default. If you turn
 > page whose step outlives the run (#64) — so a Powell retry loses the very
 > page it is meant to save. The γ back-off is the desktop equivalent.
 
-Four sheet models (`sheet_model`, see `aglaia/processors/sheet_models.py`):
+### The sheet model
 
-- `cylindrical` (default) — stock page-dewarp cubic z(x): every horizontal
-  slice shares one height profile (2 shape DOF: α, β).
-- `sine_twist` (alias `spline_twist` also accepted) — Fourier-sine
-  height profile (`spline_modes` = K modes, zero at both page edges)
-  modulated linearly in y by a twist gain γ:
-  `z(x,y) = (1 + γ·η)·Σ c_k·sin(kπx/W)`, `η = y/H − 0.5`. Captures
-  non-cubic gutter walls and curl that varies top-to-bottom.
-- `bspline_twist` — clamped cubic B-spline height profile (`spline_modes` =
-  K free interior control points, endpoints pinned to 0) with the same
-  twist gain γ. Local basis support: a steep gutter wall doesn't ripple
-  into the flat field the way high sine modes do.
-- `flat_spline` — `bspline_twist` specialised for **post-trapezoidal**
-  pages, assuming the sheet is flat except for curl at the binding:
-  - **graded knots** (`knot_grading` g ≥ 1, interior knots at
-    `1 − (1 − u)^g` toward the binding): coarse spline over the flat
-    field, high resolution at the gutter wall;
-  - **outer-flatness penalty** (`flat_outer_penalty` λ): adds
-    `λ·Σ w_i·c_i²` with `w_i = (1 − ξ_i)²` (ξ = Greville abscissa,
-    binding at basis t = 1) — far-from-binding control points are pulled
-    to z = 0, the gutter wall stays free. 0 disables;
-  - **binding side per page** (`binding_side: auto|left|right`): `auto`
-    reads the `page_side` meta the PageDetector stamps on two-page
-    spreads (left page → bound on its right edge, and vice versa; decided
-    from page coordinates, not A/B order). Pages bound on the left
-    evaluate the basis at t = 1 − x/W (flip) — same compiled objective,
-    flip + weights are runtime inputs so alternating A/B pages never
-    recompiles (grading itself is JIT-baked). Unresolved `auto` logs and
-    degrades to plain bspline behaviour (no flip, no penalty) for that
-    page.
+One model: the **cylindrical** sheet `z(x) = (α+β)x³ − (2α+β)x² + αx` — a
+generalised cylinder, every horizontal slice sharing one height profile — plus
+the optional spine-curl term above.
 
-For the spline models the K+1 extra params ride at the pvec tail (keypoint
-indexing untouched). Supported by MLX / padded-JAX / Powell (vendored
-objective); raw unpadded JAX falls back to cylindrical.
+The twist/spline family (`sine_twist`, `bspline_twist`, `flat_spline`:
+Fourier-sine and clamped cubic B-spline profiles modulated by a linear-in-y
+twist gain) was **retired in 2026-08**. They were strictly more expressive on
+parameter count and strictly worse on results — see the table below, where the
+cylindrical + spine-curl model wins on every page. A fold concentrates
+curvature at the spine, which one localized term captures robustly, while the
+global spline families spread degrees of freedom where there is no curvature,
+overfit noisy spans more easily, and are harder to optimise.
+
+This is a **hard break**: a `.agl` node stamped with one of those models raises
+on replay (`sheet_models.canonical_model`) rather than being rebuilt against a
+different surface — re-process such a page from source. Do not reintroduce them
+without beating 0.923 px on the same corpus.
 
 Pipeline:
 
@@ -316,17 +296,12 @@ Pipeline:
 ```yaml
 options:
   backend: auto                 # auto | lm | mlx | jax | powell
-  sheet_model: cylindrical      # cylindrical | sine_twist | bspline_twist | flat_spline
   principal_point: true         # LM: fit (cx, cy) — the keystone-composed camera
   spine_weight_boost: 4.0       # LM: residual weight at the binding (1 = off)
   spine_weight_zone: 0.25       # LM: width of the up-weighted spine zone
   spine_gammas: 0.02, 0.05, 0.10  # LM: spine-curl γ grid ("" = off)
   spine_gamma_scale: 0.15       # LM: spine-curl decay length, fraction of page width
-  spline_modes: 4               # shape DOF K: sine modes / B-spline ctrl points (params = K+1)
-  twist: false                  # default off; fit γ only for true open-book fan pages
-  binding_side: auto            # flat_spline + LM spine features: auto | left | right
-  knot_grading: 2.5             # flat_spline: knot density toward the binding (1 = uniform)
-  flat_outer_penalty: 1.0       # flat_spline: outer-flatness weight λ (0 = off)
+  binding_side: auto            # LM spine features: auto | left | right
   baseline_source: both         # bottom | top | average | both
   use_huber: true               # robust pseudo-Huber reprojection loss
   huber_delta: 0.005            # pseudo-Huber scale (when use_huber)

@@ -86,53 +86,6 @@ def set_huber_delta(value: float) -> None:
         _CACHED_CONSTS = None
 
 
-def set_sheet_model(model: str, n_modes: int, twist: bool = True) -> None:
-    """Select the sheet model baked into the MLX objective. Cache busts
-    on change (model structure is part of the traced graph). twist=False
-    bakes γ to 0 (pure cylinder with the chosen basis); the γ slot stays
-    in the pvec tail."""
-    from aglaia.processors.sheet_models import canonical_model
-    global _MODEL, _N_MODES, _TWIST, _VALUE_AND_GRAD, _CACHED_CONSTS
-    model = canonical_model(model)
-    n_modes = int(n_modes)
-    twist = bool(twist)
-    if (model, n_modes, twist) != (_MODEL, _N_MODES, _TWIST):
-        _MODEL = model
-        _N_MODES = n_modes
-        _TWIST = twist
-        _VALUE_AND_GRAD = None
-        _CACHED_CONSTS = None
-
-
-def set_model_dims(w: float, h: float) -> None:
-    """Per-page model page dims for the spline parameterisation. Runtime
-    input — no cache invalidation."""
-    global _MODEL_DIMS
-    _MODEL_DIMS = (float(w), float(h))
-
-
-def set_knot_grading(value: float) -> None:
-    """flat_spline knot grading g ≥ 1 (1 = uniform). Knots are JIT-baked
-    python constants → cache busts on change (constant per pipeline run)."""
-    global _KNOT_GRADING, _VALUE_AND_GRAD, _CACHED_CONSTS
-    new = max(float(value), 1.0)
-    if new != _KNOT_GRADING:
-        _KNOT_GRADING = new
-        _VALUE_AND_GRAD = None
-        _CACHED_CONSTS = None
-
-
-def set_flat(flip: bool, weights=None) -> None:
-    """Per-page flat_spline runtime inputs: flip=True puts the binding at
-    the page's LEFT edge (basis t = 1 − x/W); `weights` are the penalty-
-    scaled flat weights (flat_outer_penalty × flat_outer_weights). Runtime
-    array — alternating A/B pages does NOT recompile."""
-    global _FLAT_FLIP, _FLAT_WEIGHTS
-    _FLAT_FLIP = bool(flip)
-    _FLAT_WEIGHTS = tuple(float(w) for w in (weights if weights is not None
-                                             else ()))
-
-
 def _project_xyz_mlx(xy_coords, z_coords, pvec, focal_length, mx):
     """Mirror of page_dewarp._jax._project_xy_jax in MLX ops, with the
     height field z computed by the caller (model-dependent)."""
@@ -171,22 +124,10 @@ def _make_objective(focal_length: float, shear_cost: float,
     """Build the closure-over-constants MLX objective.
 
     `model_dims` is a runtime (2,) array argument — per-page values do
-    not bust the compile cache. `flat_args` likewise:
-    [flip, w_1·λ … w_K·λ] (flat_spline only; zeros otherwise)."""
-    import math
+    not bust the compile cache. `flat_args` is a retired twist-model
+    argument, kept as an ignored placeholder so the call sites and the
+    compiled signature stay stable."""
     import mlx.core as mx
-
-    from aglaia.processors.sheet_models import (bspline_interior_basis,
-                                             canonical_model,
-                                             BSPLINE_MODELS,
-                                             MODEL_FLAT_SPLINE,
-                                             SPLINE_MODELS)
-
-    model = canonical_model(model)
-    is_spline = model in SPLINE_MODELS
-    is_bspline = model in BSPLINE_MODELS
-    is_flat = model == MODEL_FLAT_SPLINE
-    ne = n_modes + 1 if is_spline else 0
 
     def objective(pvec, dstpoints_flat, keypoint_index, model_dims,
                   flat_args):
@@ -206,43 +147,10 @@ def _make_objective(focal_length: float, shear_cost: float,
         )
 
         x = xy_coords[:, 0]
-        if is_spline:
-            # z(x,y) = (1 + γ·η)·profile(x), η = y/H − 0.5. Extras live
-            # at the pvec tail (see sheet_models.py); the keypoint_index
-            # never reaches them.
-            coeffs = mx.clip(pvec[-ne:-1], -0.5, 0.5)
-            # twist=False: γ baked to 0 → zero gradient on the tail slot,
-            # pvec[-1] stays at its init (0).
-            gamma = (mx.clip(pvec[-1], -4.0, 4.0) if twist
-                     else mx.array(0.0))
-            if is_bspline:
-                # Clamped cubic B-spline, K free interior control points.
-                # Knots are python constants → recursion unrolls to
-                # elementwise where/mul ops, autodiff-safe.
-                t_raw = x / model_dims[0]
-                if is_flat:
-                    # flip ∈ {0, 1} runtime: t = t_raw or 1 − t_raw
-                    # (binding always at basis t = 1).
-                    flip = flat_args[0]
-                    t_raw = t_raw + flip * (1.0 - 2.0 * t_raw)
-                t = mx.clip(t_raw, 0.0, 1.0)
-                basis = bspline_interior_basis(t, n_modes, mx,
-                                               grading=grading)
-                z_coords = mx.zeros_like(t)
-                for k in range(n_modes):
-                    z_coords = z_coords + coeffs[k] * basis[k]
-            else:
-                t = x * (math.pi / model_dims[0])
-                z_coords = mx.zeros_like(t)
-                for k in range(1, n_modes + 1):
-                    z_coords = z_coords + coeffs[k - 1] * mx.sin(k * t)
-            eta = xy_coords[:, 1] / model_dims[1] - 0.5
-            z_coords = (1.0 + gamma * eta) * z_coords
-        else:
-            alpha = mx.clip(pvec[6], -0.5, 0.5)
-            beta = mx.clip(pvec[7], -0.5, 0.5)
-            z_coords = ((alpha + beta) * x ** 3
-                        + (-2.0 * alpha - beta) * x ** 2 + alpha * x)
+        alpha = mx.clip(pvec[6], -0.5, 0.5)
+        beta = mx.clip(pvec[7], -0.5, 0.5)
+        z_coords = ((alpha + beta) * x ** 3
+                    + (-2.0 * alpha - beta) * x ** 2 + alpha * x)
 
         proj = _project_xyz_mlx(xy_coords, z_coords, pvec, focal_length, mx)
         r2 = mx.sum((dstpoints_flat - proj) ** 2, axis=1)
@@ -259,39 +167,8 @@ def _make_objective(focal_length: float, shear_cost: float,
         if shear_cost > 0.0:
             error = error + shear_cost * pvec[0] ** 2
         if cubic_cost > 0.0:
-            if is_spline:
-                # Bending energy — see sheet_models.spline_bending_energy.
-                # γ unpenalised: twist is an amplitude gradient, not
-                # curvature (clip is the runaway guard).
-                reg = mx.array(0.0)
-                if is_bspline:
-                    # Σ (m²·Δ²cᵢ)² over zero-padded control polygon.
-                    m2 = float(max(n_modes - 1, 1)) ** 2
-                    for i in range(n_modes):
-                        prev = coeffs[i - 1] if i > 0 else mx.array(0.0)
-                        nxt = (coeffs[i + 1] if i < n_modes - 1
-                               else mx.array(0.0))
-                        reg = reg + (m2 * (prev - 2.0 * coeffs[i] + nxt)) ** 2
-                else:
-                    # Σ (k²·c_k)² — phantom high-mode ripple suppressed,
-                    # real low-mode curl survives.
-                    for k in range(1, n_modes + 1):
-                        reg = reg + (k * k * coeffs[k - 1]) ** 2
-                error = error + cubic_cost * reg
-            else:
-                # L2 on cubic slopes α (pvec[6]) and β (pvec[7]). Stock
-                # page-dewarp has no regularizer here, so on flat inputs
-                # the optimizer drives α, β to ±0.5 absorbing span-mean-y
-                # noise — phantom curl in the inverse remap. Penalty
-                # collapses them toward 0 unless data demand curvature.
-                error = error + cubic_cost * (pvec[6] ** 2 + pvec[7] ** 2)
-        if is_flat:
-            # Outer-flatness penalty: Σ (w_i·λ)·c_i². Weights arrive
-            # penalty-scaled at runtime (flat_args[1:]); zeros = off.
-            reg_flat = mx.array(0.0)
-            for k in range(n_modes):
-                reg_flat = reg_flat + flat_args[1 + k] * coeffs[k] ** 2
-            error = error + reg_flat
+            # L2 on cubic slopes α (pvec[6]) and β (pvec[7]).
+            error = error + cubic_cost * (pvec[6] ** 2 + pvec[7] ** 2)
         return error
 
     return objective

@@ -73,66 +73,23 @@ def _build_padded_optimiser():
     """Compile the padded objective once and return the JIT'd value+grad
     function. Defers the JAX import so this module is safe to load on
     platforms / environments without JAX."""
-    import math
-
     import jax
     import jax.numpy as jnp
     from page_dewarp.options import cfg
-
-    from aglaia.processors.sheet_models import (bspline_interior_basis,
-                                             canonical_model,
-                                             BSPLINE_MODELS,
-                                             MODEL_FLAT_SPLINE,
-                                             SPLINE_MODELS)
 
     focal_length = cfg.FOCAL_LENGTH
     shear_cost = cfg.SHEAR_COST
     cubic_cost = float(_CUBIC_COST)
     huber_delta = float(_HUBER_DELTA)
-    model = canonical_model(_MODEL)
-    n_modes = int(_N_MODES)
-    twist = bool(_TWIST)
-    grading = float(_KNOT_GRADING)
-    is_spline = model in SPLINE_MODELS
-    is_bspline = model in BSPLINE_MODELS
-    is_flat = model == MODEL_FLAT_SPLINE
-    ne = n_modes + 1 if is_spline else 0
 
-    def _z_coords(xy_coords, pvec, model_dims, flat_args):
+    def _z_coords(xy_coords, pvec):
         x = xy_coords[:, 0]
-        if is_spline:
-            # Twist-model profile + linear-in-y twist; extras at the
-            # padded pvec tail (see sheet_models.py). model_dims is a
-            # runtime (2,) array — per-page values don't recompile.
-            coeffs = jnp.clip(pvec[-ne:-1], -0.5, 0.5)
-            # twist=False: γ baked to 0 → zero gradient on the tail slot.
-            gamma = jnp.clip(pvec[-1], -4.0, 4.0) if twist else 0.0
-            if is_bspline:
-                # Clamped cubic B-spline basis — knots are python
-                # constants, recursion unrolls to elementwise ops.
-                t_raw = x / model_dims[0]
-                if is_flat:
-                    # flip ∈ {0, 1} runtime: binding always at t = 1.
-                    t_raw = t_raw + flat_args[0] * (1.0 - 2.0 * t_raw)
-                t = jnp.clip(t_raw, 0.0, 1.0)
-                basis = bspline_interior_basis(t, n_modes, jnp,
-                                               grading=grading)
-                z = jnp.zeros_like(t)
-                for k in range(n_modes):
-                    z = z + coeffs[k] * basis[k]
-            else:
-                t = x * (math.pi / model_dims[0])
-                z = jnp.zeros_like(t)
-                for k in range(1, n_modes + 1):
-                    z = z + coeffs[k - 1] * jnp.sin(k * t)
-            eta = xy_coords[:, 1] / model_dims[1] - 0.5
-            return (1.0 + gamma * eta) * z
         alpha = jnp.clip(pvec[6], -0.5, 0.5)
         beta = jnp.clip(pvec[7], -0.5, 0.5)
         return (alpha + beta) * x ** 3 + (-2.0 * alpha - beta) * x ** 2 + alpha * x
 
-    def _project_xy_jax(xy_coords, pvec, model_dims, flat_args):
-        z_coords = _z_coords(xy_coords, pvec, model_dims, flat_args)
+    def _project_xy_jax(xy_coords, pvec):
+        z_coords = _z_coords(xy_coords, pvec)
         objpoints = jnp.column_stack([xy_coords, z_coords])
 
         rvec = pvec[0:3]
@@ -157,15 +114,14 @@ def _build_padded_optimiser():
         v = focal_length * transformed[:, 1] / z
         return jnp.column_stack([u, v])
 
-    def _objective(pvec, dstpoints_flat, keypoint_index, mask, model_dims,
-                   flat_args):
+    def _objective(pvec, dstpoints_flat, keypoint_index, mask):
         xy_coords = pvec[keypoint_index]
         # Slot 0 of keypoint_index is the origin pin (original lib forces
         # xy_coords[0, :] = 0 unconditionally). Padded rows also resolve
         # to slot 0, so this single override pins them to (0, 0) and
         # the mask gates their residual to zero.
         xy_coords = xy_coords.at[0, :].set(0.0)
-        proj = _project_xy_jax(xy_coords, pvec, model_dims, flat_args)
+        proj = _project_xy_jax(xy_coords, pvec)
         # mask is (MAX_NPTS+1,) — zero for padded rows.
         r2 = jnp.sum((dstpoints_flat - proj) ** 2, axis=1)
         if huber_delta > 0.0:
@@ -179,31 +135,9 @@ def _build_padded_optimiser():
         if shear_cost > 0.0:
             error = error + shear_cost * pvec[0] ** 2
         if cubic_cost > 0.0:
-            if is_spline:
-                # Bending energy — γ unpenalised (twist is amplitude
-                # gradient, not curvature); see
-                # sheet_models.spline_bending_energy for rationale.
-                coeffs = jnp.clip(pvec[-ne:-1], -0.5, 0.5)
-                if is_bspline:
-                    ctrl = jnp.concatenate(
-                        [jnp.zeros(1), coeffs, jnp.zeros(1)])
-                    m2 = float(max(n_modes - 1, 1)) ** 2
-                    d2 = ctrl[:-2] - 2.0 * ctrl[1:-1] + ctrl[2:]
-                    reg = jnp.sum((m2 * d2) ** 2)
-                else:
-                    reg = jnp.array(0.0)
-                    for k in range(1, n_modes + 1):
-                        reg = reg + (k * k * coeffs[k - 1]) ** 2
-                error = error + cubic_cost * reg
-            else:
-                # L2 on cubic slopes α (pvec[6]) and β (pvec[7]); see
-                # page_dewarp_mlx._make_objective for rationale.
-                error = error + cubic_cost * (pvec[6] ** 2 + pvec[7] ** 2)
-        if is_flat:
-            # Outer-flatness penalty Σ (w_i·λ)·c_i² — weights arrive
-            # penalty-scaled at runtime (flat_args[1:]); zeros = off.
-            coeffs = jnp.clip(pvec[-ne:-1], -0.5, 0.5)
-            error = error + jnp.sum(flat_args[1:] * coeffs ** 2)
+            # L2 on cubic slopes α (pvec[6]) and β (pvec[7]); see
+            # page_dewarp_mlx._make_objective for rationale.
+            error = error + cubic_cost * (pvec[6] ** 2 + pvec[7] ** 2)
         return error
 
     # jit must wrap the grad transform (not the reverse): grad-of-jit
@@ -217,15 +151,8 @@ _CUBIC_COST = 0.0
 _HUBER_DELTA = 0.0
 # Sheet model (see aglaia/processors/sheet_models.py). Baked into the
 # compiled objective; model page dims are a runtime input.
-_MODEL = "cylindrical"
-_N_MODES = 0
-_TWIST = True
-_MODEL_DIMS = (1.0, 1.0)
 # flat_spline: grading is baked into the knot constants (cache-busting);
 # flip + penalty-scaled weights are a runtime array (per-page A/B).
-_KNOT_GRADING = 1.0
-_FLAT_FLIP = False
-_FLAT_WEIGHTS: tuple = ()
 _CACHED_CONSTS = None
 
 
@@ -252,59 +179,16 @@ def set_huber_delta(value: float) -> None:
         _CACHED_CONSTS = None
 
 
-def set_sheet_model(model: str, n_modes: int, twist: bool = True) -> None:
-    """Select the sheet model baked into the padded objective. Cache
-    busts on change. twist=False bakes γ to 0 (pure cylinder with the
-    chosen basis); the γ slot stays in the pvec tail."""
-    from aglaia.processors.sheet_models import canonical_model
-    global _MODEL, _N_MODES, _TWIST, _VALUE_AND_GRAD, _CACHED_CONSTS
-    model = canonical_model(model)
-    n_modes = int(n_modes)
-    twist = bool(twist)
-    if (model, n_modes, twist) != (_MODEL, _N_MODES, _TWIST):
-        _MODEL = model
-        _N_MODES = n_modes
-        _TWIST = twist
-        _VALUE_AND_GRAD = None
-        _CACHED_CONSTS = None
-
-
-def set_model_dims(w: float, h: float) -> None:
-    """Per-page model page dims for the spline parameterisation. Runtime
-    input — no recompile."""
-    global _MODEL_DIMS
-    _MODEL_DIMS = (float(w), float(h))
-
-
-def set_knot_grading(value: float) -> None:
-    """flat_spline knot grading g ≥ 1 (1 = uniform). Baked into the
-    compiled basis → cache busts on change."""
-    global _KNOT_GRADING, _VALUE_AND_GRAD, _CACHED_CONSTS
-    new = max(float(value), 1.0)
-    if new != _KNOT_GRADING:
-        _KNOT_GRADING = new
-        _VALUE_AND_GRAD = None
-        _CACHED_CONSTS = None
-
-
-def set_flat(flip: bool, weights=None) -> None:
-    """Per-page flat_spline runtime inputs (binding-left flip + penalty-
-    scaled flat weights). No recompile."""
-    global _FLAT_FLIP, _FLAT_WEIGHTS
-    _FLAT_FLIP = bool(flip)
-    _FLAT_WEIGHTS = tuple(float(w) for w in (weights if weights is not None
-                                             else ()))
-
-
 def _n_extras() -> int:
-    from aglaia.processors.sheet_models import is_spline_model
-    return _N_MODES + 1 if is_spline_model(_MODEL) else 0
+    """Length of the pvec tail beyond the page-dewarp layout. Always 0 since
+    the twist/spline models were retired — kept so the padding arithmetic
+    below reads the same as it did when it could be non-zero."""
+    return 0
 
 
 def _get_compiled():
     global _VALUE_AND_GRAD, _CACHED_CONSTS
-    key = (_CUBIC_COST, _HUBER_DELTA, _MODEL, _N_MODES, _TWIST,
-           _KNOT_GRADING)
+    key = (_CUBIC_COST, _HUBER_DELTA)
     if _VALUE_AND_GRAD is None or _CACHED_CONSTS != key:
         _VALUE_AND_GRAD = _build_padded_optimiser()
         _CACHED_CONSTS = key
@@ -498,7 +382,6 @@ def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
     degenerate single-line-over-the-point-cap problem falls back to the
     stock optimiser.
     """
-    import jax
     import jax.numpy as jnp
     from page_dewarp.options import cfg
 
@@ -537,20 +420,12 @@ def _run_jax_lbfgsb_padded(dstpoints: np.ndarray,
     dst_j = jnp.array(padded_dst)
     ki_j = jnp.array(padded_ki, dtype=jnp.int32)
     mask_j = jnp.array(mask)
-    dims_j = jnp.array(np.asarray(_MODEL_DIMS, dtype=np.float32))
-    # [flip, w_1·λ … w_K·λ] — fixed (1 + K) shape per model config.
-    flat_np = np.zeros(1 + _N_MODES, dtype=np.float32)
-    flat_np[0] = 1.0 if _FLAT_FLIP else 0.0
-    if _FLAT_WEIGHTS:
-        flat_np[1:1 + len(_FLAT_WEIGHTS)] = _FLAT_WEIGHTS
-    flat_j = jnp.array(flat_np)
 
     value_and_grad = _get_compiled()
 
     def obj_with_grad_np(p):
         p_jax = jnp.array(p)
-        val, grad = value_and_grad(p_jax, dst_j, ki_j, mask_j, dims_j,
-                                   flat_j)
+        val, grad = value_and_grad(p_jax, dst_j, ki_j, mask_j)
         val_np = float(val)
         grad_np = np.array(grad, dtype=np.float64)
         if not np.isfinite(val_np):

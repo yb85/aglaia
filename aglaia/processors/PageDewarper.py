@@ -383,54 +383,14 @@ class DewarpOption(AbstractProcessorOption):
     # Pseudo-Huber transition scale for the keypoint reprojection loss,
     # in pix2norm units (2/max(h,w) per analysis px → 0.005 ≈ 3-8 px).
     # Bounds the pull of any stray span that survived the width filter
-    # (footers, captions). MLX / padded-JAX backends only; Powell keeps
-    # the library's L2 (cylindrical) or folds it in (twist models).
+    # (footers, captions). Applied by the LM backend (as IRLS weights) and
+    # by MLX / padded JAX; the library's own Powell path keeps plain L2.
     huber_delta: float = 0.005
-    # Sheet surface model:
-    #   cylindrical   — stock page-dewarp cubic z(x) (every horizontal
-    #                   slice has the same height profile).
-    #   sine_twist    — Fourier-sine height profile (spline_modes DOF) +
-    #                   linear-in-y twist gain γ. Captures non-cubic
-    #                   gutter walls and curl that varies top-to-bottom.
-    #                   (Legacy name "spline_twist" still accepted.)
-    #   bspline_twist — clamped cubic B-spline profile (spline_modes free
-    #                   control points) + twist gain γ. Local support:
-    #                   a steep gutter wall doesn't ripple into the flat
-    #                   field. See aglaia/processors/sheet_models.py.
-    #   flat_spline   — bspline_twist specialised for post-trapezoidal
-    #                   pages (flat sheet + curl at the binding only):
-    #                   knots graded toward the binding edge (coarse
-    #                   spline on the flat field, fine at the gutter) +
-    #                   an outer-flatness penalty pulling far-from-
-    #                   binding control points to z = 0. Binding side
-    #                   resolved per page from the PageDetector A/B
-    #                   page_side meta (binding_side: auto).
-    sheet_model: str = "cylindrical"
-    # flat_spline only — which page edge carries the binding/gutter.
-    # auto = read the PageDetector page_side meta (left page → binding
-    # right, right page → binding left); explicit left/right for single-
-    # page scans. Unresolvable auto → flat features degrade to plain
-    # bspline behaviour for that page (no flip, no penalty).
+    # Which page edge carries the binding/gutter. auto = read the
+    # PageDetector page_side meta (left page → binding right, and vice
+    # versa); explicit left/right for single-page scans. Unresolvable auto
+    # turns the LM spine features off for that page.
     binding_side: str = "auto"
-    # flat_spline knot grading g ≥ 1: interior knots at 1 − (1 − u)^g
-    # toward the binding. 1 = uniform (bspline_twist resolution).
-    knot_grading: float = 2.5
-    # flat_spline outer-flatness penalty λ: adds λ·Σ w_i·c_i² with
-    # w_i = (squared) Greville distance from the binding. 0 = off.
-    # Reprojection error on a typical page sums to ~0.01-0.02 (pix2norm²,
-    # Huber'd), c_i ~ 0.1 → λ ≈ 1 makes a phantom outer bump cost about
-    # as much as the whole data term.
-    flat_outer_penalty: float = 1.0
-    # Shape DOF K: sine modes (sine_twist) or free control points
-    # (bspline_twist). Model params = K + 1.
-    spline_modes: int = 4
-    # Twist term (1 + γ·η) on/off. Off → γ baked to 0 in the objective
-    # (pure generalised cylinder with the chosen basis); the γ slot stays
-    # in the pvec tail so layout/replay are unchanged. Default OFF: on
-    # near-flat pages a free γ rides the phantom-curl valley (span-y +
-    # pose compensation under the Huber floor) and inverts the grid
-    # (observed p008/p010); enable only for genuine open-book fan pages.
-    twist: bool = False
 
     # UI-surfacing flag (no runtime effect): pre-ticks the
     # "Normalize character width" checkbox to surface BlobNormalizer reliance.
@@ -493,12 +453,6 @@ class _DewarpCtx:
     span_counts: Any
     params: Any
     model_dims: Any
-    support_x: Any
-    support_y: Any
-    support_decay: float
-    flat_flip: bool
-    flat_penalty_eff: float
-    n_extra: int
     dstpoints: Any
     spans: Any
     span_points: Any
@@ -526,7 +480,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         "roi": "page quad polygon [[x,y],...] in output coords",
         "success": "bool — whether the dewarp remap succeeded",
     }
-    _ESSENTIAL_PARAMS = ("sheet_model", "backend", "focal_length", "twist")
+    _ESSENTIAL_PARAMS = ("backend", "focal_length", "principal_point")
     # jax.clear_caches() cadence: per-process counter, flush every N
     # dewarps. Per-image clears defeat the padded fixed-shape compile
     # cache (issue #39); N=10 keeps residual XLA pool growth well under
@@ -534,6 +488,13 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     JAX_CLEAR_EVERY = 10
     _dewarps_since_clear = 0
     OPTIONS = {
+        "binding_side": _e("auto", ["auto", "left", "right"],
+                           "Page edge carrying the binding. auto reads the "
+                           "PageDetector page_side meta (left page of a spread "
+                           "→ binding right, and vice versa); set explicitly "
+                           "for single-page scans. Unresolved auto turns the "
+                           "spine-zone weighting and spine-curl search off for "
+                           "that page."),
         "backend": _e("auto", ["auto", "lm", "mlx", "jax", "powell"],
                       "Optimizer backend. auto = LM (cylindrical) or "
                       "MLX → padded JAX → Powell (spline models). "
@@ -548,34 +509,29 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                               "projective camera that a keystone homography "
                               "composed with a curled page produces — "
                               "measured −57% output line curvature after "
-                              "TrapezoidalCorrection.",
-                              visible_when={"sheet_model": ["cylindrical"]}),
+                              "TrapezoidalCorrection."),
         "spine_weight_boost": _f(4.0, 1.0, 20.0, 0.5,
                                  "LM only: residual weight AT the binding, "
                                  "ramping to 1 at the edge of the spine zone. "
                                  "The spine tail is a least-squares minority, "
                                  "so an unweighted fit under-curls there. "
                                  "1 = off (also off when the binding side is "
-                                 "unknown).",
-                                 visible_when={"sheet_model": ["cylindrical"]}),
+                                 "unknown)."),
         "spine_weight_zone": _f(0.25, 0.05, 1.0, 0.05,
                                 "LM only: width of the up-weighted spine zone "
                                 "as a fraction of the keypoint x-range.",
-                                advanced=True,
-                                visible_when={"sheet_model": ["cylindrical"]}),
+                                advanced=True),
         "spine_gammas": _s("0.02, 0.05, 0.10",
                            "LM only: comma-separated γ grid for the "
                            "spine-localized curl term z += γ·exp(−|x−x_bind|/s). "
                            "Each value is fitted and the best objective wins "
                            "(γ = 0, the plain cubic, is always a candidate). "
                            "Needs principal_point to be identifiable. Empty "
-                           "disables the search.",
-                           visible_when={"sheet_model": ["cylindrical"]}),
+                           "disables the search."),
         "spine_gamma_scale": _f(0.15, 0.02, 1.0, 0.01,
                                 "LM only: decay length s of the spine curl "
                                 "term, as a fraction of the model page width.",
-                                advanced=True,
-                                visible_when={"sheet_model": ["cylindrical"]}),
+                                advanced=True),
         "max_oob": _f(500.0, 0.0, 5000.0, 10.0,
                       "Reject the dewarp if remap goes more than this many "
                       "pixels out of bounds.", advanced=True),
@@ -599,54 +555,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                           "Pseudo-Huber transition scale (normalized units).",
                           advanced=True,
                           visible_when={"use_huber": [True]}),
-        "sheet_model": _e("cylindrical",
-                          ["cylindrical", "sine_twist", "bspline_twist",
-                           "flat_spline"],
-                          "Page surface model. cylindrical = stock cubic z(x). "
-                          "sine_twist = sine-basis profile + linear-in-y twist — "
-                          "handles non-cubic gutter walls and top-to-bottom curl "
-                          "variation. bspline_twist = clamped cubic B-spline "
-                          "profile + twist — local support, sharp gutter wall "
-                          "without ripple in the flat field. flat_spline = "
-                          "B-spline for post-trapezoidal pages: flat sheet + "
-                          "binding curl only — graded knots toward the binding "
-                          "and an outer-flatness penalty (binding side from "
-                          "the PageDetector A/B page meta)."),
-        "spline_modes": _i(4, 2, 12,
-                           "Shape DOF K: sine modes (sine_twist) or free "
-                           "control points (bspline_twist / flat_spline); "
-                           "model adds K+1 params.", advanced=True,
-                           visible_when={"sheet_model": ["sine_twist",
-                                                         "bspline_twist",
-                                                         "flat_spline"]}),
-        "twist": _b(False,
-                    "Fit the linear-in-y twist gain γ (curl amplitude "
-                    "varying top-to-bottom). Off = pure cylinder with the "
-                    "chosen basis (γ pinned to 0). Enable only for true "
-                    "open-book fan pages — on flat pages a free γ invents "
-                    "phantom twist.",
-                    visible_when={"sheet_model": ["sine_twist",
-                                                  "bspline_twist",
-                                                  "flat_spline"]}),
-        "binding_side": _e("auto", ["auto", "left", "right"],
-                           "flat_spline: page edge carrying the binding. "
-                           "auto reads the PageDetector page_side meta "
-                           "(left page of a spread → binding right, and "
-                           "vice versa); set explicitly for single-page "
-                           "scans. Unresolved auto disables the flat "
-                           "features for that page.",
-                           visible_when={"sheet_model": ["flat_spline"]}),
-        "knot_grading": _f(2.5, 1.0, 6.0, 0.5,
-                           "flat_spline: knot density grading toward the "
-                           "binding. 1 = uniform; higher = coarser flat "
-                           "field / finer gutter wall.", advanced=True,
-                           visible_when={"sheet_model": ["flat_spline"]}),
-        "flat_outer_penalty": _f(1.0, 0.0, 100.0, 0.5,
-                                 "flat_spline: weight of the outer-flatness "
-                                 "penalty λ·Σ w_i·c_i² (w = squared Greville "
-                                 "distance from the binding). 0 = off; ~1 "
-                                 "balances the data term on a typical page.",
-                                 visible_when={"sheet_model": ["flat_spline"]}),
         "page_margin_mm": _f(5.0, 0.0, 50.0, 1.0,
                              "Mask margin in mm — defines the page-extent rectangle "
                              "for span detection."),
@@ -711,9 +619,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
     @staticmethod
     def _sample_grid(ref_h, ref_w, *, params, page_dims_w, page_dims_h,
-                     model_dims, decimate, zoom, model, n_modes, focal,
-                     support, support_y, support_decay, grading, flip,
-                     n_cam=8, spine=None):
+                     decimate, zoom, focal, n_cam=8, spine=None):
         """The arc-length-uniform backward sampling grid, shared by the
         forward remap and by replay so both build pixel-identical geometry.
 
@@ -729,10 +635,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # Arc-length-uniform x grid: width sized from the sheet's arc length,
         # x samples spaced uniformly in s (else the steep gutter side comes
         # out horizontally stretched by sqrt(1+z'^2)).
-        arc_xs, arc_s = arclength_x(params, page_dims_w, model=model,
-                                    n_modes=n_modes, model_dims=model_dims,
-                                    support=support, support_decay=support_decay,
-                                    grading=grading, flip=flip, spine=spine)
+        arc_xs, arc_s = arclength_x(params, page_dims_w, spine=spine)
         arc_total = float(arc_s[-1])
         target_w = round_nearest_multiple(
             target_h * arc_total / page_dims_h, decimate)
@@ -743,10 +646,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         page_xy = np.hstack((gx.flatten().reshape((-1, 1)),
                              gy.flatten().reshape((-1, 1)))).astype(np.float32)
         image_points = project_xy_model(
-            page_xy, params.astype(np.float32), model=model, n_modes=n_modes,
-            model_dims=model_dims, focal_length=focal, support=support,
-            support_y=support_y, support_decay=support_decay,
-            grading=grading, flip=flip, n_cam=n_cam, spine=spine)
+            page_xy, params.astype(np.float32), focal_length=focal,
+            n_cam=n_cam, spine=spine)
         image_points = norm2pix((ref_h, ref_w), image_points, False)
         return image_points, gx.shape, target_w, target_h, w_small, h_small
 
@@ -756,7 +657,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         pad_px)``, sampling the input padded by ``pad_px`` white px on every
         side. Thin wrapper over the shared ``_sample_grid``."""
         from aglaia.processors.lm_solver import SpineCurl
+        from aglaia.processors.sheet_models import canonical_model
 
+        # Raises for a node stamped with a retired twist/spline model: the
+        # grid below would otherwise be built against a DIFFERENT surface
+        # than the one that was fitted — a silently wrong page.
+        canonical_model(params.get("sheet_model"))
         pad_px = int(params["pad_px"])
         in_h, in_w = int(in_hw[0]), int(in_hw[1])
         page_dims = np.array(params["page_dims"], dtype=np.float32)
@@ -766,12 +672,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # page_dims_w float()-cast (arclength), page_dims_h kept raw —
             # mirrors the pre-extraction dtype mix exactly (byte-identical).
             page_dims_w=float(page_dims[0]), page_dims_h=page_dims[1],
-            model_dims=params["model_dims"], decimate=int(params["decimate"]),
-            zoom=float(params["zoom"]), model=str(params["sheet_model"]),
-            n_modes=int(params["spline_modes"]), focal=float(params["focal_length"]),
-            support=params["support_x"], support_y=params["support_y"],
-            support_decay=params["support_decay"],
-            grading=float(params["knot_grading"]), flip=bool(params["binding_flip"]),
+            decimate=int(params["decimate"]), zoom=float(params["zoom"]),
+            focal=float(params["focal_length"]),
             # Pre-#60 stamps carry neither key: default to the 8-param pinhole
             # with no spine term, i.e. exactly the surface they were fitted on.
             n_cam=int(params.get("camera_np", 8)),
@@ -788,33 +690,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         if not HAS_LIBRARY:
             raise ImportError("page-dewarp library not found. Install with: uv pip install 'page-dewarp[jax]'")
 
-        # Sheet model + loss toggles — resolved before backend install so
-        # the backend modules get the right baked constants. canonical_model
-        # maps the legacy "spline_twist" name to "sine_twist".
-        from aglaia.processors.sheet_models import (canonical_model,
-                                                 SPLINE_MODELS)
-        self.sheet_model = canonical_model(
-            getattr(options, "sheet_model", "cylindrical"))
-        if self.sheet_model not in ("cylindrical",) + SPLINE_MODELS:
-            print(f"[PageDewarper] unknown sheet_model={self.sheet_model!r}; "
-                  f"falling back to 'cylindrical'.", flush=True)
-            self.sheet_model = "cylindrical"
-        self.spline_modes = int(getattr(options, "spline_modes", 4))
-        self.twist = bool(getattr(options, "twist", False))
-        # flat_spline knobs — inert (grading 1, penalty 0) on other models.
-        from aglaia.processors.sheet_models import MODEL_FLAT_SPLINE
-        is_flat = self.sheet_model == MODEL_FLAT_SPLINE
-        self.binding_side = str(getattr(options, "binding_side", "auto")
-                                or "auto").lower()
-        if self.binding_side not in ("auto", "left", "right"):
-            print(f"[PageDewarper] unknown binding_side="
-                  f"{self.binding_side!r}; falling back to 'auto'.",
-                  flush=True)
-            self.binding_side = "auto"
-        self.knot_grading = (max(float(getattr(options, "knot_grading", 2.5)),
-                                 1.0) if is_flat else 1.0)
-        self.flat_outer_penalty = (max(float(getattr(
-            options, "flat_outer_penalty", 1.0)), 0.0) if is_flat else 0.0)
         self.use_huber = bool(getattr(options, "use_huber", True))
         self.huber_delta = (float(getattr(options, "huber_delta", 0.005))
                             if self.use_huber else 0.0)
@@ -843,8 +718,14 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # `_seed_warm_curl` / `_remember_warm_curl`.
         self._warm_curl: dict[str, list] = {}
 
-        # LM camera/objective knobs (issue #60) — cylindrical + LM only, so
-        # they are neutralised up front on any other model/backend below.
+        # LM camera/objective knobs (issue #60) — LM only, so they are
+        # neutralised on the other backends below.
+        self.binding_side = str(getattr(options, "binding_side", "auto")
+                                or "auto").lower()
+        if self.binding_side not in ("auto", "left", "right"):
+            print(f"[PageDewarper] unknown binding_side="
+                  f"{self.binding_side!r}; falling back to 'auto'.", flush=True)
+            self.binding_side = "auto"
         self.principal_point = bool(getattr(options, "principal_point", True))
         self.spine_weight_boost = max(
             float(getattr(options, "spine_weight_boost", 4.0)), 1.0)
@@ -874,16 +755,9 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         lm_allowed = (env_lm is None
                       or env_lm.lower() not in ("0", "false", "no", ""))
 
-        # LM is cylindrical-only: its analytic Jacobian is the cubic sheet's.
-        # It is the default there (issue #59 — 70x faster than Powell, no
-        # JAX/MLX pool to babysit); the spline models keep the GPU chain.
-        if requested == "lm" and self.sheet_model != "cylindrical":
-            print(f"[PageDewarper] lm backend is cylindrical-only "
-                  f"({self.sheet_model} requested); falling back to 'auto'.",
-                  flush=True)
-            requested = "auto"
-        if requested == "lm" or (requested == "auto" and lm_allowed
-                                 and self.sheet_model == "cylindrical"):
+        # LM is the default (issue #59 — ~100x faster than Powell at a better
+        # objective, and no JAX/MLX allocator pool to babysit).
+        if requested == "lm" or (requested == "auto" and lm_allowed):
             requested = "lm"
 
         # Resolve to one of: "lm" | "mlx" | "jax" | "powell".
@@ -902,16 +776,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                         install as _install_mlx,
                         set_cubic_cost as _set_mlx_cubic,
                         set_huber_delta as _set_mlx_huber,
-                        set_knot_grading as _set_mlx_grading,
-                        set_sheet_model as _set_mlx_model,
                     )
                     if _install_mlx():
                         active = "mlx"
                         _set_mlx_cubic(float(getattr(options, "cubic_cost", 0.0)))
                         _set_mlx_huber(self.huber_delta)
-                        _set_mlx_model(self.sheet_model, self.spline_modes,
-                                       self.twist)
-                        _set_mlx_grading(self.knot_grading)
                         print("[PageDewarper] MLX backend active "
                               "(bypasses JAX-CPU host-pool leak).",
                               flush=True)
@@ -929,15 +798,10 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                             install as _install_pad,
                             set_cubic_cost as _set_pad_cubic,
                             set_huber_delta as _set_pad_huber,
-                            set_knot_grading as _set_pad_grading,
-                            set_sheet_model as _set_pad_model,
                         )
                         _install_pad()
                         _set_pad_cubic(float(getattr(options, "cubic_cost", 0.0)))
                         _set_pad_huber(self.huber_delta)
-                        _set_pad_model(self.sheet_model, self.spline_modes,
-                                       self.twist)
-                        _set_pad_grading(self.knot_grading)
                         active = "jax"
                     except Exception as e:
                         print(f"[PageDewarper] padded JAX install failed: "
@@ -945,14 +809,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                         active = "powell"
                 else:
                     active = "jax"  # raw, unpadded JAX
-                    if self.sheet_model in SPLINE_MODELS:
-                        # Library's raw JAX objective is cubic-only — the
-                        # model tail would get zero gradient and the
-                        # remap would then project a flat sheet.
-                        print(f"[PageDewarper] {self.sheet_model} needs MLX "
-                              "/ padded JAX / powell; raw JAX is cubic-only. "
-                              "Falling back to cylindrical.", flush=True)
-                        self.sheet_model = "cylindrical"
         self.backend = active
         if active != "lm":
             # The #60 camera upgrades live in the LM assembly only — the
@@ -1042,41 +898,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     # blows this up to 1e6+ and then crashes the arc-length remap.
     _PAGE_DIM_SANE = 50.0
 
-    def _set_backend_sheet_model(self) -> None:
-        """Re-push the current sheet_model/twist to the active backend's
-        module-global config (used when falling back mid-run)."""
-        try:
-            if self.backend == "mlx":
-                from aglaia.processors.page_dewarp_mlx import set_sheet_model as _s
-                _s(self.sheet_model, self.spline_modes, self.twist)
-            elif self.backend == "jax":
-                from aglaia.processors.page_dewarp_padded import set_sheet_model as _s
-                _s(self.sheet_model, self.spline_modes, self.twist)
-        except Exception:
-            pass
-
-    def _resolve_binding_side(self, img_buf: ImageBuffer,
-                              warn: bool = False) -> str | None:
-        """Which page edge carries the binding/gutter: "left", "right" or
-        None when it cannot be resolved.
-
-        `binding_side=auto` reads the PageDetector `page_side` meta stamped on
-        2-page spreads — the LEFT page of a spread is bound on its RIGHT edge,
-        and vice versa. Single-page scans have no such meta and need the
-        option set explicitly. Shared by flat_spline (knot flip + outer
-        penalty) and the LM spine features (#60)."""
-        side = self.binding_side
-        if side in ("left", "right"):
-            return side
-        ps = str(img_buf.meta.get("page_side") or "").lower()
-        side = {"left": "right", "right": "left"}.get(ps)
-        if side is None and warn:
-            print("[PageDewarper] no page_side meta and binding_side=auto — "
-                  "spine-zone weighting / spine curl off for this page (set "
-                  "binding_side explicitly for single-page scans).",
-                  flush=True)
-        return side
-
     def _retry_without_spine(self, img_buf, orig_buffer, orig_roi):
         """An LM fit whose remap blew the OOB gate — re-run this page with the
         spine-curl grid off (plain cubic) before giving up to the gray
@@ -1110,36 +931,28 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         finally:
             self.spine_gammas = saved
 
-    def _fallback_to_bspline(self, img_buf, orig_buffer, orig_roi):
-        """Cylindrical fit diverged — retry this page with bspline_twist
-        (no twist), which is numerically stable. Restores the pre-padding
-        buffer, swaps the model for THIS call only (saved/restored so the
-        next page still starts cylindrical), and re-runs process. Returns
-        the recovered buffer, or None when no fallback is possible (already
-        on a spline model → caller does a safe near-identity passthrough)."""
-        if self.sheet_model != "cylindrical":
-            return None
-        saved_model, saved_twist = self.sheet_model, self.twist
-        # LM's analytic Jacobian is the cubic sheet's, so the spline retry
-        # needs a model-aware optimiser: Powell is the universal one. Slow
-        # (~seconds), but this is the already-diverged page, not the norm.
-        saved_backend = self.backend
-        print("[PageDewarper] cylindrical fit diverged — falling back to "
-              "bspline_twist (no twist) for this page.", flush=True)
-        self.sheet_model = "bspline_twist"
-        self.twist = False
-        if self.backend == "lm":
-            self.backend = "powell"
-        self._set_backend_sheet_model()
-        img_buf.buffer = orig_buffer
-        if orig_roi is not None:
-            img_buf.meta["roi"] = orig_roi
-        try:
-            return self.process(img_buf)
-        finally:
-            self.sheet_model, self.twist = saved_model, saved_twist
-            self.backend = saved_backend
-            self._set_backend_sheet_model()
+    def _resolve_binding_side(self, img_buf: ImageBuffer,
+                              warn: bool = False) -> str | None:
+        """Which page edge carries the binding/gutter: "left", "right" or
+        None when it cannot be resolved.
+
+        `binding_side=auto` reads the PageDetector `page_side` meta stamped on
+        2-page spreads — the LEFT page of a spread is bound on its RIGHT edge,
+        and vice versa. Single-page scans have no such meta and need the
+        option set explicitly. The meta has to survive the intervening steps:
+        TrapezoidalCorrection returns a fresh buffer and dropped it until
+        2026-08, which silently disabled every feature gated on this."""
+        side = self.binding_side
+        if side in ("left", "right"):
+            return side
+        ps = str(img_buf.meta.get("page_side") or "").lower()
+        side = {"left": "right", "right": "left"}.get(ps)
+        if side is None and warn:
+            print("[PageDewarper] no page_side meta and binding_side=auto — "
+                  "spine-zone weighting / spine curl off for this page (set "
+                  "binding_side explicitly for single-page scans).",
+                  flush=True)
+        return side
 
     def process(self, img_buf: ImageBuffer) -> ImageBuffer:
         """
@@ -1159,9 +972,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         small = ctx.small
         span_counts = ctx.span_counts
-        model_dims = ctx.model_dims
-        flat_flip = ctx.flat_flip
-        flat_penalty_eff = ctx.flat_penalty_eff
         dstpoints = ctx.dstpoints
         params = ctx.params
 
@@ -1192,10 +1002,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                 ki = keypoint_index(span_counts, ctx.n_cam)
                 ppts = sheet_models.project_keypoints_model(
                     np.asarray(pvec, dtype=np.float64).copy(), ki,
-                    model=self.sheet_model, n_modes=self.spline_modes,
-                    model_dims=model_dims,
                     focal_length=self.focal_length,
-                    grading=self.knot_grading, flip=flat_flip,
                     n_cam=ctx.n_cam, spine=ctx.spine)
                 res = img.copy()
                 for pt in ppts:
@@ -1214,24 +1021,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             with SuppressOutput():
                 if self.backend == "lm":
                     params = self._solve_lm(ctx)
-                elif (self.sheet_model in sheet_models.SPLINE_MODELS
-                        and self.backend == "powell"):
-                    # Library Powell objective is cubic-only — use
-                    # the vendored model-aware optimiser.
-                    params = sheet_models.optimise_params_spline_powell(
-                        dstpoints, span_counts, params,
-                        model=self.sheet_model,
-                        n_modes=self.spline_modes,
-                        twist=self.twist,
-                        model_dims=model_dims,
-                        focal_length=self.focal_length,
-                        shear_cost=float(self.cfg.SHEAR_COST),
-                        cubic_cost=self.cubic_cost,
-                        huber_delta=self.huber_delta,
-                        grading=self.knot_grading,
-                        flip=flat_flip,
-                        flat_penalty=flat_penalty_eff,
-                        maxiter=int(self.cfg.OPT_MAX_ITER))
                 else:
                     params = optimise_params("dewarp", small, dstpoints, span_counts, params, self.cfg.DEBUG_LEVEL)
         finally:
@@ -1282,9 +1071,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # Polish pass for Powell only — MLX/padded-JAX fold cubic_cost into
         # their main pass. For Powell we re-optimise the 8 global params
         # (rvec+tvec+α+β); per-span y/x stay frozen at lib's optimum.
-        # Cylindrical only: the spline Powell path folds its own reg.
-        if (self.cubic_cost > 0.0 and self.backend == "powell"
-                and self.sheet_model == "cylindrical"):
+        if self.cubic_cost > 0.0 and self.backend == "powell":
             from scipy.optimize import minimize
             kpidx = make_keypoint_index(span_counts)
             target_pts = dstpoints.reshape((-1, 2))
@@ -1319,7 +1106,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             self.debug_save(res_2, "2_optimized", img_buf)
 
         ctx.params_initial = params_initial
-        self._remember_warm_curl(params, ctx.n_extra, img_buf)
+        self._remember_warm_curl(params, img_buf)
         return self._finish_dewarp(img_buf, params, ctx)
 
     # ── BatchableTrait: split the SOLVE out so the chain can batch it on the
@@ -1329,10 +1116,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     # above is unchanged — this is a parallel entry for the batched path.
     def make_batcher(self):
         from aglaia.processors.dewarp_batcher import DewarpBatcher
-        return DewarpBatcher(model=self.sheet_model, n_modes=self.spline_modes,
-                             twist=self.twist, cubic_cost=self.cubic_cost,
-                             huber=self.huber_delta,
-                             knot_grading=self.knot_grading)
+        return DewarpBatcher(cubic_cost=self.cubic_cost,
+                             huber=self.huber_delta)
 
     def to_request(self, img_buf: ImageBuffer):
         """Build the dewarp problem and return a BatchItem, or None when this
@@ -1353,21 +1138,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # finished buffer so apply_result can hand it straight back.
             img_buf.meta["_dewarp_early"] = early_buf
             return None
-        from aglaia.processors import sheet_models
-        if ctx.n_extra:
-            flat_w = tuple(
-                float(w) for w in ctx.flat_penalty_eff
-                * sheet_models.flat_outer_weights(self.spline_modes,
-                                                  self.knot_grading))
-        else:
-            flat_w = ()
         payload = {
             "dstpoints": ctx.dstpoints,
             "keypoint_index": make_keypoint_index(ctx.span_counts),
             "params": ctx.params,
             "model_dims": ctx.model_dims,
-            "flat_flip": ctx.flat_flip,
-            "flat_weights": flat_w,
         }
         bucket = self.make_batcher().bucket_key_for(payload)
         if bucket is None:
@@ -1380,7 +1155,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         returning the output ImageBuffer exactly as inline process() would."""
         ctx = img_buf.meta.pop("_dewarp_ctx")
         result = np.asarray(result)
-        self._remember_warm_curl(result, ctx.n_extra, img_buf)
+        self._remember_warm_curl(result, img_buf)
         return self._finish_dewarp(img_buf, result, ctx)
 
     # Warm-start cache tunables.
@@ -1394,12 +1169,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     def _warm_key(img_buf: ImageBuffer) -> str:
         return str(img_buf.meta.get("page_side") or "single").lower()
 
-    def _seed_warm_curl(self, params, n_extra: int, img_buf: ImageBuffer):
+    def _seed_warm_curl(self, params, img_buf: ImageBuffer):
         """Seed the curl DOFs from a ROBUST median of recent same-side fits.
 
-        Transfers ONLY the global shape — cubic slopes (params[6:8]) and, for
-        spline models, the coeff/γ tail — leaving pose (rvec/tvec) and the
-        per-span keypoints page-specific. Robustness (vs seeding the single
+        Transfers ONLY the global shape — the cubic slopes (params[6:8]) —
+        leaving pose (rvec/tvec) and the per-span keypoints page-specific. Robustness (vs seeding the single
         last fit, which lets over-curl compound into a runaway): the seed is
         the componentwise median of the last N fits scaled to the MEDIAN of
         their magnitudes (a lone outlier moves neither), then hard-capped in
@@ -1407,8 +1181,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         hist = self._warm_curl.get(self._warm_key(img_buf))
         if not hist:
             return
-        recent = hist[-self._WARM_MEDIAN_N:]
-        cubics = np.asarray([h[0] for h in recent], dtype=np.float64)  # (k, 2)
+        cubics = np.asarray(hist[-self._WARM_MEDIAN_N:],
+                            dtype=np.float64)          # (k, 2)
         med = np.median(cubics, axis=0)
         med_mag = float(np.median(np.linalg.norm(cubics, axis=1)))
         nv = float(np.linalg.norm(med))
@@ -1419,15 +1193,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             med = med * (self._WARM_CURL_MAX / mag)
         if np.all(np.isfinite(med)):
             params[6:8] = med.astype(np.float32)
-        if n_extra:
-            ex = [h[1] for h in recent
-                  if h[1] is not None and len(h[1]) == n_extra]
-            if ex:
-                med_ex = np.median(np.asarray(ex, dtype=np.float64), axis=0)
-                if np.all(np.isfinite(med_ex)):
-                    params[-n_extra:] = med_ex.astype(np.float32)
 
-    def _remember_warm_curl(self, params, n_extra: int, img_buf: ImageBuffer):
+    def _remember_warm_curl(self, params, img_buf: ImageBuffer):
         """Append the solved curl to this page side's ring (drops non-finite
         fits so they can't poison the median)."""
         params = np.asarray(params)
@@ -1436,12 +1203,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         cubic = params[6:8].astype(np.float32)
         if not np.all(np.isfinite(cubic)):
             return
-        extras = None
-        if n_extra and params.size >= 8 + n_extra \
-                and np.all(np.isfinite(params[-n_extra:])):
-            extras = params[-n_extra:].astype(np.float32).copy()
         hist = self._warm_curl.setdefault(self._warm_key(img_buf), [])
-        hist.append((cubic.copy(), extras))
+        hist.append(cubic.copy())
         if len(hist) > self._WARM_HIST:
             del hist[0]
 
@@ -1640,8 +1403,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             for k in self.cfg.__struct_fields__:
                 setattr(lib_cfg, k, getattr(self.cfg, k))
 
-            from aglaia.processors import sheet_models
-
             # 3. Sampling and Optimization
             # x-height-band sampler avoids ascender/descender bias in samples.
             span_points = _sample_spans_xband(small.shape, spans,
@@ -1655,55 +1416,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # get_page_dims. Stored in replay_params so replay rebuilds
             # the identical surface.
             model_dims = (float(rough_dims[0]), float(rough_dims[1]))
-            # Data support in page-x: the optimiser only constrains the
-            # sheet where span keypoints exist. Outside this range the
-            # spline is tangent-extended at evaluation time so the page
-            # margins can't pick up phantom curl.
-            if xcoords:
-                _xall = np.concatenate([np.asarray(xc).ravel()
-                                        for xc in xcoords])
-                support_x = (float(_xall.min()), float(_xall.max()))
-            else:
-                support_x = (0.0, model_dims[0])
-            # Same in y for the twist factor: (1 + γ·η) is linear in y and
-            # keeps growing past the first/last span — amplified (or, at
-            # |γ| > 2, sign-flipped) phantom curl in the top/bottom
-            # margins. Clamp η to the span-y data range at evaluation.
-            _yall = np.asarray(ycoords).ravel()
-            if _yall.size:
-                support_y = (float(_yall.min()), float(_yall.max()))
-            else:
-                support_y = (0.0, model_dims[1])
-            # Decay length of the x tangent extension. A pure tangent
-            # grows linearly into the margin — a steep gutter wall at the
-            # support edge blows the margin grid up.
-            support_decay = sheet_models.SUPPORT_DECAY_FRAC * model_dims[0]
-            n_extra = sheet_models.n_extras(self.sheet_model,
-                                            self.spline_modes)
-            # flat_spline per-page state: flip puts the binding at the
-            # page's left edge (basis t = 1 − x/W); flat_penalty_eff is
-            # zeroed when the binding side can't be resolved.
+            # Which page edge carries the binding, for the LM spine features.
             binding_side = self._resolve_binding_side(img_buf)
-            flat_flip = False
-            flat_penalty_eff = 0.0
-            if self.sheet_model == sheet_models.MODEL_FLAT_SPLINE:
-                if binding_side is None:
-                    print("[PageDewarper] flat_spline: no page_side "
-                          "meta and binding_side=auto — flat penalty "
-                          "off for this page (set binding_side "
-                          "explicitly for single-page scans).",
-                          flush=True)
-                flat_flip = binding_side == "left"
-                if binding_side is not None:
-                    flat_penalty_eff = self.flat_outer_penalty
-            if n_extra:
-                params = np.concatenate(
-                    [params, np.zeros(n_extra, dtype=params.dtype)])
             # Principal-point DOF (#60): (cx, cy) are inserted right after
             # α/β, so the camera block grows 8 -> 10 and every span/keypoint
-            # index shifts with it. Only the LM path understands that layout
-            # (the library's make_keypoint_index hardcodes 8), and it is
-            # cylindrical-only, so `n_extra` is always 0 here.
+            # index shifts with it. Only the LM path understands that
+            # layout — the library's make_keypoint_index hardcodes 8.
             n_cam = 10 if (self.backend == "lm" and self.principal_point) else 8
             if n_cam > 8:
                 params = np.concatenate(
@@ -1712,22 +1430,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # flat-[0,0] local optimum that leaves some pages undewarped).
             # Done here so BOTH the inline process() and the batched
             # make-request path (which read ctx.params) get the seed.
-            self._seed_warm_curl(params, n_extra, img_buf)
-            if n_extra:
-                flat_w = flat_penalty_eff * sheet_models.flat_outer_weights(
-                    self.spline_modes, self.knot_grading)
-                if self.backend == "mlx":
-                    from aglaia.processors.page_dewarp_mlx import (
-                        set_flat as _set_flat,
-                        set_model_dims as _set_model_dims)
-                    _set_model_dims(*model_dims)
-                    _set_flat(flat_flip, flat_w)
-                elif self.backend == "jax":
-                    from aglaia.processors.page_dewarp_padded import (
-                        set_flat as _set_flat,
-                        set_model_dims as _set_model_dims)
-                    _set_model_dims(*model_dims)
-                    _set_flat(flat_flip, flat_w)
+            self._seed_warm_curl(params, img_buf)
             dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) + tuple(span_points)).astype(np.float32)
 
             # Spine-zone residual weights (#60): the binding-side tail is a
@@ -1747,9 +1450,6 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                 orig_buffer=_orig_buffer, orig_roi=_orig_roi,
                 corners=corners, rough_dims=rough_dims,
                 span_counts=span_counts, params=params, model_dims=model_dims,
-                support_x=support_x, support_y=support_y,
-                support_decay=support_decay, flat_flip=flat_flip,
-                flat_penalty_eff=flat_penalty_eff, n_extra=n_extra,
                 dstpoints=dstpoints, spans=spans, span_points=span_points)
             return ctx, None
 
@@ -1824,29 +1524,17 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         corners = ctx.corners
         rough_dims = ctx.rough_dims
         model_dims = ctx.model_dims
-        support_x = ctx.support_x
-        support_y = ctx.support_y
-        support_decay = ctx.support_decay
-        flat_flip = ctx.flat_flip
-        flat_penalty_eff = ctx.flat_penalty_eff
-        span_counts = ctx.span_counts
-        dstpoints = ctx.dstpoints
         img = ctx.img
         pad_px = ctx.pad_px
         char_h_frac = ctx.char_h_frac
         _orig_buffer = ctx.orig_buffer
         _orig_roi = ctx.orig_roi
-        params_initial = ctx.params_initial
         success = True
 
         with SuppressOutput():
             page_dims = sheet_models.get_page_dims_model(
                 corners, rough_dims, params,
-                model=self.sheet_model, n_modes=self.spline_modes,
-                model_dims=model_dims, focal_length=self.focal_length,
-                support=support_x, support_y=support_y,
-                support_decay=support_decay,
-                grading=self.knot_grading, flip=flat_flip,
+                focal_length=self.focal_length,
                 n_cam=ctx.n_cam, spine=ctx.spine)
 
         if np.any(page_dims < 0):
@@ -1856,40 +1544,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # retry the page with the stable bspline model; if we're already
         # on a spline model, fall back to a safe near-identity instead.
         if float(np.max(np.abs(page_dims))) > self._PAGE_DIM_SANE:
-            fb = self._fallback_to_bspline(img_buf, _orig_buffer, _orig_roi)
-            if fb is not None:
-                return fb
-            print(f"[PageDewarper] {self.sheet_model} fit diverged "
-                  f"(page_dims={page_dims}); passing through.", flush=True)
+            # Used to retry on bspline_twist; that model is retired (it lost
+            # to this one on every page of the corpus), so a diverged fit
+            # falls back to the rough dims and the OOB gate decides.
+            print(f"[PageDewarper] fit diverged (page_dims={page_dims}); "
+                  f"passing through.", flush=True)
             page_dims = rough_dims
-        if self.sheet_model in sheet_models.SPLINE_MODELS:
-            _, _c, _g = sheet_models.split_extras(
-                params, self.sheet_model, self.spline_modes)
-
-            def _kp_rms(pv):
-                ki = make_keypoint_index(span_counts)
-                pp = sheet_models.project_keypoints_model(
-                    np.asarray(pv, dtype=np.float64).copy(), ki,
-                    model=self.sheet_model, n_modes=self.spline_modes,
-                    model_dims=model_dims,
-                    focal_length=self.focal_length,
-                    grading=self.knot_grading,
-                    flip=flat_flip).reshape(-1, 2)  # spline models: n_cam == 8
-                tgt = dstpoints.reshape(-1, 2)
-                return float(np.sqrt(np.mean(
-                    np.sum((tgt - pp) ** 2, axis=1))))
-
-            _flat_note = ""
-            if self.sheet_model == sheet_models.MODEL_FLAT_SPLINE:
-                _flat_note = (f" binding={'left' if flat_flip else 'right'}"
-                              f" g={self.knot_grading:g}"
-                              f" lam={flat_penalty_eff:g}")
-            print(f"[PageDewarper] {self.sheet_model} fit: c="
-                  f"[{', '.join(f'{v:+.4f}' for v in _c)}] "
-                  f"gamma={_g:+.4f} "
-                  f"rms {_kp_rms(params_initial):.5f}->"
-                  f"{_kp_rms(params):.5f}{_flat_note}", flush=True)
-
         # 5. Remapping — shared arc-length grid (same code path replay
         # uses, so the live remap and a replayed remap are pixel-identical).
         zoom = 1.0
@@ -1898,11 +1558,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             self._sample_grid(
                 img.shape[0], img.shape[1], params=params,
                 page_dims_w=page_dims[0], page_dims_h=page_dims[1],
-                model_dims=model_dims, decimate=decimate, zoom=zoom,
-                model=self.sheet_model, n_modes=self.spline_modes,
-                focal=self.focal_length, support=support_x,
-                support_y=support_y, support_decay=support_decay,
-                grading=self.knot_grading, flip=flat_flip,
+                decimate=decimate, zoom=zoom, focal=self.focal_length,
                 n_cam=ctx.n_cam, spine=ctx.spine)
 
         im_x_dec = image_points[:, 0, 0].reshape(grid_shape).astype(np.float32)
@@ -2030,19 +1686,9 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             "pad_px": int(pad_px),
             "zoom": float(1.0),
             "decimate": int(self.cfg.REMAP_DECIMATE),
-            "sheet_model": self.sheet_model,
-            "spline_modes": int(self.spline_modes),
+            "sheet_model": "cylindrical",
             "model_dims": [float(model_dims[0]), float(model_dims[1])],
             "focal_length": float(self.focal_length),
-            # Twist-model data support: page-x tangent-extended outside the
-            # support (no phantom margin curl), page-y η-clamped at its edge.
-            "support_x": [float(support_x[0]), float(support_x[1])],
-            "support_y": [float(support_y[0]), float(support_y[1])],
-            # Decay length λ of the page-x tangent extension.
-            "support_decay": float(support_decay),
-            # flat_spline surface geometry: graded knot vector + binding flip.
-            "knot_grading": float(self.knot_grading),
-            "binding_flip": bool(flat_flip),
             # LM camera/objective upgrades (#60): the camera block size (10
             # means pvec[8:10] is the principal point) and the spine-localized
             # curl term the fit won on. Replay MUST rebuild the same surface.

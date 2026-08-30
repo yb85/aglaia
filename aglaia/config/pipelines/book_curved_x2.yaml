@@ -61,12 +61,14 @@ pipeline:
   processor: PageDewarper
   options:
     backend: auto
+    # binding_side: auto reads the page_side meta PageDetector stamps on the
+    # x2 split. Everything below needs it resolved.
+    binding_side: auto
     # LM camera upgrades (#60). This step runs right after
     # TrapezoidalCorrection, which is exactly the post-keystone case they
     # were measured on: the composed camera needs a principal point, and the
     # binding-side residuals need up-weighting to stop the fit under-curling
-    # at the gutter. binding_side stays `auto` — PageDetector stamps
-    # page_side on the x2 split.
+    # at the gutter.
     principal_point: true
     spine_weight_boost: 4.0
     spine_weight_zone: 0.25
@@ -85,9 +87,6 @@ pipeline:
     cubic_cost: 0.0
     focal_length: 1.3
     processing_dpi: 150
-    sheet_model: cylindrical
-    twist: false
-    spline_modes: 4
     baseline_source: bottom
 - name: output_margin
   processor: MarginSetter

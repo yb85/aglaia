@@ -38,7 +38,7 @@ def _dewarper():
     # Matches config/pipelines/book_curved_x2.yaml's PageDewarper, but forces
     # the jax backend (the batchable path).
     return PageDewarper(DewarpOption(
-        backend="jax", sheet_model="cylindrical", twist=False,
+        backend="jax",
         baseline_source="bottom", cubic_cost=0.0, focal_length=1.3))
 
 
@@ -54,7 +54,7 @@ def test_batched_path_matches_inline_process():
     item = d.to_request(buf2)
     assert item is not None, "cylindrical jax page should be batchable"
     assert set(item.payload) == {"dstpoints", "keypoint_index", "params",
-                                 "model_dims", "flat_flip", "flat_weights"}
+                                 "model_dims"}
     params = d.make_batcher().solve_one(item.payload)
     out_trait = d.apply_result(buf2, params)
 
