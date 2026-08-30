@@ -110,6 +110,7 @@ def bbox_baseline(bbox: Sequence[int]) -> tuple[np.ndarray, np.ndarray]:
 def baseline_from_ink(ink: np.ndarray, bbox: Sequence[int],
                       *, min_samples: int = 8,
                       span_mask: Optional[np.ndarray] = None,
+                      spine: Optional[tuple[float, float]] = None,
                       ) -> Optional[tuple[np.ndarray, np.ndarray]]:
     """Robustly fit a baseline through the bottom contour of a text line.
 
@@ -123,6 +124,16 @@ def baseline_from_ink(ink: np.ndarray, bbox: Sequence[int],
     to keep this span's RANSAC fit unaffected by ink from neighbouring
     text lines that happen to fall inside the same bbox (curl, morph
     bridging, or skewed bboxes).
+
+    spine: optional `(x_fold, zone_px)`. Near the binding the page curls
+    out of plane, so the bottom-most ink sits progressively lower than the
+    true baseline — evidence that is systematically wrong, not merely
+    noisy, and a plain fit lets it tilt the whole line. Columns get a
+    weight ramping from a floor at the fold to 1 outside the zone; the
+    RANSAC inlier band scales with it (curl-displaced bottoms fall out
+    more easily), candidates are scored by weight sum, and the refit is
+    weighted least squares. `None` → all weights 1, i.e. the exact
+    unweighted behaviour.
 
     Returns `(p_left, p_right)` — two points spanning the line — or None
     when there is too little data.
@@ -175,9 +186,19 @@ def baseline_from_ink(ink: np.ndarray, bbox: Sequence[int],
     # drop exceeds the tight 0.05×h band (a ~3° tilt over 2000 px drops
     # ~100 px, which a 10-px band rejects, fragmenting the inlier set
     # into a near-horizontal sub-cluster that underestimates the slope).
+    # Spine weights: 1 everywhere when `spine` is None, which keeps every
+    # expression below numerically identical to the unweighted fit.
+    if spine is not None:
+        spine_x, zone_px = float(spine[0]), max(float(spine[1]), 1.0)
+        wts = np.clip(np.abs((x + xs) - spine_x) / zone_px, 0.25, 1.0)
+    else:
+        wts = np.ones(xs.size, dtype=np.float64)
+    total_w = float(wts.sum())
+
     rng = np.random.default_rng(0)
     n = xs.size
     best_inliers = np.array([], dtype=np.int64)
+    best_score = -1.0
     eps = max(1.5, 0.15 * h)
     for _ in range(60):
         i, j = rng.choice(n, size=2, replace=False)
@@ -188,18 +209,32 @@ def baseline_from_ink(ink: np.ndarray, bbox: Sequence[int],
         a = (y2 - y1) / (x2 - x1)
         b = y1 - a * x1
         residuals = np.abs(ys - (a * xs + b))
-        inliers = np.where(residuals < eps)[0]
-        if inliers.size > best_inliers.size:
+        # Band shrinks with the weight → a curl-displaced bottom near the
+        # fold has to be much closer to the candidate to count.
+        inliers = np.where(residuals < eps * wts)[0]
+        score = float(wts[inliers].sum())
+        if score > best_score:
+            best_score = score
             best_inliers = inliers
-            if inliers.size > 0.85 * n:
+            if score > 0.85 * total_w:
                 break
 
     if best_inliers.size < min_samples:
         return None
-    # Least-squares re-fit on inliers.
-    A = np.column_stack([xs[best_inliers], np.ones(best_inliers.size)])
-    sol, *_ = np.linalg.lstsq(A, ys[best_inliers], rcond=None)
-    a, b = sol
+    # Weighted least-squares re-fit on inliers (weights all 1 → the plain
+    # lstsq solution).
+    wi = wts[best_inliers]
+    xi, yi = xs[best_inliers], ys[best_inliers]
+    sw = float(wi.sum())
+    sx = float((wi * xi).sum())
+    sy = float((wi * yi).sum())
+    sxx = float((wi * xi * xi).sum())
+    sxy = float((wi * xi * yi).sum())
+    denom = sw * sxx - sx * sx
+    if abs(denom) < 1e-12:
+        return None
+    a = (sw * sxy - sx * sy) / denom
+    b = (sy - a * sx) / sw
     # Two endpoints in the bbox-relative frame, translated back to image coords.
     x_lo, x_hi = xs.min(), xs.max()
     pL = np.array([x + x_lo, y + (a * x_lo + b)], dtype=np.float64)
@@ -1295,8 +1330,17 @@ def detect_column_quad_from_baselines(
     edge_cluster_gap_pct: float = 0.03,
     vblock_gap_mult: float = 2.5,
     vblock_edge_tol_pct: float = 0.04,
+    spine_side: Optional[str] = None,
 ) -> Optional[tuple[np.ndarray, dict]]:
     """Column quadrilateral from precomputed line baselines.
+
+    ``spine_side`` (``"left"`` / ``"right"`` / ``None``) names the page edge
+    carrying the binding. Curl corrupts the evidence on that side
+    specifically, which lets two spine-aware adjustments be made without
+    guessing: the fold-side endpoint cluster gets a relaxed bandwidth (its
+    members wobble), and a tilt disagreement backed by strong support on both
+    sides is kept as real keystone rather than reconciled. ``None`` is the
+    exact prior behaviour.
 
     Decoupled estimator (see `docs/algorithms.md` §3.6.2):
 
@@ -1371,11 +1415,17 @@ def detect_column_quad_from_baselines(
     bw = max(6.0, 0.008 * W_est)
     y_ref = float(np.median(np.concatenate([all_left[:, 1], all_right[:, 1]])))
     min_support = max(4, int(0.2 * len(all_left)))
+    # Spine-aware: the fold-side endpoints wobble with page curl, so that
+    # edge's members splinter into clusters too small to survive
+    # `min_support`. Relaxing only that side's bandwidth lets the wobbling
+    # members join one cluster. `spine_side=None` leaves both at `bw`.
+    bw_l = 2.0 * bw if spine_side == "left" else bw
+    bw_r = 2.0 * bw if spine_side == "right" else bw
     lmask = estimate_column_edge_members(
-        all_left[:, 0], all_left[:, 1], y_ref, bw=bw,
+        all_left[:, 0], all_left[:, 1], y_ref, bw=bw_l,
         outer_sign=-1, min_support=min_support)
     rmask = estimate_column_edge_members(
-        all_right[:, 0], all_right[:, 1], y_ref, bw=bw,
+        all_right[:, 0], all_right[:, 1], y_ref, bw=bw_r,
         outer_sign=+1, min_support=min_support)
     left_idxs = list(np.where(lmask)[0])
     right_idxs = list(np.where(rmask)[0])
@@ -1396,8 +1446,22 @@ def detect_column_quad_from_baselines(
     # intercept (median residual of its members).
     tilt_l = margin_line_tilt_deg(left_line)
     tilt_r = margin_line_tilt_deg(right_line)
-    if abs(tilt_l - tilt_r) > 2.5:
-        if len(left_idxs) >= len(right_idxs):
+    # Spine-aware: with curl-weighted baselines BOTH edges are genuine
+    # evidence, so a disagreement backed by strong support on both sides is
+    # real keystone convergence, not one side locking onto a slanted
+    # minority — reconciling it flattened a true 2.9° clean-edge tilt to
+    # vertical and parked the quad corner ~100 px off the ink.
+    solid = max(6, int(0.5 * len(all_left)))
+    keep_both = (spine_side is not None
+                 and len(left_idxs) >= solid and len(right_idxs) >= solid)
+    if abs(tilt_l - tilt_r) > 2.5 and not keep_both:
+        if spine_side is not None:
+            # Curl corrupts the FOLD side, so the clean side is the strong
+            # one by construction — a better arbiter than member count.
+            left_strong = spine_side == "right"
+        else:
+            left_strong = len(left_idxs) >= len(right_idxs)
+        if left_strong:
             strong_line, weak_pts, weak_members, weak_is_right = (
                 left_line, all_right, right_idxs, True)
         else:

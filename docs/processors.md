@@ -153,6 +153,43 @@ options:
 
 Falls back to passthrough (`Status.REVIEW`) when too few baselines or the quad fails convexity/area/aspect sanity checks.
 
+### Spine-aware estimation (`spine_aware`, default on)
+
+Near the binding the page curls out of plane, so the bottom-most ink sits
+progressively lower than the true baseline. That is evidence which is
+systematically *wrong*, not merely noisy, and an unweighted fit lets it tilt
+the line and drag the vanishing point. Knowing which edge carries the fold —
+the `page_side` meta PageDetector stamps on a spread, which survives this step
+since 2026-08 — allows three corrections:
+
+1. **Curl-zone down-weighting.** Column weights ramp from a 0.25 floor at the
+   fold to 1 outside the innermost 30% of page width. The RANSAC inlier band
+   scales with the weight (curl-displaced bottoms fall out more easily),
+   candidates score by weight sum, and the refit is weighted least squares.
+   Measured on a synthetic line, this cuts the curl-induced baseline tilt by
+   **57-69%** across sag strengths of 12-30 px.
+2. **Fold-side cluster bandwidth ×2.** Only that edge — its endpoints wobble
+   with the curl and would otherwise splinter into clusters below
+   `min_support`.
+3. **A well-supported tilt disagreement is kept.** With curl-weighted
+   baselines both edges are genuine evidence, so a disagreement backed by
+   ≥ max(6, half the members) on both sides is real keystone convergence, not
+   one side locking onto a slanted minority. When one edge *is* weak, the fold
+   side arbitrates (curl corrupts it by construction) rather than member count.
+
+`spine_aware: false` gives the exact side-agnostic behaviour, and the option
+is inert on single-page scans (no `page_side` to resolve).
+
+> **The local corpus does not corroborate this.** On the 12 fixture pages:
+> mean 0.926 → 0.929 px, median 0.879 → 0.897 (worse, and ~9× the noise
+> floor), worst page 1.206 → 1.128 (better). More importantly the per-page
+> benefit correlates **+0.275** with page curl — the *opposite* of the
+> mechanism's premise, with low-curl pages gaining (−0.024 mean) and
+> high-curl pages losing (+0.031). It is on by default on the maintainer's
+> call, backed by the iOS port's device validation on handheld captures; the
+> fixture corpus is rig captures, a different regime. If you are scanning on a
+> rig and comparing carefully, `spine_aware: false` is a reasonable choice.
+
 ## PageDewarper (`aglaia/processors/PageDewarper.py`)
 
 **Dewarping** removes the curvature + perspective that make a photographed

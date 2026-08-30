@@ -45,10 +45,28 @@ from aglaia.processors.utils import binarize_fixed, to_gray
 # one shared "single" history for both halves of every spread.
 _CARRIED_META = ("page_side", "parent_crop_xywh")
 
+#: Curl zone as a fraction of page width — the band nearest the binding whose
+#: baseline evidence is down-weighted. 0.30 matches the iOS port.
+_SPINE_ZONE_FRAC = 0.30
+
 
 @dataclass
 class TrapezoidalOption(AbstractProcessorOption):
     # --- input geometry source ---
+    # Spine-aware estimation: use the page's binding side (from the
+    # PageDetector `page_side` meta) to down-weight curl-corrupted baseline
+    # evidence, relax the fold-side endpoint cluster, and keep a
+    # well-supported tilt disagreement as real keystone. False = the exact
+    # side-agnostic behaviour.
+    #
+    # ON by default — Yann's call, backed by the iOS port's device validation
+    # on handheld captures. The local corpus does NOT corroborate it: mean
+    # 0.926 -> 0.929 px, median 0.879 -> 0.897 (worse, ~9x the noise floor),
+    # worst page 1.206 -> 1.128 (better), and the per-page benefit correlates
+    # +0.275 with curl — i.e. the OPPOSITE of the mechanism's premise, with
+    # low-curl pages gaining and high-curl pages losing. That corpus is rig
+    # captures; the mechanism targets handheld curl. Set False to revert.
+    spine_aware: bool = True
     line_source: str = "connectivity"   # connectivity | meta
     min_line_count: int = 4
     # Horizontal MORPH_CLOSE kernel fallback (mm). Used when text-scale
@@ -160,6 +178,17 @@ class TrapezoidalCorrection(AbstractImageProcessor):
     }
     _ESSENTIAL_PARAMS = ("line_source", "interp", "processing_dpi")
     OPTIONS = {
+        "spine_aware": _b(True,
+                          "Use the page's binding side (PageDetector's "
+                          "page_side meta) to correct for page curl: "
+                          "down-weight baseline evidence in the fold zone, "
+                          "relax the fold-side endpoint cluster, and keep a "
+                          "well-supported tilt disagreement as real keystone "
+                          "rather than reconciling it away. Needs a two-page "
+                          "spread; inert on single-page scans. On by "
+                          "default; the local fixture corpus does not "
+                          "corroborate it (see the dataclass comment) — turn "
+                          "off to get the exact side-agnostic behaviour."),
         "line_source": _e("connectivity", ["connectivity", "meta"],
                           "Where to source text-line bboxes from. "
                           "connectivity = morphological analysis; meta = PageDetector bboxes.",
@@ -265,6 +294,7 @@ class TrapezoidalCorrection(AbstractImageProcessor):
     def __init__(self, options: TrapezoidalOption):
         super().__init__(options)
         self.opt = options
+        self.spine_aware = bool(getattr(options, "spine_aware", False))
         self.uses_gpu = False
         self._last_source_label: str = ""
         # Median glyph height as a fraction of the analysis-image height
@@ -470,10 +500,22 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         baselines: list[tuple[np.ndarray, np.ndarray]] = []
         baseline_bboxes: list[tuple[int, int, int, int]] = []
         span_masks_local = getattr(self, "_last_span_masks", None) or []
+        # Which edge carries the binding. PageDetector stamps `page_side` on
+        # a two-page spread: the LEFT page of a spread is bound on its RIGHT
+        # edge, and vice versa. Unresolvable → side-agnostic behaviour.
+        spine_side = None
+        if getattr(self, "spine_aware", False):
+            ps = str(buf.meta.get("page_side") or "").lower()
+            spine_side = {"left": "right", "right": "left"}.get(ps)
+        ink_w = ink_arr.shape[1]
+        spine_arg = None
+        if spine_side is not None:
+            spine_arg = ((float(ink_w - 1) if spine_side == "right" else 0.0),
+                         _SPINE_ZONE_FRAC * ink_w)
         for idx, bb in enumerate(line_bboxes):
             sm = (span_masks_local[idx]
                   if idx < len(span_masks_local) else None)
-            bl = baseline_from_ink(ink_arr, bb, span_mask=sm)
+            bl = baseline_from_ink(ink_arr, bb, span_mask=sm, spine=spine_arg)
             if bl is None:
                 continue
             baselines.append(bl)
@@ -512,6 +554,7 @@ class TrapezoidalCorrection(AbstractImageProcessor):
             edge_cluster_gap_pct=self.opt.edge_cluster_gap_pct,
             vblock_gap_mult=self.opt.vblock_gap_mult,
             vblock_edge_tol_pct=self.opt.vblock_edge_tol_pct,
+            spine_side=spine_side,
         )
         if result is None:
             return self._fallback(
