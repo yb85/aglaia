@@ -171,30 +171,82 @@ def _curvature(img):
     return float(np.mean(devs))
 
 
-def test_rejected_lm_fit_backs_off_to_the_plain_cubic():
-    """The γ grid selects on objective alone, and the objective cannot see a
-    wild remap — on one fixture page γ = −0.10 scored below γ = 0 and blew the
-    OOB gate. Conceding straight to grayscale would lose a page the plain
-    cubic still dewarps, so a rejection must back off, not give up."""
+def test_a_rejected_fit_walks_the_whole_ladder_then_concedes():
+    """Rungs, cheapest first: γ grid off, then a flat (zero-curl) fit, then
+    grayscale. Each rung re-enters process(), whose own ladder starts one rung
+    lower — that is what bounds the recursion.
+
+    `max_oob = 0` rejects any remap that overshoots by even a pixel, which is
+    what drives the ladder all the way down. Note the page still comes out
+    dewarped: the flat rung's remap does not overshoot at all."""
     d = _lm(spine_gammas="0.02, 0.05, 0.10")
-    d.max_oob = 0.0                    # force the gate to reject any remap
-    calls = []
-    real = d._retry_without_spine
+    d.max_oob = 0.0                    # force the gate to reject every remap
+    rungs = []
+    real_spine, real_flat = d._retry_without_spine, d._retry_flat
 
-    def spy(buf, orig, roi):
-        calls.append(tuple(d.spine_gammas))
-        return real(buf, orig, roi)
+    def spy_spine(buf, orig, roi):
+        rungs.append(("spine", tuple(d.spine_gammas)))
+        return real_spine(buf, orig, roi)
 
-    d._retry_without_spine = spy
+    def spy_flat(buf, orig, roi):
+        rungs.append(("flat", d._flat_fit))
+        return real_flat(buf, orig, roi)
+
+    d._retry_without_spine, d._retry_flat = spy_spine, spy_flat
     out = d.process(_buf())
-    # First entry retries with the grid off; the nested rejection sees an
-    # empty grid, has nothing left to back off to and returns None — that is
-    # what stops the retry from recursing forever.
-    assert calls == [(0.02, 0.05, 0.10), ()]
-    assert d.spine_gammas == (0.02, 0.05, 0.10), "must be restored for the next page"
-    # The gate rejects everything here, so the page still ends in the gray
-    # fallback — what matters is that the plain cubic was given its turn.
-    assert out.meta["success"] is False
+
+    kinds = [r[0] for r in rungs]
+    assert kinds.count("spine") >= 1 and kinds.count("flat") >= 1, rungs
+    # The γ rung fires first, with the grid still populated.
+    assert rungs[0] == ("spine", (0.02, 0.05, 0.10))
+    # The flat rung is reached only after the γ rung has nothing left.
+    assert ("flat", False) in rungs
+    # Both flags restored for the next page — a fallback must not be sticky.
+    assert d.spine_gammas == (0.02, 0.05, 0.10)
+    assert d._flat_fit is False
+    # Recursion terminated: each rung fired once per level, not repeatedly.
+    assert rungs == [("spine", (0.02, 0.05, 0.10)), ("spine", ()),
+                     ("flat", False)]
+    # And the page survives: even under a gate this brutal the flat rung's
+    # remap lands in bounds, because a zero-curl surface cannot overshoot.
+    assert out.meta["success"] is True
+
+
+def test_the_flat_rung_produces_a_usable_page_not_grayscale():
+    """The point of the rung: a zero-curl surface cannot produce the runaway
+    remap that trips the gate, so it always has an answer."""
+    d = _lm(spine_gammas="")
+    buf = _buf("left")
+    ctx, early = d._build_dewarp_problem(buf)
+    assert early is None
+    d._flat_fit = True
+    try:
+        params = d._solve_lm(ctx)
+    finally:
+        d._flat_fit = False
+    assert params[6] == pytest.approx(0.0) and params[7] == pytest.approx(0.0)
+    assert ctx.spine is None
+    ctx.params_initial = ctx.params
+    out = d._finish_dewarp(buf, params, ctx)
+    assert out.meta["success"] is True
+    assert max(out.meta["oob"].values()) <= d.max_oob
+
+
+def test_a_flat_fallback_does_not_poison_the_warm_start():
+    """A flat fit's curl is 0 by construction, not by measurement. Recording
+    it would drag the next same-side page's seed toward zero on the strength
+    of a failure — the ring exists to carry a book's real curl forward."""
+    d = _lm(spine_gammas="")
+    d._flat_fit = True
+    try:
+        d.process(_buf("left"))
+    finally:
+        d._flat_fit = False
+    assert not any(d._warm_curl.values()), "flat fallback was remembered"
+
+    # …while an ordinary fit still is, or the warm start would do nothing.
+    d.process(_buf("left"))
+    assert any(d._warm_curl.values()), "a normal fit must seed the ring"
 
 
 def test_no_spine_grid_means_nothing_to_back_off_to():

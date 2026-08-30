@@ -735,6 +735,10 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             float(getattr(options, "spine_gamma_scale", 0.15)), 1e-3)
         self.spine_gammas = _parse_gammas(
             getattr(options, "spine_gammas", "0.02, 0.05, 0.10"))
+        #: Last-resort mode, set only by `_retry_flat` for one page: fit pose
+        #: and page dims around a FLAT sheet (curl frozen at 0). Never a user
+        #: option — it is the bottom rung of the failure ladder, not a model.
+        self._flat_fit = False
 
         # Resolve backend (auto / lm / mlx / jax / powell). Env overrides:
         # AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables padded JAX,
@@ -931,6 +935,35 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         finally:
             self.spine_gammas = saved
 
+    def _retry_flat(self, img_buf, orig_buffer, orig_roi):
+        """Last rung: re-run this page with the curl frozen at zero.
+
+        The rung above (`_retry_without_spine`) fixes the failure the γ grid
+        can cause. It does not fix a curl that runs away on its own — the
+        objective has a near-flat curl/pose valley and LM can park a shape DOF
+        on the ±0.5 clamp at a competitive objective but a wild remap (the
+        iOS port reaches for Powell here; on the desktop that costs 25-80 s,
+        see `_retry_without_spine`). A zero-curl surface cannot produce that
+        remap at all, so this rung always has an answer.
+
+        The page comes out perspective- and pose-corrected but NOT
+        curl-corrected — worse than a good fit, much better than the grayscale
+        passthrough it replaces. ~6 ms. Returns None when already flat."""
+        if self.backend != "lm" or self._flat_fit:
+            return None
+        print("[PageDewarper] still out of bounds — falling back to a flat "
+              "(zero-curl) fit for this page.", flush=True)
+        self._flat_fit = True
+        img_buf.buffer = orig_buffer
+        if orig_roi is not None:
+            img_buf.meta["roi"] = orig_roi
+        else:
+            img_buf.meta.pop("roi", None)
+        try:
+            return self.process(img_buf)
+        finally:
+            self._flat_fit = False
+
     def _resolve_binding_side(self, img_buf: ImageBuffer,
                               warn: bool = False) -> str | None:
         """Which page edge carries the binding/gutter: "left", "right" or
@@ -1106,7 +1139,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             self.debug_save(res_2, "2_optimized", img_buf)
 
         ctx.params_initial = params_initial
-        self._remember_warm_curl(params, img_buf)
+        if not self._flat_fit:
+            # A flat fallback's curl is 0 by construction, not by measurement —
+            # remembering it would drag the next same-side page's seed toward
+            # zero on the strength of a failure.
+            self._remember_warm_curl(params, img_buf)
         return self._finish_dewarp(img_buf, params, ctx)
 
     # ── BatchableTrait: split the SOLVE out so the chain can batch it on the
@@ -1469,7 +1506,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
     def _solve_lm(self, ctx: _DewarpCtx) -> np.ndarray:
         """Levenberg-Marquardt fit of the cylindrical sheet (issue #59), with
-        the spine-localized curl grid search of #60.
+        the spine-localized curl grid search of #60 — or, under
+        `_flat_fit`, the zero-curl last resort of the failure ladder.
 
         The base (γ = 0) fit always runs and always competes, so the grid can
         only ever improve the objective — a page where the plain cubic wins
@@ -1478,15 +1516,30 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         the surface the solver actually fitted."""
         from aglaia.processors import lm_solver
 
-        def _fit(spine):
-            obj = lm_solver.Objective(
+        def _objective(spine):
+            return lm_solver.Objective(
                 ctx.span_counts, ctx.dstpoints,
                 focal=self.focal_length,
                 shear_cost=float(self.cfg.SHEAR_COST),
                 cubic_cost=self.cubic_cost,
                 huber_delta=self.huber_delta,
                 weights=ctx.weights, spine=spine, n_cam=ctx.n_cam)
-            return lm_solver.minimize(obj, ctx.params)
+
+        def _fit(spine):
+            return lm_solver.minimize(_objective(spine), ctx.params)
+
+        if self._flat_fit:
+            # Pose + page dims around a flat sheet. A zero-curl surface cannot
+            # produce the runaway remap that blows the OOB gate, so this is the
+            # rung that always has an answer — ~6 ms, and the page comes out
+            # perspective-corrected instead of grey.
+            x0 = np.asarray(ctx.params, dtype=np.float64).copy()
+            x0[6] = x0[7] = 0.0
+            flat = lm_solver.minimize(_objective(None), x0, freeze_curl=True)
+            ctx.spine = None
+            print(f"[PageDewarper] flat fallback fit: obj={flat.fun:.6g} "
+                  f"(curl frozen at 0).", flush=True)
+            return flat.x.astype(np.float32)
 
         best_spine = None
         best = _fit(None)
@@ -1649,12 +1702,16 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         if oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
             success = False
-            # The γ grid selects on objective alone, which can prefer a
-            # surface whose remap is wild. Back off to the plain cubic before
-            # conceding the page to the gray fallback.
-            retried = self._retry_without_spine(img_buf, _orig_buffer, _orig_roi)
-            if retried is not None:
-                return retried
+            # Failure ladder, cheapest first. The γ grid selects on objective
+            # alone and can prefer a surface whose remap is wild, so back off
+            # to the plain cubic; if the curl itself is the problem, fall back
+            # to a flat fit. Only then concede the page to grayscale. Each
+            # rung re-enters process(), whose own ladder starts one rung lower
+            # — so the recursion is bounded by the rung count.
+            for _rung in (self._retry_without_spine, self._retry_flat):
+                retried = _rung(img_buf, _orig_buffer, _orig_roi)
+                if retried is not None:
+                    return retried
 
         if not success:
             # Fallback to gray on padded image.
