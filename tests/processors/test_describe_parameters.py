@@ -29,7 +29,7 @@ def test_full_lists_all_algo_fields_one_per_line():
 def test_describe_options_does_not_instantiate():
     # PageDewarper.__init__ spins up JAX/MLX; the classmethod must avoid it.
     s = PageDewarper.describe_options(DewarpOption(), "essential")
-    assert "sheet_model cylindrical" in s and "twist off" in s
+    assert "backend auto" in s and "principal_point on" in s
 
 
 def test_binarizer_is_method_aware():

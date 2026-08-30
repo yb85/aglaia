@@ -18,8 +18,7 @@ from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.PageDewarper import DewarpOption, PageDewarper
 
 FIX = Path(__file__).parent / "fixtures" / "dewarp_input_0.pkl"
-BASE = dict(sheet_model="cylindrical", twist=False, baseline_source="bottom",
-            cubic_cost=0.0, focal_length=1.3)
+BASE = dict(baseline_source="bottom", cubic_cost=0.0, focal_length=1.3)
 
 
 def _buf(page_side=None):
@@ -37,21 +36,18 @@ def _lm(**kw):
     return PageDewarper(DewarpOption(**{**BASE, "backend": "lm", **kw}))
 
 
-def test_auto_resolves_to_lm_for_the_cylindrical_model():
+def test_auto_resolves_to_lm():
     assert PageDewarper(DewarpOption(**BASE, backend="auto")).backend == "lm"
 
 
-def test_auto_keeps_the_gpu_chain_for_spline_models():
-    """LM's analytic Jacobian is the cubic sheet's — it cannot fit a spline."""
-    d = PageDewarper(DewarpOption(**{**BASE, "sheet_model": "bspline_twist"},
-                                  backend="auto"))
-    assert d.backend != "lm"
-
-
-def test_lm_requested_on_a_spline_model_falls_back_instead_of_misfitting():
-    d = PageDewarper(DewarpOption(**{**BASE, "sheet_model": "flat_spline"},
-                                  backend="lm"))
-    assert d.backend != "lm"
+@pytest.mark.parametrize("retired", ["sine_twist", "bspline_twist",
+                                     "flat_spline", "spline_twist"])
+def test_retired_sheet_models_are_rejected_not_silently_approximated(retired):
+    """A node stamped with one of these cannot be rebuilt against the
+    cylindrical surface — replay must fail loudly, not draw a wrong page."""
+    from aglaia.processors.sheet_models import canonical_model
+    with pytest.raises(ValueError, match="retired"):
+        canonical_model(retired)
 
 
 def test_camera_upgrades_are_inert_on_the_other_backends():

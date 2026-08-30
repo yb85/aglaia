@@ -39,6 +39,7 @@ TrapezoidalCorrection	max_baseline_tilt_deg	bounded_float	Reject if median basel
 TrapezoidalCorrection	max_aspect_ratio	bounded_float	Sanity cap on recovered w/h.	false	5.0
 TrapezoidalCorrection	debug	bool	Save VP/line overlay as debug image to meta.	false	false
 TrapezoidalCorrection	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	false	false
+PageDewarper	binding_side	enum	Page edge carrying the binding. auto reads the PageDetector page_side meta (left page of a spread → binding right, and vice versa); set explicitly for single-page scans. Unresolved auto turns the spine-zone weighting and spine-curl search off for that page.	false	auto
 PageDewarper	backend	enum	Optimizer backend. auto = LM (cylindrical) or MLX → padded JAX → Powell (spline models). lm = Levenberg-Marquardt with analytic Jacobians and Schur/arrowhead sparsity — CPU, ~70× faster than Powell, cylindrical only. WARNING: jax has unresolved issue on Apple hardware (memory cache fills up); prefer MLX.	false	auto
 PageDewarper	principal_point	bool	LM only: fit the camera principal point (cx, cy) as well as the pose. Absorbs the projective camera that a keystone homography composed with a curled page produces — measured −57% output line curvature after TrapezoidalCorrection.	false	true
 PageDewarper	spine_weight_boost	bounded_float	LM only: residual weight AT the binding, ramping to 1 at the edge of the spine zone. The spine tail is a least-squares minority, so an unweighted fit under-curls there. 1 = off (also off when the binding side is unknown).	false	4.0
@@ -51,12 +52,6 @@ PageDewarper	min_span_width_ratio	bounded_float	Drop spans whose width is less t
 PageDewarper	baseline_source	enum	Which fitted text-line curve(s) constrain the sheet: bottom = baselines, top = x-height toplines, average = midlines, both = baseline + topline as separate spans (doubles vertical constraints).	false	bottom
 PageDewarper	use_huber	bool	Robust pseudo-Huber reprojection loss — caps the pull of stray spans (footers, captions). Off = plain L2.	false	true
 PageDewarper	huber_delta	bounded_float	Pseudo-Huber transition scale (normalized units).	true	0.005
-PageDewarper	sheet_model	enum	Page surface model. cylindrical = stock cubic z(x). sine_twist = sine-basis profile + linear-in-y twist — handles non-cubic gutter walls and top-to-bottom curl variation. bspline_twist = clamped cubic B-spline profile + twist — local support, sharp gutter wall without ripple in the flat field. flat_spline = B-spline for post-trapezoidal pages: flat sheet + binding curl only — graded knots toward the binding and an outer-flatness penalty (binding side from the PageDetector A/B page meta).	false	cylindrical
-PageDewarper	spline_modes	bounded_int	Shape DOF K: sine modes (sine_twist) or free control points (bspline_twist / flat_spline); model adds K+1 params.	true	4
-PageDewarper	twist	bool	Fit the linear-in-y twist gain γ (curl amplitude varying top-to-bottom). Off = pure cylinder with the chosen basis (γ pinned to 0). Enable only for true open-book fan pages — on flat pages a free γ invents phantom twist.	false	false
-PageDewarper	binding_side	enum	flat_spline: page edge carrying the binding. auto reads the PageDetector page_side meta (left page of a spread → binding right, and vice versa); set explicitly for single-page scans. Unresolved auto disables the flat features for that page.	false	auto
-PageDewarper	knot_grading	bounded_float	flat_spline: knot density grading toward the binding. 1 = uniform; higher = coarser flat field / finer gutter wall.	true	2.5
-PageDewarper	flat_outer_penalty	bounded_float	flat_spline: weight of the outer-flatness penalty λ·Σ w_i·c_i² (w = squared Greville distance from the binding). 0 = off; ~1 balances the data term on a typical page.	false	1.0
 PageDewarper	page_margin_mm	bounded_float	Mask margin in mm — defines the page-extent rectangle for span detection.	false	5.0
 PageDewarper	dewarp_margin	bounded_float	Pre-dewarp white padding around the crop (mm).	false	5.0
 PageDewarper	remap_decimate	bounded_int	Decimation factor for the remap grid. Lower = sharper but slower.	true	4

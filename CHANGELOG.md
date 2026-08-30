@@ -43,6 +43,35 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl clamp), which is why `principal_point` defaults on and a rejected LM
   fit now retries on Powell instead of falling straight through to grayscale.
 
+### Removed
+
+- **The twist/spline sheet models** (`sine_twist`, `bspline_twist`,
+  `flat_spline`) and their options (`sheet_model`, `spline_modes`, `twist`,
+  `knot_grading`, `flat_outer_penalty`). They were strictly more expressive on
+  parameter count and strictly worse on results. A/B over the fixture corpus
+  (3 books, 12 pages), mean deviation of the output baselines from straight:
+
+  | model | mean | worst page |
+  |---|---|---|
+  | **cylindrical + spine curl** | **0.923 px** | **1.194** |
+  | flat_spline | 1.679 px | 3.315 |
+  | bspline_twist | 1.648 px | 3.053 |
+  | sine_twist | 1.645 px | 3.051 |
+
+  The cylindrical model wins on **every one of the 12 pages**. A fold
+  concentrates curvature at the spine, which one localized exponential term
+  captures robustly; the global spline families spread degrees of freedom
+  where there is no curvature and overfit noisy spans.
+
+  **Hard break**: a `.agl` node stamped with one of these models now raises on
+  replay rather than being silently rebuilt against a different surface —
+  re-process such a page from source.
+
+  Removes ~900 lines: `sheet_models.py` 592 → 171, the spline objectives in
+  the MLX and padded-JAX backends, the model plumbing in `PageDewarper` and
+  the dewarp batcher, and two test modules. Output for the surviving model is
+  bit-identical (verified: 0.923 px on all 12 pages, before and after).
+
 ## [0.1.0rc2] — 2026-07-02
 
 Second release candidate. A large body of work landed since rc1: a subcommand
