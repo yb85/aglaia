@@ -100,3 +100,26 @@ def test_prepare_args_injects_gui():
     assert _prepare_args(["run", "x"]) == ["run", "x"]
     assert _prepare_args(["--version"]) == ["--version"]
     assert _prepare_args(["--help"]) == ["--help"]
+
+
+# ── usage errors must come back as exit codes, not tracebacks ────────────
+
+def test_usage_errors_are_caught_from_typers_own_click():
+    """`run()` must catch the usage errors THIS typer raises.
+
+    Typer >= 0.26 vendors click as `typer._click` and drops the dependency on
+    the standalone package, so a hard-coded `click.ClickException` catches
+    nothing it throws — and `import click` may not even resolve. Both existing
+    exit-code-2 cases already cover the behaviour; this pins the mechanism, so
+    that "simplifying" the handler back to `import click` fails here instead of
+    only on a machine that happens to have a newer typer.
+    """
+    import aglaia.cli as cli
+
+    assert issubclass(cli._ClickException, Exception)
+    assert cli._ClickException.__module__.startswith(("typer.", "click."))
+    # Whatever typer's parser raises for a bad option must be catchable.
+    from typer.main import get_command
+    with pytest.raises(cli._ClickException):
+        get_command(cli.app)(args=["run", "--no-such-option"],
+                             standalone_mode=False)
