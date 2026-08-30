@@ -109,6 +109,12 @@ KEY_MISTRAL_FOOTNOTES = "mistral_footnotes"  # str — "numeric" | "alphabetic" 
                                    # "off". Markdown-export post-process of the
                                    # stored Mistral output: superscript / (N)
                                    # footnotes → GFM. (Markdown export card.)
+KEY_MISTRAL_SAME_LINE = "mistral_same_line"  # bool — at markdown export, split
+                                   # a definition line packed with several
+                                   # notes ("(12) premier. (13) second.") at
+                                   # each in-line marker. Off by default: it
+                                   # changes how a page is segmented, and only
+                                   # critical editions pack notes this way.
 KEY_MISTRAL_HEADERS = "mistral_headers"  # bool — at markdown export, wrap the
                                    # page's running head / number in <header>/
                                    # <footer> tags (else keep them inline).
@@ -149,6 +155,7 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_MISTRAL_BATCH: False,
     KEY_MISTRAL_FOOTNOTES: "numeric",
     KEY_MISTRAL_HEADERS: True,
+    KEY_MISTRAL_SAME_LINE: False,
     KEY_MODELS_PROMPT_DISMISSED: False,
 }
 

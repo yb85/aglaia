@@ -1056,7 +1056,7 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
     # the current Markdown-card toggles + code without re-running (paid) OCR.
     from aglaia.workers.ocr.md_postprocess import (
         assign_page_mappings, mistral_settings, postprocess_mistral_page)
-    fn_mode, wrap_hf = mistral_settings()
+    fn_mode, wrap_hf, same_line = mistral_settings()
 
     # Parse each row once; collect Mistral pages in row order so footnote anchors
     # are assigned document-wide (numbers reset per chapter → each occurrence
@@ -1074,7 +1074,8 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
             if isinstance(data, dict) else None
         mpages.append(mp if isinstance(mp, dict) else None)
     present = [mp for mp in mpages if mp is not None]
-    _maps = assign_page_mappings(present, fn_mode) if present else []
+    _maps = (assign_page_mappings(present, fn_mode, same_line=same_line)
+             if present else [])
     _mi = iter(_maps)
     row_maps = [next(_mi) if mp is not None else None for mp in mpages]
 
@@ -1084,7 +1085,8 @@ def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
         if mp is not None:
             raw_md = mp.get("markdown", "") or ""
             text = postprocess_mistral_page(
-                raw_md, mp, footnotes=fn_mode, headers=wrap_hf, mapping=mmap)
+                raw_md, mp, footnotes=fn_mode, headers=wrap_hf, mapping=mmap,
+                same_line=same_line)
             cls: dict | None = {"kind": "assembled", "text": text.rstrip()}
         else:
             cls = _classify_data(data)

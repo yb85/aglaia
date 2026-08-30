@@ -39,6 +39,39 @@ plugin](./processors.md) appears automatically.
 | **unlimited** | on-device | Baidu Unlimited-OCR (MLX port, in-process); whole-doc, per-page (window=1), DPI-independent |
 | **mistral_cloud** | cloud | Mistral Document AI over HTTPS; reads any script; footnote + header/footer post-processing |
 
+## Footnote lift (`aglaia/workers/ocr/md_postprocess.py`)
+
+Applied at **markdown export** time, not at OCR import — re-exporting a project
+reflects the current toggles and code without re-running (paid) OCR.
+
+A footnote is recognised by an **intersection**: superscript refs in the body
+(`$^{7}$`, `¹⁷⁰`, or numeric `(7)`) ∩ line-start entries in the footer
+(`7. …`). The intersection is what keeps a stray citation from being lifted;
+pairing is windowed ±1 page, because note numbers reset per page and a global
+set would link page 2's "1" to page 500's "1".
+
+**Same-line definitions** (`mistral_same_line`, default off). Critical editions
+pack several notes onto one physical line:
+
+    (12) premier. (13) second. (14) troisième.
+
+Every marker after the first never sits at a line start, so it never enters the
+entry set and is **never classified as a footnote at all** — its ref stays a
+bare `(13)` in the body and its text stays glued to note 12. With the toggle
+on, markers found inside a line that already *starts* with an entry marker also
+count as entries, and such a line is split at each of them.
+
+Two deliberate limits, both to avoid inventing footnotes:
+
+- only markers already in that page's ref∩entry mapping cut a line, so a
+  citation inside a note (`voir Migne (3) col. 44`) never splits it;
+- the bare `N.` form never cuts mid-line — hopelessly ambiguous against dates,
+  verse references and enumerations (`voir Jn 3. 16`). Only superscript and
+  parenthesised markers cut.
+
+Off by default because it changes how a page is segmented and only some books
+are typeset this way. Backported from the iOS port (issue #70).
+
 ## Shared DPI + confidence knobs
 
 Both live in `engine.py` (one place for picker, env, and DB key):
