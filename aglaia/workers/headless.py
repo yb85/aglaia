@@ -607,17 +607,36 @@ class _LogDrainer(threading.Thread):
         with self._lock:
             return len(self._done_scans)
 
-    def wait_for_completion(self, timeout_s: float, quiesce_s: float = 8.0) -> int:
+    #: Consecutive idle readings required before the run is called finished.
+    #: ``is_idle`` is best-effort — ``mp.Queue.empty()`` is approximate and a
+    #: worker between two items reads idle for an instant — so one reading is
+    #: not evidence. Its own docstring asks callers to debounce.
+    _IDLE_CONFIRMATIONS = 4
+    _IDLE_POLL_S = 0.25
+
+    def wait_for_completion(self, timeout_s: float, quiesce_s: float = 8.0,
+                            chain=None) -> int:
         """Block until the run settles or ``timeout_s`` elapses.
 
         Two phases, because a scan's branch count is dynamic (PageDetector
         emits 1–N layouts) so the total isn't known up front:
           1. every expected scan has emitted at least one branch (all scans
              have started finishing), then
-          2. branch activity goes quiet for ``quiesce_s`` (the remaining
-             sibling branches — incl. parked/batched dewarps — and replay
-             settle). Returning on the scan count alone tore multi-layout
-             scans down after their first branch."""
+          2. the chain reports no work in flight, confirmed over several
+             consecutive polls.
+
+        Phase 2 used to be a SILENCE TIMER: return once no branch event had
+        arrived for ``quiesce_s``. Silence is not the same as finished — a page
+        whose step outlives that window was still being processed when the
+        caller stopped the chain, and it vanished with no node, no error and a
+        zero exit code (#64; observed as 2 of 4 pages lost under the ~75 s/page
+        `powell` backend, and 2 of 12 with a 25 s dewarp retry). The chain
+        already tracks in-flight work — including pipelines parked on the
+        batched solver — so ask it rather than guess.
+
+        ``chain`` is optional: without one (or if probing it raises) the old
+        timer applies, so a caller that cannot supply a chain degrades to the
+        previous behaviour instead of blocking to the timeout."""
         deadline = time.monotonic() + timeout_s
         while self.done_count() < self._total_expected and time.monotonic() < deadline:
             time.sleep(0.2)
@@ -628,13 +647,44 @@ class _LogDrainer(threading.Thread):
                 file=sys.stderr,
             )
             return n
-        # Phase 2: wait for branch activity to go silent (all siblings done).
+
+        probe = getattr(chain, "is_idle", None)
+        if not callable(probe):
+            # Phase 2, legacy: wait for branch activity to go silent.
+            while time.monotonic() < deadline:
+                with self._lock:
+                    quiet = time.monotonic() - self._last_branch_ts
+                if quiet >= quiesce_s:
+                    break
+                time.sleep(0.2)
+            return n
+
+        # Phase 2: wait for the chain to actually be idle. `quiesce_s` stays a
+        # FLOOR — a worker that has just emitted branch_ready may not have
+        # picked up its sibling yet, which would read as idle.
+        idle_streak = 0
         while time.monotonic() < deadline:
             with self._lock:
                 quiet = time.monotonic() - self._last_branch_ts
-            if quiet >= quiesce_s:
+            try:
+                idle = bool(probe())
+            except Exception as e:
+                print(f"WARN: idle probe failed ({e}); falling back to the "
+                      f"quiesce timer.", file=sys.stderr)
+                while time.monotonic() < deadline:
+                    with self._lock:
+                        quiet = time.monotonic() - self._last_branch_ts
+                    if quiet >= quiesce_s:
+                        break
+                    time.sleep(0.2)
+                return n
+            idle_streak = idle_streak + 1 if idle else 0
+            if idle_streak >= self._IDLE_CONFIRMATIONS and quiet >= quiesce_s:
                 break
-            time.sleep(0.2)
+            time.sleep(self._IDLE_POLL_S)
+        else:
+            print("WARN: chain still had work in flight at the timeout; "
+                  "some pages may be unfinished.", file=sys.stderr)
         return n
 
     def stop(self) -> None:
@@ -978,7 +1028,7 @@ def run(cfg: CliConfig) -> int:
         if expected_branches:
             print(f"Waiting for {expected_branches} scan(s) to finish processing…")
             drainer.set_expected(expected_branches)
-            drainer.wait_for_completion(DEFAULT_TIMEOUT_S)
+            drainer.wait_for_completion(DEFAULT_TIMEOUT_S, chain=chain)
         else:
             print("Nothing to process — pipeline objective already in DB.")
     finally:
