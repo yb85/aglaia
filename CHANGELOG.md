@@ -4,6 +4,45 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **LM dewarp solver** (`aglaia/processors/lm_solver.py`, #59). Levenberg-
+  Marquardt with analytic Jacobians and the problem's bipartite sparsity —
+  per-span *arrowhead* blocks eliminated in O(nᵢ), Schur complement down to one
+  small solve per iteration. Now the default backend for the `cylindrical`
+  sheet model (`backend: auto`), replacing ~10⁵ Powell objective evaluations
+  with ~10-60 iterations: 28 s → 0.25 s per page on the test fixture, at a
+  *better* final objective, on CPU with no GPU allocator to babysit. Ported
+  from the iOS implementation; `AGLAIA_DEWARP_LM=0` keeps the old GPU chain.
+- **Dewarp camera upgrades** (LM + `cylindrical` only, #60), from the iOS
+  port's on-device research:
+  - `principal_point` (default on) fits (cx, cy) alongside the pose. A
+    homography composed with a perspective view of a curled page is a general
+    projective camera the centred pinhole cannot represent — this is why the
+    fit under-curled near the spine after `TrapezoidalCorrection`. Measured
+    output line curvature 1.77 → 0.98 px on the fixture page.
+  - `spine_weight_boost` / `spine_weight_zone` up-weight the binding-side
+    residuals, which are otherwise a least-squares minority (2-4 px systematic
+    under-curl at 300 dpi).
+  - `spine_gammas` grid-searches a spine-localized directrix term
+    `z += γ·exp(−|x−x_binding|/s)`, keeping the best objective (γ = 0 always
+    competes). Only identifiable with the principal point; also supplies the
+    surface slope the arc-length grid needs at the fold, fixing horizontal
+    compression there.
+
+  Replay params gained `camera_np` and `spine`; stamps written before this
+  release default to the 8-param pinhole with no spine term, i.e. exactly the
+  surface they were fitted on.
+
+  Measured over `test_data/test_athanase` through `book_curved_x2`, mean
+  output-baseline curvature: Powell 2.04 px @ 75.7 s/page → LM + the new
+  camera 0.90 px @ 0.78 s/page. LM with the *old* 8-param camera is not
+  uniformly better than Powell (2.96 px — it can park a shape DOF on the ±0.5
+  curl clamp), which is why `principal_point` defaults on and a rejected LM
+  fit now retries on Powell instead of falling straight through to grayscale.
+
 ## [0.1.0rc2] — 2026-07-02
 
 Second release candidate. A large body of work landed since rc1: a subcommand

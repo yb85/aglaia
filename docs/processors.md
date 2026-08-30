@@ -174,8 +174,77 @@ re-projects it flat, recovering straight lines. The chain runs deskew first
 > **Twist is off by default.** A free twist gain invents phantom curl on pages
 > that are actually flat, so it is disabled unless a page genuinely needs it.
 
-Sheet-model dewarping built on the `page-dewarp` library; optimizer backend is
-MLX (Apple Metal) → padded JAX → SciPy Powell (`backend: auto`).
+Sheet-model dewarping built on the `page-dewarp` library. Optimizer backend
+(`backend: auto`) resolves to **LM** for the cylindrical model and
+**MLX (Apple Metal) → padded JAX → SciPy Powell** for the spline models.
+
+### Optimizer backends
+
+| backend | what it is | models | notes |
+|---|---|---|---|
+| `lm` | Levenberg-Marquardt, analytic Jacobians, Schur complement over per-span *arrowhead* blocks (`aglaia/processors/lm_solver.py`) | cylindrical only | CPU, no GPU pool to babysit. ~10-60 iterations replace Powell's 10⁴-10⁵ objective evaluations — measured 28 s → 0.25 s per page on the test fixture at a *better* final objective. The only backend carrying the camera upgrades below. |
+| `mlx` | MLX value+grad, Apple Metal | all | Needs `clear_pool()` between pages (unified-memory allocator). |
+| `jax` | padded JAX L-BFGS-B (fixed shapes, batchable) | all | Unresolved host-pool growth on Apple silicon; prefer MLX. |
+| `powell` | SciPy Powell, derivative-free | all | Reference oracle. Slowest by ~100×. |
+
+The LM problem is bipartite: 8 (or 10) *global* camera params against S span
+heights `y_i` and N per-keypoint abscissae `x_ij`. Points in a span share only
+`y_i`, so each local Hessian block is an **arrowhead** matrix eliminated in
+O(nᵢ) by Sherman-Morrison; the Schur complement leaves one `n_cam × n_cam`
+solve per iteration. Env override `AGLAIA_DEWARP_LM=0` keeps `auto` on the
+pre-#59 GPU chain.
+
+### Camera and objective upgrades (LM only)
+
+Three findings from the iOS port's on-device debugging (issue #60), all
+cylindrical + LM only — the MLX/JAX/Powell objectives are the plain centred
+pinhole, so these options are forced off on those backends:
+
+- **`principal_point`** (default on) — fit (cx, cy) alongside the pose, camera
+  block 8 → 10. A homography composed with a perspective view of a *curled*
+  page is a general projective camera; the centred square-pixel pinhole cannot
+  represent it, which is why the fit under-curls near the spine after
+  `TrapezoidalCorrection`. Measured on the fixture page: output line curvature
+  1.77 → 0.98 px.
+- **`spine_weight_boost` / `spine_weight_zone`** (default 4 over the
+  spine-side 25%) — the binding-side tail is a least-squares minority, so an
+  unweighted fit systematically under-curls there (2-4 px at 300 dpi). Weights
+  ramp from `boost` AT the binding to 1 at the far edge of the zone. Needs a
+  resolvable binding side (see `binding_side`); off otherwise.
+- **`spine_gammas` / `spine_gamma_scale`** — grid search over a
+  spine-localized directrix term `z += γ·exp(−|x − x_binding| / s)`, each
+  candidate fitted and the best objective kept. γ = 0 (the plain cubic) always
+  competes, so the grid can only improve the fit. Only identifiable *with*
+  the principal point — under the 8-param camera the composed-camera offset is
+  absorbed into curl and masks the basis term. Also fixes horizontal
+  compression at the fold: output x-scale comes solely from ∫√(1+z′²)dx, so an
+  under-sloped surface under-allocates arc length exactly there. Both signs of
+  each γ are tried (the physical curl direction is not fixed across corpora).
+
+`binding_side: auto` reads the `page_side` meta the PageDetector stamps on
+two-page spreads; single-page scans need it set explicitly or the spine
+features stay off for that page.
+
+**Measured on `book_curved_x2` over `test_data/test_athanase` (2 spreads → 4
+pages), mean deviation of the output text baselines from a straight line:**
+
+| solver | camera | curvature | ms/page |
+|---|---|---|---|
+| Powell | 8-param | 2.04 px¹ | 75 700 |
+| LM | 8-param | 2.96 px | 2 630 |
+| **LM** | **10-param + spine weights (default)** | **0.90 px** | **775** |
+
+¹ A pages only — Powell did not finish the B pages inside the run.
+
+Note the middle row: **LM with the plain 8-param camera is not uniformly
+better than Powell**, even though it reaches an equal-or-better objective.
+The objective has a near-flat curl/pose valley and LM occasionally parks a
+shape DOF ON the ±0.5 curl clamp — same objective as the sane region, wild
+remap (reproduced here: α = −0.503 on one page). The principal-point DOF
+removes the degeneracy, which is why it is on by default; and an LM fit whose
+remap blows the `max_oob` gate is retried on Powell before the page is
+conceded to the grayscale fallback. If you turn `principal_point` off, expect
+the pre-#60 quality band, not the numbers above.
 
 Four sheet models (`sheet_model`, see `aglaia/processors/sheet_models.py`):
 
@@ -219,17 +288,22 @@ Pipeline:
 2. Downscale to `processing_dpi` (default 150) for span analysis; the remap reads full-res pixels.
 3. Build a text mask (mm-sized MORPH_CLOSE, char-scale adaptive); assemble spans; fall back to line-mask morphology if <3 text spans.
 4. Sample span curves via robust span-level fits (`fit_span_baseline`: IRLS Tukey cubic over each text line's ink profile — descenders/dashes rejected by the loss, keypoints reach line ends). `baseline_source` selects what feeds the model: `bottom` (baselines), `top` (x-height toplines), `average` (midlines), or `both` (default — baseline + topline as separate spans, doubling vertical constraints). Toplines are validated to sit 0.3–2.5 x-heights above the baseline.
-5. Optimize the sheet + per-span/per-point coords. With `use_huber` (default on) the reprojection loss is pseudo-Huber (`huber_delta`, normalized units) on MLX/padded-JAX backends — stray spans (footers, captions) can't drag the sheet. `cubic_cost` regularizes the shape params against phantom curl on flat input (α/β L2 for cylindrical; bending energy for the twist models: Σ(k²c_k)² for sine_twist, second differences of the control polygon for bspline_twist — γ unpenalised). The whole geometry path (solvePnP init, optimise, page dims, remap) runs under the configured `focal_length`.
-6. Remap with an **arc-length-uniform x grid** (`sheet_models.arclength_x`, mid-row profile): output width sized from the sheet's arc length, so text near the steep gutter side keeps its true width instead of stretching by √(1+z′²). Replay mirrors this via the `arc_len` flag in `replay_params`. Replay params also carry `sheet_model` / `spline_modes` / `model_dims` / `focal_length` / `support_x` / `support_y` / `support_decay` / `knot_grading` / `binding_flip` (the flat outer penalty is fit-time only, nothing to replay). The supports clamp evaluation outside the fitted span range: decaying tangent extension in x (excursion bounded by |slope|·λ, λ = `support_decay` ≈ 0.05·W), twist-factor freeze in y (margins otherwise pick up amplified phantom curl).
+5. Optimize the sheet + per-span/per-point coords. With `use_huber` (default on) the reprojection loss is pseudo-Huber (`huber_delta`, normalized units) on the LM (via IRLS — the Gauss-Newton weight `1/√(1+r²/δ²)` recomputed each Jacobian pass) and MLX/padded-JAX backends — stray spans (footers, captions) can't drag the sheet. `cubic_cost` regularizes the shape params against phantom curl on flat input (α/β L2 for cylindrical; bending energy for the twist models: Σ(k²c_k)² for sine_twist, second differences of the control polygon for bspline_twist — γ unpenalised). The whole geometry path (solvePnP init, optimise, page dims, remap) runs under the configured `focal_length`.
+6. Remap with an **arc-length-uniform x grid** (`sheet_models.arclength_x`, mid-row profile): output width sized from the sheet's arc length, so text near the steep gutter side keeps its true width instead of stretching by √(1+z′²). Replay mirrors this via the `arc_len` flag in `replay_params`. Replay params also carry `sheet_model` / `spline_modes` / `model_dims` / `focal_length` / `support_x` / `support_y` / `support_decay` / `knot_grading` / `binding_flip` (the flat outer penalty is fit-time only, nothing to replay), plus `camera_np` (8, or 10 when pvec[8:10] is the fitted principal point) and `spine` (the winning `SpineCurl`, or null). Those last two are load-bearing: replay derives the whole sampling grid from them, so a stamp missing either would remap the page against a different sheet. Pre-#60 stamps carry neither and default to the 8-param pinhole with no spine term — exactly the surface they were fitted on. The supports clamp evaluation outside the fitted span range: decaying tangent extension in x (excursion bounded by |slope|·λ, λ = `support_decay` ≈ 0.05·W), twist-factor freeze in y (margins otherwise pick up amplified phantom curl).
 7. Sanity check: if remap goes out of bounds by more than `max_oob` px, abandon dewarp and return grayscale of padded input (`Status.ERROR`). Span-count guard (`min_spans`) passes through with `Status.WARNING` instead of running an under-constrained fit.
 
 ```yaml
 options:
-  backend: auto                 # auto | mlx | jax | powell
+  backend: auto                 # auto | lm | mlx | jax | powell
   sheet_model: cylindrical      # cylindrical | sine_twist | bspline_twist | flat_spline
+  principal_point: true         # LM: fit (cx, cy) — the keystone-composed camera
+  spine_weight_boost: 4.0       # LM: residual weight at the binding (1 = off)
+  spine_weight_zone: 0.25       # LM: width of the up-weighted spine zone
+  spine_gammas: 0.02, 0.05, 0.10  # LM: spine-curl γ grid ("" = off)
+  spine_gamma_scale: 0.15       # LM: spine-curl decay length, fraction of page width
   spline_modes: 4               # shape DOF K: sine modes / B-spline ctrl points (params = K+1)
   twist: false                  # default off; fit γ only for true open-book fan pages
-  binding_side: auto            # flat_spline: auto (PageDetector page_side meta) | left | right
+  binding_side: auto            # flat_spline + LM spine features: auto | left | right
   knot_grading: 2.5             # flat_spline: knot density toward the binding (1 = uniform)
   flat_outer_penalty: 1.0       # flat_spline: outer-flatness weight λ (0 = off)
   baseline_source: both         # bottom | top | average | both

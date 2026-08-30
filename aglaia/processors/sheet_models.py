@@ -370,11 +370,17 @@ def project_xy_model(xy_coords: np.ndarray, pvec: np.ndarray, *,
                      model_dims=None, focal_length: float = 1.2,
                      support=None, support_y=None,
                      support_decay=None, grading: float = 1.0,
-                     flip: bool = False) -> np.ndarray:
+                     flip: bool = False, n_cam: int = 8,
+                     spine=None) -> np.ndarray:
     """Model-aware replacement for page_dewarp.projection.project_xy.
 
     Returns an (N, 1, 2) array of projected image points (pix2norm units).
-    Focal length is explicit; cx = cy = 0 as in the library K matrix.
+    Focal length is explicit; cx = cy = 0 as in the library K matrix unless
+    `n_cam` = 10, which reads the principal point from pvec[8:10] (#60 — it
+    absorbs the projective camera the keystone homography composes).
+    `spine` (cylindrical only): a `lm_solver.SpineCurl` added to the height
+    profile — the fitted surface must be reconstructed with the same term the
+    solver used, here and in replay.
     `support` / `support_y` (twist models only): x/y-range of the fitted
     span keypoints — outside it the surface is tangent-extended in x
     (decaying over `support_decay` when set) and amplitude-frozen in y
@@ -397,10 +403,14 @@ def project_xy_model(xy_coords: np.ndarray, pvec: np.ndarray, *,
         x = xy_coords[:, 0]
         z_coords = ((alpha + beta) * x ** 3
                     + (-2.0 * alpha - beta) * x ** 2 + alpha * x)
+        if spine is not None:
+            z_coords = z_coords + spine.z(x)
 
     objpoints = np.hstack((xy_coords, z_coords.reshape((-1, 1))))
-    K = np.array([[focal_length, 0, 0],
-                  [0, focal_length, 0],
+    cx = float(pvec[8]) if int(n_cam) > 8 else 0.0
+    cy = float(pvec[9]) if int(n_cam) > 9 else 0.0
+    K = np.array([[focal_length, 0, cx],
+                  [0, focal_length, cy],
                   [0, 0, 1]], dtype=np.float32)
     rvec = np.asarray(pvec[0:3], dtype=np.float64)
     tvec = np.asarray(pvec[3:6], dtype=np.float64)
@@ -411,21 +421,26 @@ def project_xy_model(xy_coords: np.ndarray, pvec: np.ndarray, *,
 def project_keypoints_model(pvec: np.ndarray, keypoint_index: np.ndarray, *,
                             model: str = MODEL_CYLINDRICAL, n_modes: int = 0,
                             model_dims=None, focal_length: float = 1.2,
-                            grading: float = 1.0, flip: bool = False
-                            ) -> np.ndarray:
-    """Model-aware replacement for page_dewarp.keypoints.project_keypoints."""
+                            grading: float = 1.0, flip: bool = False,
+                            n_cam: int = 8, spine=None) -> np.ndarray:
+    """Model-aware replacement for page_dewarp.keypoints.project_keypoints.
+
+    `keypoint_index` must be built for the same `n_cam` (see
+    `lm_solver.keypoint_index` — the library's helper hardcodes 8)."""
     xy_coords = np.asarray(pvec)[np.asarray(keypoint_index)]
     xy_coords[0, :] = 0
     return project_xy_model(xy_coords, pvec, model=model, n_modes=n_modes,
                             model_dims=model_dims, focal_length=focal_length,
-                            grading=grading, flip=flip)
+                            grading=grading, flip=flip, n_cam=n_cam,
+                            spine=spine)
 
 
 def arclength_x(params: np.ndarray, page_w: float, *,
                 model: str = MODEL_CYLINDRICAL, n_modes: int = 0,
                 model_dims=None, n: int = 4096, support=None,
                 support_decay=None, grading: float = 1.0,
-                flip: bool = False) -> tuple[np.ndarray, np.ndarray]:
+                flip: bool = False, spine=None
+                ) -> tuple[np.ndarray, np.ndarray]:
     """Cumulative mid-row arc length of the sheet over x ∈ [0, page_w].
 
     Used to build an arc-length-uniform output x grid (paper is
@@ -450,7 +465,7 @@ def arclength_x(params: np.ndarray, page_w: float, *,
                             np.cumsum(0.5 * (ds[1:] + ds[:-1]) * np.diff(xs))])
         return xs, s
     from aglaia.processors.geometry import dewarp_arclength_x
-    return dewarp_arclength_x(params, page_w, n=n)
+    return dewarp_arclength_x(params, page_w, n=n, spine=spine)
 
 
 def get_page_dims_model(corners: np.ndarray, rough_dims, params: np.ndarray, *,
@@ -458,7 +473,8 @@ def get_page_dims_model(corners: np.ndarray, rough_dims, params: np.ndarray, *,
                         model_dims=None, focal_length: float = 1.2,
                         support=None, support_y=None,
                         support_decay=None, grading: float = 1.0,
-                        flip: bool = False) -> np.ndarray:
+                        flip: bool = False, n_cam: int = 8,
+                        spine=None) -> np.ndarray:
     """Model-aware replacement for page_dewarp.image.get_page_dims.
 
     The library version projects the bottom-right corner through its
@@ -474,7 +490,7 @@ def get_page_dims_model(corners: np.ndarray, rough_dims, params: np.ndarray, *,
             model=model, n_modes=n_modes, model_dims=model_dims,
             focal_length=focal_length, support=support,
             support_y=support_y, support_decay=support_decay,
-            grading=grading, flip=flip)
+            grading=grading, flip=flip, n_cam=n_cam, spine=spine)
         return float(np.sum((dst_br - proj.flatten()) ** 2))
 
     res = minimize(objective, np.array(rough_dims, dtype=np.float64),

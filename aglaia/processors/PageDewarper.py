@@ -281,12 +281,42 @@ class DewarpOption(AbstractProcessorOption):
     cubic_cost: float = 0.0
     focal_length: float = 1.3
     # Backend switch:
-    #   auto   – MLX (Apple Metal) → padded JAX → SciPy Powell.
+    #   auto   – LM for cylindrical; MLX (Apple Metal) → padded JAX → SciPy
+    #            Powell for the spline models (LM is cylindrical-only).
+    #   lm     – Levenberg-Marquardt with analytic Jacobians + Schur/arrowhead
+    #            sparsity (aglaia/processors/lm_solver.py, issue #59). CPU,
+    #            ~70x faster than Powell at an equal-or-better objective, and
+    #            the only backend carrying the principal-point / spine-curl
+    #            camera upgrades of #60. Cylindrical model only.
     #   mlx    – force MLX value+grad over JAX padded path; falls back to Powell on install error.
     #   jax    – padded JAX L-BFGS-B.
     #   powell – SciPy Powell only (safest, slowest).
-    # Env overrides: AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables padded JAX.
+    # Env overrides: AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables
+    # padded JAX, AGLAIA_DEWARP_LM=0 disables LM in `auto`.
     backend: str = "auto"
+    # --- LM-backend camera / objective upgrades (issue #60) ----------------
+    # Principal-point DOF: fit (cx, cy) alongside the pose, camera block
+    # 8 -> 10. A homography composed with a perspective view of a CURLED page
+    # is a general projective camera, which the centred square-pixel pinhole
+    # cannot represent — measured post-TrapezoidalCorrection, this cut output
+    # line curvature 7.27 -> 3.12 px with a consistent cy ~ +0.145.
+    principal_point: bool = True
+    # Spine-zone residual weight: ramp from `spine_weight_boost` AT the
+    # binding to 1 at the far edge of the spine-side `spine_weight_zone`
+    # fraction of the x-range. The spine tail is a least-squares minority, so
+    # an unweighted fit under-curls there (measured 2-4 px @300dpi).
+    # 1.0 (or an unresolved binding side) disables it.
+    spine_weight_boost: float = 4.0
+    spine_weight_zone: float = 0.25
+    # Spine-localized directrix term z += gamma*exp(-|x - x_binding|/s), grid-
+    # searched per page (best objective wins; 0 is always in the grid, so the
+    # plain cubic can never lose). Only identifiable WITH the principal point
+    # (#60: the 8-param camera absorbs the composed-camera offset into curl
+    # and masks the basis term). Supplies the surface slope the arc-length
+    # grid needs at the fold — the fix for horizontal compression there.
+    # Empty string / "0" disables the search.
+    spine_gammas: str = "0.02, 0.05, 0.10"
+    spine_gamma_scale: float = 0.15
     processing_dpi: Optional[float] = 150.0
     camera_matrix: Optional[np.ndarray] = None
     camera_matrix_resolution: Optional[tuple] = None
@@ -407,7 +437,30 @@ class DewarpOption(AbstractProcessorOption):
     norm_width: bool = False
 
 
-from aglaia.processors.option_specs import _b, _e, _f, _i
+from aglaia.processors.option_specs import _b, _e, _f, _i, _s
+
+
+def _parse_gammas(spec) -> tuple[float, ...]:
+    """Parse the `spine_gammas` option into a de-duplicated γ grid.
+
+    Accepts a comma/space-separated string or an already-iterable of numbers.
+    γ = 0 is dropped — the base (plain-cubic) fit is always run and always
+    competes, so the grid only ever carries the non-zero candidates."""
+    if spec is None:
+        return ()
+    items = (spec.replace(",", " ").split() if isinstance(spec, str)
+             else list(spec))
+    out: list[float] = []
+    for it in items:
+        try:
+            g = float(it)
+        except (TypeError, ValueError):
+            print(f"[PageDewarper] ignoring non-numeric spine gamma {it!r}.",
+                  flush=True)
+            continue
+        if g != 0.0 and g not in out:
+            out.append(g)
+    return tuple(out)
 
 
 class SuppressOutput:
@@ -449,6 +502,14 @@ class _DewarpCtx:
     dstpoints: Any
     spans: Any
     span_points: Any
+    # LM path (issue #60). n_cam = camera block size (8, or 10 with the
+    # principal-point DOF); binding_side = "left"/"right"/None, the page edge
+    # carrying the gutter; weights = per-keypoint spine-zone residual weights;
+    # spine = the winning SpineCurl of the γ grid search (None = plain cubic).
+    n_cam: int = 8
+    binding_side: Any = None
+    weights: Any = None
+    spine: Any = None
     # Filled in by process() after the solve, only for the spline RMS log.
     params_initial: Any = None
 
@@ -473,10 +534,48 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     JAX_CLEAR_EVERY = 10
     _dewarps_since_clear = 0
     OPTIONS = {
-        "backend": _e("auto", ["auto", "mlx", "jax", "powell"],
-                      "Optimizer backend. auto = MLX → padded JAX → Powell. "
+        "backend": _e("auto", ["auto", "lm", "mlx", "jax", "powell"],
+                      "Optimizer backend. auto = LM (cylindrical) or "
+                      "MLX → padded JAX → Powell (spline models). "
+                      "lm = Levenberg-Marquardt with analytic Jacobians and "
+                      "Schur/arrowhead sparsity — CPU, ~70× faster than "
+                      "Powell, cylindrical only. "
                       "WARNING: jax has unresolved issue on Apple hardware "
                       "(memory cache fills up); prefer MLX."),
+        "principal_point": _b(True,
+                              "LM only: fit the camera principal point "
+                              "(cx, cy) as well as the pose. Absorbs the "
+                              "projective camera that a keystone homography "
+                              "composed with a curled page produces — "
+                              "measured −57% output line curvature after "
+                              "TrapezoidalCorrection.",
+                              visible_when={"sheet_model": ["cylindrical"]}),
+        "spine_weight_boost": _f(4.0, 1.0, 20.0, 0.5,
+                                 "LM only: residual weight AT the binding, "
+                                 "ramping to 1 at the edge of the spine zone. "
+                                 "The spine tail is a least-squares minority, "
+                                 "so an unweighted fit under-curls there. "
+                                 "1 = off (also off when the binding side is "
+                                 "unknown).",
+                                 visible_when={"sheet_model": ["cylindrical"]}),
+        "spine_weight_zone": _f(0.25, 0.05, 1.0, 0.05,
+                                "LM only: width of the up-weighted spine zone "
+                                "as a fraction of the keypoint x-range.",
+                                advanced=True,
+                                visible_when={"sheet_model": ["cylindrical"]}),
+        "spine_gammas": _s("0.02, 0.05, 0.10",
+                           "LM only: comma-separated γ grid for the "
+                           "spine-localized curl term z += γ·exp(−|x−x_bind|/s). "
+                           "Each value is fitted and the best objective wins "
+                           "(γ = 0, the plain cubic, is always a candidate). "
+                           "Needs principal_point to be identifiable. Empty "
+                           "disables the search.",
+                           visible_when={"sheet_model": ["cylindrical"]}),
+        "spine_gamma_scale": _f(0.15, 0.02, 1.0, 0.01,
+                                "LM only: decay length s of the spine curl "
+                                "term, as a fraction of the model page width.",
+                                advanced=True,
+                                visible_when={"sheet_model": ["cylindrical"]}),
         "max_oob": _f(500.0, 0.0, 5000.0, 10.0,
                       "Reject the dewarp if remap goes more than this many "
                       "pixels out of bounds.", advanced=True),
@@ -613,7 +712,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
     @staticmethod
     def _sample_grid(ref_h, ref_w, *, params, page_dims_w, page_dims_h,
                      model_dims, decimate, zoom, model, n_modes, focal,
-                     support, support_y, support_decay, grading, flip):
+                     support, support_y, support_decay, grading, flip,
+                     n_cam=8, spine=None):
         """The arc-length-uniform backward sampling grid, shared by the
         forward remap and by replay so both build pixel-identical geometry.
 
@@ -632,7 +732,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         arc_xs, arc_s = arclength_x(params, page_dims_w, model=model,
                                     n_modes=n_modes, model_dims=model_dims,
                                     support=support, support_decay=support_decay,
-                                    grading=grading, flip=flip)
+                                    grading=grading, flip=flip, spine=spine)
         arc_total = float(arc_s[-1])
         target_w = round_nearest_multiple(
             target_h * arc_total / page_dims_h, decimate)
@@ -646,7 +746,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             page_xy, params.astype(np.float32), model=model, n_modes=n_modes,
             model_dims=model_dims, focal_length=focal, support=support,
             support_y=support_y, support_decay=support_decay,
-            grading=grading, flip=flip)
+            grading=grading, flip=flip, n_cam=n_cam, spine=spine)
         image_points = norm2pix((ref_h, ref_w), image_points, False)
         return image_points, gx.shape, target_w, target_h, w_small, h_small
 
@@ -655,6 +755,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         """Backward sampling map for a stamped dewarp step → ``(im_x, im_y,
         pad_px)``, sampling the input padded by ``pad_px`` white px on every
         side. Thin wrapper over the shared ``_sample_grid``."""
+        from aglaia.processors.lm_solver import SpineCurl
+
         pad_px = int(params["pad_px"])
         in_h, in_w = int(in_hw[0]), int(in_hw[1])
         page_dims = np.array(params["page_dims"], dtype=np.float32)
@@ -669,7 +771,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             n_modes=int(params["spline_modes"]), focal=float(params["focal_length"]),
             support=params["support_x"], support_y=params["support_y"],
             support_decay=params["support_decay"],
-            grading=float(params["knot_grading"]), flip=bool(params["binding_flip"]))
+            grading=float(params["knot_grading"]), flip=bool(params["binding_flip"]),
+            # Pre-#60 stamps carry neither key: default to the 8-param pinhole
+            # with no spine term, i.e. exactly the surface they were fitted on.
+            n_cam=int(params.get("camera_np", 8)),
+            spine=SpineCurl.from_dict(params.get("spine")))
         im_x = image_points[:, 0, 0].reshape(shp)
         im_y = image_points[:, 0, 1].reshape(shp)
         im_x = cv2.resize(im_x, (target_w, target_h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
@@ -737,24 +843,54 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # `_seed_warm_curl` / `_remember_warm_curl`.
         self._warm_curl: dict[str, list] = {}
 
-        # Resolve backend (auto / mlx / jax / powell). Env overrides:
-        # AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables padded JAX.
+        # LM camera/objective knobs (issue #60) — cylindrical + LM only, so
+        # they are neutralised up front on any other model/backend below.
+        self.principal_point = bool(getattr(options, "principal_point", True))
+        self.spine_weight_boost = max(
+            float(getattr(options, "spine_weight_boost", 4.0)), 1.0)
+        self.spine_weight_zone = min(max(
+            float(getattr(options, "spine_weight_zone", 0.25)), 1e-3), 1.0)
+        self.spine_gamma_scale = max(
+            float(getattr(options, "spine_gamma_scale", 0.15)), 1e-3)
+        self.spine_gammas = _parse_gammas(
+            getattr(options, "spine_gammas", "0.02, 0.05, 0.10"))
+
+        # Resolve backend (auto / lm / mlx / jax / powell). Env overrides:
+        # AGLAIA_MLX=0 disables MLX, AGLAIA_JAX_PAD=0 disables padded JAX,
+        # AGLAIA_DEWARP_LM=0 keeps `auto` on the pre-#59 GPU chain.
         requested = str(getattr(options, "backend", "auto") or "auto").lower()
-        if requested not in ("auto", "mlx", "jax", "powell"):
+        if requested not in ("auto", "lm", "mlx", "jax", "powell"):
             print(f"[PageDewarper] unknown backend={requested!r}; "
                   f"falling back to 'auto'.", flush=True)
             requested = "auto"
 
         env_mlx = os.environ.get("AGLAIA_MLX")
         env_pad = os.environ.get("AGLAIA_JAX_PAD")
+        env_lm = os.environ.get("AGLAIA_DEWARP_LM")
         mlx_allowed = (env_mlx is None
                        or env_mlx.lower() not in ("0", "false", "no", ""))
         pad_allowed = (env_pad is None
                        or env_pad.lower() not in ("0", "false", "no", ""))
+        lm_allowed = (env_lm is None
+                      or env_lm.lower() not in ("0", "false", "no", ""))
 
-        # Resolve to one of: "mlx" | "jax" | "powell".
+        # LM is cylindrical-only: its analytic Jacobian is the cubic sheet's.
+        # It is the default there (issue #59 — 70x faster than Powell, no
+        # JAX/MLX pool to babysit); the spline models keep the GPU chain.
+        if requested == "lm" and self.sheet_model != "cylindrical":
+            print(f"[PageDewarper] lm backend is cylindrical-only "
+                  f"({self.sheet_model} requested); falling back to 'auto'.",
+                  flush=True)
+            requested = "auto"
+        if requested == "lm" or (requested == "auto" and lm_allowed
+                                 and self.sheet_model == "cylindrical"):
+            requested = "lm"
+
+        # Resolve to one of: "lm" | "mlx" | "jax" | "powell".
         active = "powell"
-        if requested == "powell" or not HAS_JAX:
+        if requested == "lm":
+            active = "lm"
+        elif requested == "powell" or not HAS_JAX:
             active = "powell"
         else:
             # Both auto and mlx try MLX first; jax explicitly skips it.
@@ -818,6 +954,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                               "Falling back to cylindrical.", flush=True)
                         self.sheet_model = "cylindrical"
         self.backend = active
+        if active != "lm":
+            # The #60 camera upgrades live in the LM assembly only — the
+            # MLX/JAX/Powell objectives are the plain 8-param pinhole.
+            self.principal_point = False
+            self.spine_weight_boost = 1.0
+            self.spine_gammas = ()
         self.use_jax = active in ("mlx", "jax")
         self.uses_gpu = False
         if self.use_jax:
@@ -913,6 +1055,55 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         except Exception:
             pass
 
+    def _resolve_binding_side(self, img_buf: ImageBuffer,
+                              warn: bool = False) -> str | None:
+        """Which page edge carries the binding/gutter: "left", "right" or
+        None when it cannot be resolved.
+
+        `binding_side=auto` reads the PageDetector `page_side` meta stamped on
+        2-page spreads — the LEFT page of a spread is bound on its RIGHT edge,
+        and vice versa. Single-page scans have no such meta and need the
+        option set explicitly. Shared by flat_spline (knot flip + outer
+        penalty) and the LM spine features (#60)."""
+        side = self.binding_side
+        if side in ("left", "right"):
+            return side
+        ps = str(img_buf.meta.get("page_side") or "").lower()
+        side = {"left": "right", "right": "left"}.get(ps)
+        if side is None and warn:
+            print("[PageDewarper] no page_side meta and binding_side=auto — "
+                  "spine-zone weighting / spine curl off for this page (set "
+                  "binding_side explicitly for single-page scans).",
+                  flush=True)
+        return side
+
+    def _retry_with_powell(self, img_buf, orig_buffer, orig_roi):
+        """An LM fit whose remap blew the OOB gate — re-run this page on
+        Powell before giving up to the gray fallback.
+
+        The objective has a near-flat curl/pose valley, and LM occasionally
+        parks a shape DOF ON the ±0.5 clamp bound: same objective as the sane
+        region, wild remap (measured on iOS: obj 0.00785 vs Powell 0.00791,
+        oob 2190 vs 108). Powell, being derivative-free, wanders out of that
+        corner. Costs ~80 s on this class of page, but the alternative is a
+        page that fails to dewarp at all. Returns None when the backend isn't
+        LM (nothing to retry with)."""
+        if self.backend != "lm":
+            return None
+        saved = self.backend
+        print("[PageDewarper] LM fit rejected (out of bounds) — retrying this "
+              "page on Powell.", flush=True)
+        self.backend = "powell"
+        img_buf.buffer = orig_buffer
+        if orig_roi is not None:
+            img_buf.meta["roi"] = orig_roi
+        else:
+            img_buf.meta.pop("roi", None)
+        try:
+            return self.process(img_buf)
+        finally:
+            self.backend = saved
+
     def _fallback_to_bspline(self, img_buf, orig_buffer, orig_roi):
         """Cylindrical fit diverged — retry this page with bspline_twist
         (no twist), which is numerically stable. Restores the pre-padding
@@ -923,10 +1114,16 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         if self.sheet_model != "cylindrical":
             return None
         saved_model, saved_twist = self.sheet_model, self.twist
+        # LM's analytic Jacobian is the cubic sheet's, so the spline retry
+        # needs a model-aware optimiser: Powell is the universal one. Slow
+        # (~seconds), but this is the already-diverged page, not the norm.
+        saved_backend = self.backend
         print("[PageDewarper] cylindrical fit diverged — falling back to "
               "bspline_twist (no twist) for this page.", flush=True)
         self.sheet_model = "bspline_twist"
         self.twist = False
+        if self.backend == "lm":
+            self.backend = "powell"
         self._set_backend_sheet_model()
         img_buf.buffer = orig_buffer
         if orig_roi is not None:
@@ -935,6 +1132,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             return self.process(img_buf)
         finally:
             self.sheet_model, self.twist = saved_model, saved_twist
+            self.backend = saved_backend
             self._set_backend_sheet_model()
 
     def process(self, img_buf: ImageBuffer) -> ImageBuffer:
@@ -982,14 +1180,17 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             self.debug_save(dbg_0, "0_spans", img_buf)
 
             # Debug Points Helper
+            from aglaia.processors.lm_solver import keypoint_index
+
             def draw_points(img, pvec):
-                ki = make_keypoint_index(span_counts)
+                ki = keypoint_index(span_counts, ctx.n_cam)
                 ppts = sheet_models.project_keypoints_model(
                     np.asarray(pvec, dtype=np.float64).copy(), ki,
                     model=self.sheet_model, n_modes=self.spline_modes,
                     model_dims=model_dims,
                     focal_length=self.focal_length,
-                    grading=self.knot_grading, flip=flat_flip)
+                    grading=self.knot_grading, flip=flat_flip,
+                    n_cam=ctx.n_cam, spine=ctx.spine)
                 res = img.copy()
                 for pt in ppts:
                     cv2.circle(res, (int(pt[0,0]), int(pt[0,1])), 3, (255, 0, 0), -1)
@@ -1005,7 +1206,9 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         try:
             with SuppressOutput():
-                if (self.sheet_model in sheet_models.SPLINE_MODELS
+                if self.backend == "lm":
+                    params = self._solve_lm(ctx)
+                elif (self.sheet_model in sheet_models.SPLINE_MODELS
                         and self.backend == "powell"):
                     # Library Powell objective is cubic-only — use
                     # the vendored model-aware optimiser.
@@ -1474,28 +1677,31 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # flat_spline per-page state: flip puts the binding at the
             # page's left edge (basis t = 1 − x/W); flat_penalty_eff is
             # zeroed when the binding side can't be resolved.
+            binding_side = self._resolve_binding_side(img_buf)
             flat_flip = False
             flat_penalty_eff = 0.0
             if self.sheet_model == sheet_models.MODEL_FLAT_SPLINE:
-                side = self.binding_side
-                if side == "auto":
-                    # PageDetector stamps page_side on 2-page spreads:
-                    # the LEFT page of a spread is bound on its RIGHT
-                    # edge, and vice versa.
-                    ps = str(img_buf.meta.get("page_side") or "").lower()
-                    side = {"left": "right", "right": "left"}.get(ps)
-                    if side is None:
-                        print("[PageDewarper] flat_spline: no page_side "
-                              "meta and binding_side=auto — flat penalty "
-                              "off for this page (set binding_side "
-                              "explicitly for single-page scans).",
-                              flush=True)
-                flat_flip = side == "left"
-                if side is not None:
+                if binding_side is None:
+                    print("[PageDewarper] flat_spline: no page_side "
+                          "meta and binding_side=auto — flat penalty "
+                          "off for this page (set binding_side "
+                          "explicitly for single-page scans).",
+                          flush=True)
+                flat_flip = binding_side == "left"
+                if binding_side is not None:
                     flat_penalty_eff = self.flat_outer_penalty
             if n_extra:
                 params = np.concatenate(
                     [params, np.zeros(n_extra, dtype=params.dtype)])
+            # Principal-point DOF (#60): (cx, cy) are inserted right after
+            # α/β, so the camera block grows 8 -> 10 and every span/keypoint
+            # index shifts with it. Only the LM path understands that layout
+            # (the library's make_keypoint_index hardcodes 8), and it is
+            # cylindrical-only, so `n_extra` is always 0 here.
+            n_cam = 10 if (self.backend == "lm" and self.principal_point) else 8
+            if n_cam > 8:
+                params = np.concatenate(
+                    [params[:8], np.zeros(2, dtype=params.dtype), params[8:]])
             # Warm-start the curl from the last same-side fit (escapes the
             # flat-[0,0] local optimum that leaves some pages undewarped).
             # Done here so BOTH the inline process() and the batched
@@ -1518,7 +1724,18 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                     _set_flat(flat_flip, flat_w)
             dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) + tuple(span_points)).astype(np.float32)
 
+            # Spine-zone residual weights (#60): the binding-side tail is a
+            # least-squares minority, so an unweighted fit under-curls there.
+            weights = None
+            if self.backend == "lm" and binding_side is not None:
+                from aglaia.processors.lm_solver import spine_weights
+                weights = spine_weights(
+                    dstpoints.reshape((-1, 2))[:, 0],
+                    self.spine_weight_boost, self.spine_weight_zone,
+                    spine_right=(binding_side == "right"))
+
             ctx = _DewarpCtx(
+                n_cam=n_cam, binding_side=binding_side, weights=weights,
                 img=img, small=small, pad_px=pad_px, is_bw=is_bw,
                 input_dpi=input_dpi, char_h_frac=char_h_frac,
                 orig_buffer=_orig_buffer, orig_roi=_orig_roi,
@@ -1543,6 +1760,53 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         img_buf.meta["success"] = False
         img_buf.meta["status"] = int(Status.ERROR)
         return None, img_buf
+
+    def _solve_lm(self, ctx: _DewarpCtx) -> np.ndarray:
+        """Levenberg-Marquardt fit of the cylindrical sheet (issue #59), with
+        the spine-localized curl grid search of #60.
+
+        The base (γ = 0) fit always runs and always competes, so the grid can
+        only ever improve the objective — a page where the plain cubic wins
+        gets exactly the pre-#60 surface. The winning `SpineCurl` is stashed
+        on the ctx: the remap, the page-dims fit and replay must all rebuild
+        the surface the solver actually fitted."""
+        from aglaia.processors import lm_solver
+
+        def _fit(spine):
+            obj = lm_solver.Objective(
+                ctx.span_counts, ctx.dstpoints,
+                focal=self.focal_length,
+                shear_cost=float(self.cfg.SHEAR_COST),
+                cubic_cost=self.cubic_cost,
+                huber_delta=self.huber_delta,
+                weights=ctx.weights, spine=spine, n_cam=ctx.n_cam)
+            return lm_solver.minimize(obj, ctx.params)
+
+        best_spine = None
+        best = _fit(None)
+        if self.spine_gammas and ctx.binding_side is not None:
+            w_m = float(ctx.model_dims[0])
+            x0 = w_m if ctx.binding_side == "right" else 0.0
+            s_x = self.spine_gamma_scale * w_m
+            # Sign convention: γ > 0 lifts the sheet at the binding. A page
+            # bound on the LEFT curls the same way mirrored, so the grid is
+            # searched symmetrically rather than sign-guessed.
+            for gamma in self.spine_gammas:
+                for sign in (1.0, -1.0):
+                    cand = lm_solver.SpineCurl(sign * gamma, s_x, x0)
+                    fit = _fit(cand)
+                    if fit.fun < best.fun:
+                        best, best_spine = fit, cand
+        ctx.spine = best_spine
+        if self.debug_enabled():
+            g = best_spine.gamma if best_spine else 0.0
+            print(f"[PageDewarper] LM n_cam={ctx.n_cam} "
+                  f"iters={best.iterations} evals={best.evaluations} "
+                  f"obj={best.fun:.6g} gamma={g:+.3f} "
+                  f"curl=({best.x[6]:+.4f}, {best.x[7]:+.4f})"
+                  + (f" cx,cy=({best.x[8]:+.4f}, {best.x[9]:+.4f})"
+                     if ctx.n_cam > 8 else ""), flush=True)
+        return best.x.astype(np.float32)
 
     def _finish_dewarp(self, img_buf: ImageBuffer, params, ctx) -> ImageBuffer:
         """Post-solve: build page_dims (with the divergence guard + bspline
@@ -1576,7 +1840,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                 model_dims=model_dims, focal_length=self.focal_length,
                 support=support_x, support_y=support_y,
                 support_decay=support_decay,
-                grading=self.knot_grading, flip=flat_flip)
+                grading=self.knot_grading, flip=flat_flip,
+                n_cam=ctx.n_cam, spine=ctx.spine)
 
         if np.any(page_dims < 0):
             page_dims = rough_dims
@@ -1603,7 +1868,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                     model_dims=model_dims,
                     focal_length=self.focal_length,
                     grading=self.knot_grading,
-                    flip=flat_flip).reshape(-1, 2)
+                    flip=flat_flip).reshape(-1, 2)  # spline models: n_cam == 8
                 tgt = dstpoints.reshape(-1, 2)
                 return float(np.sqrt(np.mean(
                     np.sum((tgt - pp) ** 2, axis=1))))
@@ -1631,7 +1896,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                 model=self.sheet_model, n_modes=self.spline_modes,
                 focal=self.focal_length, support=support_x,
                 support_y=support_y, support_decay=support_decay,
-                grading=self.knot_grading, flip=flat_flip)
+                grading=self.knot_grading, flip=flat_flip,
+                n_cam=ctx.n_cam, spine=ctx.spine)
 
         im_x_dec = image_points[:, 0, 0].reshape(grid_shape).astype(np.float32)
         im_y_dec = image_points[:, 0, 1].reshape(grid_shape).astype(np.float32)
@@ -1721,6 +1987,12 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         if oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
             success = False
+            # LM can park a shape DOF on the curl clamp at an objective the
+            # sane region matches; Powell wanders out of that corner. Try it
+            # before conceding the page to the gray fallback.
+            retried = self._retry_with_powell(img_buf, _orig_buffer, _orig_roi)
+            if retried is not None:
+                return retried
 
         if not success:
             # Fallback to gray on padded image.
@@ -1765,6 +2037,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             # flat_spline surface geometry: graded knot vector + binding flip.
             "knot_grading": float(self.knot_grading),
             "binding_flip": bool(flat_flip),
+            # LM camera/objective upgrades (#60): the camera block size (10
+            # means pvec[8:10] is the principal point) and the spine-localized
+            # curl term the fit won on. Replay MUST rebuild the same surface.
+            "camera_np": int(ctx.n_cam),
+            "spine": ctx.spine.as_dict() if ctx.spine is not None else None,
         }
 
         # Only max_oob (above) gates status. Sub-threshold fringe OOB is
