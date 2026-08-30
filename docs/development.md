@@ -85,6 +85,60 @@ See `docs/processors.md` — "Writing a new processor". One step:
 
 `tests/test_processing_chain.py` is the integration smoke test: it builds a 1-element Integrated chain with `SkewFinder`, feeds a synthetic skewed line, and waits for the corresponding `image_event`.
 
+## A/B a pipeline change (measure the output, not the objective)
+
+`scripts/ab_pipeline.py` runs the real CLI once per variant over the committed
+fixture corpus and prints a comparison. Every dewarp decision on record was
+made with it — retiring the twist/spline sheet models, adopting the
+principal-point DOF, sizing the spine-curl grid.
+
+```bash
+uv run python scripts/ab_pipeline.py \
+    --variant "shipped:" \
+    --variant "flat-camera:PageDewarper.principal_point=false" \
+    --variant "no-gamma:PageDewarper.spine_gammas="
+```
+
+Each `--variant` is `label:Processor.option=value[,…]`; an empty override list
+runs the pipeline as committed. Output is mean / median / worst deviation of
+the output text baselines from a straight line, ms/page, and a per-page column.
+
+**Use it whenever a change claims to improve output quality.** A green test
+suite says a change didn't break anything; it says nothing about whether the
+change is *better*. Four habits, each of which caught a real bug here:
+
+1. **Score the output, not the objective.** A fit is judged by its objective,
+   and the objective cannot see a bad page — a spine-curl γ at the grid edge
+   beat γ = 0 on objective while producing a remap that blew the out-of-bounds
+   gate. Only the rendered page tells you.
+2. **Distrust a suspicious tie.** Two variants scoring *identically* is
+   evidence of a bug, not of equivalence. That is how the `page_side` drop
+   surfaced: `TrapezoidalCorrection` returns a fresh `ImageBuffer` and was
+   dropping the meta one step before `PageDewarper` read it, so every
+   binding-side feature had been silently inert — including `flat_spline`'s
+   own defining features. The A/B before that fix was measuring two
+   handicapped things and would have justified the wrong conclusion.
+3. **Check pages in == pages out.** The harness compares `PageDetector`
+   children against `PageDewarper` nodes and exits 2 on a mismatch. That
+   column is how #64 surfaced — pages vanishing from slow runs with no node,
+   no error and exit code 0. A quality metric averaged over the pages that
+   *survived* would have looked fine.
+4. **Re-measure after a refactor that should change nothing.** The
+   twist/spline retirement was verified by re-running the whole corpus and
+   getting the same aggregate and per-page numbers, which is a much stronger
+   statement than "the tests still pass". Expect *equal*, not *bit-equal* —
+   see the noise floor below.
+
+Numbers quoted in commits and `docs/processors.md` come from this harness, so
+they are reproducible — and re-runnable when you doubt them.
+
+**How much delta to believe.** Runs are not bit-deterministic: the warm-start
+ring seeds each page's curl from recent same-side fits, so the order pages
+happen to complete (worker scheduling) can shift a page slightly. Observed
+drift on repeat runs of an identical configuration is ~0.002 px. Treat
+sub-1% differences as noise and re-run before believing one; the gaps that
+decided anything here (0.92 vs 1.65 px) are far outside it.
+
 ## Headless UI debugging (no display / camera)
 
 Three layers let you inspect + drive the app without a screen, camera, or the
