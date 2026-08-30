@@ -46,9 +46,10 @@ pipeline:
 - name: pages_trap
   processor: TrapezoidalCorrection
   options:
-    # Use the binding side (PageDetector page_side) to correct for
-    # page curl in the baseline evidence and the edge clustering.
-    spine_aware: true
+    # Use the binding side (PageDetector page_side) to correct for page curl
+    # in the baseline evidence and the edge clustering. Off: measured slightly
+    # against on this rig-capture corpus. Turn on for handheld/curled input.
+    spine_aware: false
     line_source: connectivity
     min_line_count: 4
     line_join_mm: 4.0

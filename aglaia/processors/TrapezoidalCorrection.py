@@ -59,14 +59,16 @@ class TrapezoidalOption(AbstractProcessorOption):
     # well-supported tilt disagreement as real keystone. False = the exact
     # side-agnostic behaviour.
     #
-    # ON by default — Yann's call, backed by the iOS port's device validation
-    # on handheld captures. The local corpus does NOT corroborate it: mean
-    # 0.926 -> 0.929 px, median 0.879 -> 0.897 (worse, ~9x the noise floor),
-    # worst page 1.206 -> 1.128 (better), and the per-page benefit correlates
-    # +0.275 with curl — i.e. the OPPOSITE of the mechanism's premise, with
-    # low-curl pages gaining and high-curl pages losing. That corpus is rig
-    # captures; the mechanism targets handheld curl. Set False to revert.
-    spine_aware: bool = True
+    # OFF by default. It was briefly on; the fixture corpus measured against
+    # it (mean 0.926 -> 0.929 px, median 0.879 -> 0.897 — worse, ~9x the noise
+    # floor) and, more tellingly, the per-page benefit correlated +0.275 with
+    # curl: the OPPOSITE of the mechanism's premise, low-curl pages gaining
+    # and high-curl pages losing. The direct mechanism test is strong (57-69%
+    # less curl-induced baseline tilt on synthetic sag) and the iOS port
+    # device-validated it on HANDHELD captures, so this is kept and
+    # documented rather than removed — set True for handheld/strongly-curled
+    # material, where the rig-capture corpus above says nothing useful.
+    spine_aware: bool = False
     line_source: str = "connectivity"   # connectivity | meta
     min_line_count: int = 4
     # Horizontal MORPH_CLOSE kernel fallback (mm). Used when text-scale
@@ -178,17 +180,18 @@ class TrapezoidalCorrection(AbstractImageProcessor):
     }
     _ESSENTIAL_PARAMS = ("line_source", "interp", "processing_dpi")
     OPTIONS = {
-        "spine_aware": _b(True,
+        "spine_aware": _b(False,
                           "Use the page's binding side (PageDetector's "
                           "page_side meta) to correct for page curl: "
                           "down-weight baseline evidence in the fold zone, "
                           "relax the fold-side endpoint cluster, and keep a "
                           "well-supported tilt disagreement as real keystone "
                           "rather than reconciling it away. Needs a two-page "
-                          "spread; inert on single-page scans. On by "
-                          "default; the local fixture corpus does not "
-                          "corroborate it (see the dataclass comment) — turn "
-                          "off to get the exact side-agnostic behaviour."),
+                          "spread; inert on single-page scans. OFF by "
+                          "default — the rig-capture fixture corpus measured "
+                          "slightly against it. Intended for handheld or "
+                          "strongly-curled material, where the iOS port "
+                          "device-validated it."),
         "line_source": _e("connectivity", ["connectivity", "meta"],
                           "Where to source text-line bboxes from. "
                           "connectivity = morphological analysis; meta = PageDetector bboxes.",
