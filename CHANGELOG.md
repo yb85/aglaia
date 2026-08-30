@@ -4,7 +4,21 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0rc3] — 2026-08-30
+
+A dewarp cycle: the sheet fit is ~100× faster and measurably straighter, the
+four sheet models are down to one, and three defects that had been degrading
+output silently — with no failing test — are fixed. Most of it is backported
+from the iOS port (`aglaia-ios`), which had diverged ahead on the shared
+algorithms.
+
+Headline, measured over the fixture corpus (3 books, 12 pages) as mean
+deviation of the output text baselines from a straight line:
+
+| | curvature | per page |
+|---|---|---|
+| before | 2.04 px | 75.7 s |
+| after | **0.92 px** | **0.66 s** |
 
 ### Added
 
@@ -16,6 +30,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with ~10-60 iterations: 28 s → 0.25 s per page on the test fixture, at a
   *better* final objective, on CPU with no GPU allocator to babysit. Ported
   from the iOS implementation; `AGLAIA_DEWARP_LM=0` keeps the old GPU chain.
+
 - **Dewarp camera upgrades** (LM + `cylindrical` only, #60), from the iOS
   port's on-device research:
   - `principal_point` (default on) fits (cx, cy) alongside the pose. A
@@ -43,7 +58,36 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl clamp), which is why `principal_point` defaults on and a rejected LM
   fit now retries on Powell instead of falling straight through to grayscale.
 
-### Added
+- **Same-line footnotes** (`mistral_same_line`, default off). Critical editions
+  pack several notes onto one physical line (`"(12) premier. (13) second."`).
+  Every marker after the first never sits at a line start, so it never entered
+  the entry set — and since a footnote is recognised by refs ∩ entries, it was
+  never classified as a footnote **at all**: its ref stayed a bare `(13)` in
+  the body and its text stayed glued to note 12. With the toggle on, markers
+  inside a line that already starts with an entry marker also count, and such
+  a line is split at each of them. Only markers already in that page's mapping
+  cut (a citation inside a note never splits it), and the bare `N.` form never
+  cuts mid-line (too ambiguous against dates and verse references).
+
+- **Slope-based x decompression** (`slope_emphasis`, ships at k = 1).
+  The arc-length grid corrects the *surface-length* term; it does not correct
+  **projective foreshortening**, where the page recedes steeply near the spine
+  and the camera compresses those glyphs however the surface is
+  parameterised. `slope_emphasis` (k) weights the grid measure by
+  `(1+z′²)^(k/2)` so steep regions claim more output width, and is carried in
+  the replay stamp so a replayed page is sized like the live one.
+
+  The effect scales with z′², so it is negligible on mild curl and large on
+  strong: at k = 1, +0.3% output width at max|z′| = 0.1 but **+16.9%** at 1.67,
+  with the steepest quarter's share of output columns going 0.318 → 0.403.
+
+  **Ships at k = 1**, matching the iOS port where it is device-validated. That
+  rests on iOS validation plus the maintainer's judgement, not on a local
+  measurement: the A/B harness scores baseline straightness (vertical) and this
+  changes horizontal scale, so it can only confirm no regression — which it
+  does, 0.926 px vs 0.923 at the noise floor. `slope_emphasis: 0` recovers the
+  exact previous geometry, and projects stamped before this option replay at 0
+  regardless of the default.
 
 - **Spine-aware keystone estimation** (`spine_aware`, default off). Near the
   binding the page curls out of plane, so the bottom-most ink sits
@@ -66,53 +110,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   handheld captures, a curl regime the rig-capture fixtures do not cover.
   Turn it on for handheld or strongly-curled material.
 
-- **Slope-based x decompression** (`slope_emphasis`, default 0 = unchanged).
-  The arc-length grid corrects the *surface-length* term; it does not correct
-  **projective foreshortening**, where the page recedes steeply near the spine
-  and the camera compresses those glyphs however the surface is
-  parameterised. `slope_emphasis` (k) weights the grid measure by
-  `(1+z′²)^(k/2)` so steep regions claim more output width, and is carried in
-  the replay stamp so a replayed page is sized like the live one.
-
-  The effect scales with z′², so it is negligible on mild curl and large on
-  strong: at k = 1, +0.3% output width at max|z′| = 0.1 but **+16.9%** at 1.67,
-  with the steepest quarter's share of output columns going 0.318 → 0.403.
-
-  **Ships at k = 1**, matching the iOS port where it is device-validated. That
-  rests on iOS validation plus the maintainer's judgement, not on a local
-  measurement: the A/B harness scores baseline straightness (vertical) and this
-  changes horizontal scale, so it can only confirm no regression — which it
-  does, 0.926 px vs 0.923 at the noise floor. `slope_emphasis: 0` recovers the
-  exact previous geometry, and projects stamped before this option replay at 0
-  regardless of the default.
-
-- **Same-line footnotes** (`mistral_same_line`, default off). Critical editions
-  pack several notes onto one physical line (`"(12) premier. (13) second."`).
-  Every marker after the first never sits at a line start, so it never entered
-  the entry set — and since a footnote is recognised by refs ∩ entries, it was
-  never classified as a footnote **at all**: its ref stayed a bare `(13)` in
-  the body and its text stayed glued to note 12. With the toggle on, markers
-  inside a line that already starts with an entry marker also count, and such
-  a line is split at each of them. Only markers already in that page's mapping
-  cut (a citation inside a note never splits it), and the bare `N.` form never
-  cuts mid-line (too ambiguous against dates and verse references).
-
-### Fixed
-
-- **The keystone de-rotate no longer shears a page whose deskew failed.**
-  `detect_column_quad_from_baselines` re-centres near-parallel tilted margins
-  onto the median baseline angle, on the premise that the page was deskewed
-  upstream so level baselines are ground truth. That premise fails exactly
-  when `pages_deskew` returns 0 on a fanned page (no peak in its projection
-  profile): the baselines keep their tilt, and margins disagreeing with them
-  are real shear, not invented rotation. Un-gated it forced the sides onto the
-  baseline angle — flat text lines, sheared verticals, the quad corner ~100 px
-  off the ink. Now gated on `|median baseline angle| < 1°`. Backported from
-  the iOS port, where it was found on a real capture and verified against the
-  desktop reference byte-for-byte.
-
-### Added
-
 - **A flat-fit rung in the dewarp failure ladder.** When a fit's remap
   overshoots the `max_oob` gate, the page now falls back to a zero-curl fit
   (pose and page dims around a flat sheet, ~6 ms) before being conceded to the
@@ -128,6 +125,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl of 0 by construction is not a measurement.
 
 ### Fixed
+
+- **The keystone de-rotate no longer shears a page whose deskew failed.**
+  `detect_column_quad_from_baselines` re-centres near-parallel tilted margins
+  onto the median baseline angle, on the premise that the page was deskewed
+  upstream so level baselines are ground truth. That premise fails exactly
+  when `pages_deskew` returns 0 on a fanned page (no peak in its projection
+  profile): the baselines keep their tilt, and margins disagreeing with them
+  are real shear, not invented rotation. Un-gated it forced the sides onto the
+  baseline angle — flat text lines, sheared verticals, the quad corner ~100 px
+  off the ink. Now gated on `|median baseline angle| < 1°`. Backported from
+  the iOS port, where it was found on a real capture and verified against the
+  desktop reference byte-for-byte.
 
 - **A headless run no longer abandons a page whose step outlives it** (#64).
   Completion decided the run had settled from a *silence timer*: once every
