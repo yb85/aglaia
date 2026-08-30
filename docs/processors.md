@@ -223,28 +223,49 @@ pinhole, so these options are forced off on those backends:
 
 `binding_side: auto` reads the `page_side` meta the PageDetector stamps on
 two-page spreads; single-page scans need it set explicitly or the spine
-features stay off for that page.
+features stay off for that page. That meta has to *survive* the intervening
+steps — `TrapezoidalCorrection` returns a fresh `ImageBuffer` and dropped it
+until 2026-08, which silently disabled the spine features **and**
+flat_spline's binding-side flip/penalty **and** the per-side warm-start ring
+for every page in the default pipeline. Anything added to that path must
+forward `_CARRIED_META`.
 
-**Measured on `book_curved_x2` over `test_data/test_athanase` (2 spreads → 4
-pages), mean deviation of the output text baselines from a straight line:**
+**Measured on `book_curved_x2` over the full fixture corpus (`test_athanase`,
+`test_augustin`, `test_balthasar` — 6 spreads → 12 pages), mean deviation of
+the output text baselines from a straight line:**
 
-| solver | camera | curvature | ms/page |
-|---|---|---|---|
-| Powell | 8-param | 2.04 px¹ | 75 700 |
-| LM | 8-param | 2.96 px | 2 630 |
-| **LM** | **10-param + spine weights (default)** | **0.90 px** | **775** |
+| sheet model | solver | mean | worst page | ms/page |
+|---|---|---|---|---|
+| **cylindrical + spine curl** | **LM, 10-param** | **0.923 px** | **1.194** | 659 |
+| cylindrical (γ off) | LM, 10-param | 0.960 px | 1.345 | 236 |
+| flat_spline | MLX | 1.679 px | 3.315 | 553 |
+| bspline_twist | MLX | 1.648 px | 3.053 | 635 |
+| sine_twist | MLX | 1.645 px | 3.051 | 681 |
 
-¹ A pages only — Powell did not finish the B pages inside the run.
+The cylindrical + spine-curl model wins on **every one of the 12 pages**. Most
+of that margin is the LM solver and the principal point (an 8-param Powell fit
+of the same model scores 2.04 px); the γ term itself adds a further ~4% on the
+mean and ~11% on the worst page, for ~3× the fit time (the grid is 6 extra LM
+fits). The twist family never wins on any page.
 
-Note the middle row: **LM with the plain 8-param camera is not uniformly
-better than Powell**, even though it reaches an equal-or-better objective.
+**Selection hazard.** The γ grid keeps the lowest objective, and the objective
+cannot see a wild remap: on one fixture page γ = −0.10 (the grid edge) scored
+*below* γ = 0 while producing a remap that blew the `max_oob` gate. A rejected
+fit therefore backs off to the plain cubic (~125 ms) before the page is
+conceded to the grayscale fallback.
+
+**LM with the plain 8-param camera is not uniformly better than Powell**,
+even though it reaches an equal-or-better objective.
 The objective has a near-flat curl/pose valley and LM occasionally parks a
 shape DOF ON the ±0.5 curl clamp — same objective as the sane region, wild
 remap (reproduced here: α = −0.503 on one page). The principal-point DOF
-removes the degeneracy, which is why it is on by default; and an LM fit whose
-remap blows the `max_oob` gate is retried on Powell before the page is
-conceded to the grayscale fallback. If you turn `principal_point` off, expect
-the pre-#60 quality band, not the numbers above.
+removes the degeneracy, which is why it is on by default. If you turn
+`principal_point` off, expect the pre-#60 quality band, not the numbers above.
+
+> The iOS port retries a rejected fit on Powell, which is right where Powell
+> costs ~540 ms. On the desktop it is 25-80 s per page, and the chain drops a
+> page whose step outlives the run (#64) — so a Powell retry loses the very
+> page it is meant to save. The γ back-off is the desktop equivalent.
 
 Four sheet models (`sheet_model`, see `aglaia/processors/sheet_models.py`):
 

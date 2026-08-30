@@ -37,6 +37,15 @@ from aglaia.processors.geometry import (
 from aglaia.processors.utils import binarize_fixed, to_gray
 
 
+# Meta keys that describe the PAGE itself, not the last operation, so they must
+# survive a processor that returns a FRESH ImageBuffer (this one does). Dropping
+# `page_side` here silently disabled every downstream binding-side feature —
+# flat_spline's knot flip + outer penalty, PageDewarper's spine-zone weighting
+# and spine-curl search, and the per-side warm-start ring, which fell back to
+# one shared "single" history for both halves of every spread.
+_CARRIED_META = ("page_side", "parent_crop_xywh")
+
+
 @dataclass
 class TrapezoidalOption(AbstractProcessorOption):
     # --- input geometry source ---
@@ -689,6 +698,9 @@ class TrapezoidalCorrection(AbstractImageProcessor):
             depth=buf.depth,
             branch_label=buf.branch_label,
         )
+        for _k in _CARRIED_META:
+            if _k in buf.meta:
+                out.meta[_k] = buf.meta[_k]
         # Forward the ROI polygon through H_total so a downstream
         # Binarizer can still mask off the non-page area.
         if (old_roi := buf.meta.get("roi")):
@@ -779,6 +791,9 @@ class TrapezoidalCorrection(AbstractImageProcessor):
             depth=buf.depth,
             branch_label=buf.branch_label,
         )
+        for _k in _CARRIED_META:
+            if _k in buf.meta:
+                out.meta[_k] = buf.meta[_k]
         # Passthrough: image unchanged, propagate ROI so downstream
         # Binarizer can still mask off the non-page area. Default to the
         # full image rect if no upstream ROI.
