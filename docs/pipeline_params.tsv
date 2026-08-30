@@ -39,22 +39,36 @@ TrapezoidalCorrection	max_baseline_tilt_deg	bounded_float	Reject if median basel
 TrapezoidalCorrection	max_aspect_ratio	bounded_float	Sanity cap on recovered w/h.	false	5.0
 TrapezoidalCorrection	debug	bool	Save VP/line overlay as debug image to meta.	false	false
 TrapezoidalCorrection	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	false	false
-PageDewarper	backend	enum	Optimizer backend. auto = MLX → padded JAX → Powell. mlx forces Apple Metal (MLX) on top of padded JAX. jax skips MLX, uses padded JAX L-BFGS-B. powell uses SciPy Powell (no JAX/MLX).	false	auto
-PageDewarper	max_oob	bounded_float	Reject the dewarp if remap goes more than this many pixels out of bounds. Bumped to 400 because the page outline (footer + page number area) routinely extrapolates 200-300 px below the last detected span — benign white fringe, not a real failure.	false	400.0
-PageDewarper	min_spans	bounded_int	Minimum span count to run the cubic fit. Below this, the optimizer is under-constrained and passthrough is safer.	false	4
-PageDewarper	min_span_width_ratio	bounded_float	Drop spans whose width is less than this fraction of the widest span in the scan. Cuts page-number / author-line / footer fragments that bias the cubic fit toward false curvature; keep ≥ the footnote block so the fit's support reaches the page bottom (else footnotes get extrapolated/fanned). 0 = disabled.	false	0.2
+PageDewarper	backend	enum	Optimizer backend. auto = LM (cylindrical) or MLX → padded JAX → Powell (spline models). lm = Levenberg-Marquardt with analytic Jacobians and Schur/arrowhead sparsity — CPU, ~70× faster than Powell, cylindrical only. WARNING: jax has unresolved issue on Apple hardware (memory cache fills up); prefer MLX.	false	auto
+PageDewarper	principal_point	bool	LM only: fit the camera principal point (cx, cy) as well as the pose. Absorbs the projective camera that a keystone homography composed with a curled page produces — measured −57% output line curvature after TrapezoidalCorrection.	false	true
+PageDewarper	spine_weight_boost	bounded_float	LM only: residual weight AT the binding, ramping to 1 at the edge of the spine zone. The spine tail is a least-squares minority, so an unweighted fit under-curls there. 1 = off (also off when the binding side is unknown).	false	4.0
+PageDewarper	spine_weight_zone	bounded_float	LM only: width of the up-weighted spine zone as a fraction of the keypoint x-range.	true	0.25
+PageDewarper	spine_gammas	string	LM only: comma-separated γ grid for the spine-localized curl term z += γ·exp(−|x−x_bind|/s). Each value is fitted and the best objective wins (γ = 0, the plain cubic, is always a candidate). Needs principal_point to be identifiable. Empty disables the search.	false	0.02, 0.05, 0.10
+PageDewarper	spine_gamma_scale	bounded_float	LM only: decay length s of the spine curl term, as a fraction of the model page width.	true	0.15
+PageDewarper	max_oob	bounded_float	Reject the dewarp if remap goes more than this many pixels out of bounds.	true	500.0
+PageDewarper	min_spans	bounded_int	Minimum span count to run the cubic fit. Below this, the optimizer is under-constrained and passthrough is safer.	true	4
+PageDewarper	min_span_width_ratio	bounded_float	Drop spans whose width is less than this fraction of the widest span in the scan. 0 = disabled.	true	0.2
+PageDewarper	baseline_source	enum	Which fitted text-line curve(s) constrain the sheet: bottom = baselines, top = x-height toplines, average = midlines, both = baseline + topline as separate spans (doubles vertical constraints).	false	bottom
+PageDewarper	use_huber	bool	Robust pseudo-Huber reprojection loss — caps the pull of stray spans (footers, captions). Off = plain L2.	false	true
+PageDewarper	huber_delta	bounded_float	Pseudo-Huber transition scale (normalized units).	true	0.005
+PageDewarper	sheet_model	enum	Page surface model. cylindrical = stock cubic z(x). sine_twist = sine-basis profile + linear-in-y twist — handles non-cubic gutter walls and top-to-bottom curl variation. bspline_twist = clamped cubic B-spline profile + twist — local support, sharp gutter wall without ripple in the flat field. flat_spline = B-spline for post-trapezoidal pages: flat sheet + binding curl only — graded knots toward the binding and an outer-flatness penalty (binding side from the PageDetector A/B page meta).	false	cylindrical
+PageDewarper	spline_modes	bounded_int	Shape DOF K: sine modes (sine_twist) or free control points (bspline_twist / flat_spline); model adds K+1 params.	true	4
+PageDewarper	twist	bool	Fit the linear-in-y twist gain γ (curl amplitude varying top-to-bottom). Off = pure cylinder with the chosen basis (γ pinned to 0). Enable only for true open-book fan pages — on flat pages a free γ invents phantom twist.	false	false
+PageDewarper	binding_side	enum	flat_spline: page edge carrying the binding. auto reads the PageDetector page_side meta (left page of a spread → binding right, and vice versa); set explicitly for single-page scans. Unresolved auto disables the flat features for that page.	false	auto
+PageDewarper	knot_grading	bounded_float	flat_spline: knot density grading toward the binding. 1 = uniform; higher = coarser flat field / finer gutter wall.	true	2.5
+PageDewarper	flat_outer_penalty	bounded_float	flat_spline: weight of the outer-flatness penalty λ·Σ w_i·c_i² (w = squared Greville distance from the binding). 0 = off; ~1 balances the data term on a typical page.	false	1.0
 PageDewarper	page_margin_mm	bounded_float	Mask margin in mm — defines the page-extent rectangle for span detection.	false	5.0
 PageDewarper	dewarp_margin	bounded_float	Pre-dewarp white padding around the crop (mm).	false	5.0
-PageDewarper	remap_decimate	bounded_int	Decimation factor for the remap grid. Lower = sharper but slower.	false	4
-PageDewarper	shear_cost	bounded_float	Penalty on rvec[0]² (camera tilt). Does NOT regularize cubic α/β; use cubic_cost for that.	false	40.0
-PageDewarper	cubic_cost	bounded_float	L2 penalty on cubic slopes α, β. 0 = page-dewarp default (no regularizer). Previously needed at 1.0 to mask a span-linking bug that produced phantom curl on flat pages; with that bug fixed (see EDGE_MAX_LENGTH = 3·h_med, span_mask isolation) the regularizer biases real curl out — leave at 0. Crank it up only if a real input over-curls.	false	0.0
-PageDewarper	focal_length	bounded_float	Normalized camera focal length. Overridden by calibration if present.	false	1.3
-PageDewarper	line_join_mm	bounded_float	Horizontal MORPH_CLOSE kernel fallback (mm at analysis DPI). Used when <30 char-like CCs available.	false	4.0
-PageDewarper	kernel_char_mult	bounded_float	Adaptive MORPH_CLOSE kernel width = mult × median char height. Bridges words into full-line spans.	false	2.0
-PageDewarper	thickness_char_mult	bounded_float	TEXT_MAX_THICKNESS = mult × median char height (≈ ascender + x-height + descender). Drops multi-line bridged blobs.	false	3.0
-PageDewarper	edge_max_length_char_mult	bounded_float	EDGE_MAX_LENGTH = mult × median char height. Max Euclidean gap between adjacent cinfos the span-builder will link. 3 ≈ one wide justified word gap + margin.	false	3.0
+PageDewarper	remap_decimate	bounded_int	Decimation factor for the remap grid. Lower = sharper but slower.	true	4
+PageDewarper	shear_cost	bounded_float	Penalty on rvec[0]² (camera tilt).	true	40.0
+PageDewarper	cubic_cost	bounded_float	L2 penalty on cubic slopes α, β. 0 = no penalty.	true	0.0
+PageDewarper	focal_length	bounded_float	Normalized camera focal length. Overridden by calibration if present.	true	1.3
+PageDewarper	line_join_mm	bounded_float	Horizontal MORPH_CLOSE kernel fallback (mm at analysis DPI). Used when <30 char-like CCs available.	true	4.0
+PageDewarper	kernel_char_mult	bounded_float	Adaptive MORPH_CLOSE kernel width = mult × median char height. Bridges words into full-line spans.	false	1.5
+PageDewarper	large_blob_limit	bounded_float	Drop connected components whose bounding-box area exceeds (mult × median char height)² before span detection — removes table-grid lines. Use 0 to disable.	false	10.0
+PageDewarper	thickness_char_mult	bounded_float	TEXT_MAX_THICKNESS = mult × median char height (3× ≈ ascender + x-height + descender + margin).	false	3.0
+PageDewarper	edge_max_length_char_mult	bounded_float	EDGE_MAX_LENGTH = mult × median char height. Max gap between atoms the span-builder will link.	false	3.0
 PageDewarper	processing_dpi	bounded_float	Downsample to this DPI for span analysis; full-res for the remap.	false	150.0
-PageDewarper	debug	bool	Save intermediate visualisations as debug_artifacts.	false	false
-PageDewarper	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	false	false
+PageDewarper	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	true	false
 MarginSetter	margin_mm	string	CSS-style margin in mm. "10" all sides; "10 20" V H; "10 20 30 40" L R T B.	false	5
 MarginSetter	margin_px	string	Same as margin_mm but in pixels (overrides margin_mm when set).	false	

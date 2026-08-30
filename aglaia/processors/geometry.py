@@ -423,7 +423,7 @@ def fit_span_baseline(xs: np.ndarray, ys: np.ndarray, heights: np.ndarray,
     return p
 
 
-def dewarp_arclength_x(params, page_w: float, n: int = 4096
+def dewarp_arclength_x(params, page_w: float, n: int = 4096, spine=None
                        ) -> tuple[np.ndarray, np.ndarray]:
     """Cumulative arc length of the cubic-sheet height profile.
 
@@ -437,11 +437,18 @@ def dewarp_arclength_x(params, page_w: float, n: int = 4096
     cumulative arc length. Callers build an arc-length-uniform x grid
     with `np.interp(np.linspace(0, s[-1], w), s, xs)` and size the
     output width from `s[-1]` instead of `page_w`.
+
+    `spine` (a `lm_solver.SpineCurl`) adds its slope to z′. This is the
+    mechanism behind the horizontal compression fix of #60: output x-scale
+    comes solely from ∫√(1+z′²)dx, so an under-sloped surface under-allocates
+    arc length exactly at the fold.
     """
     alpha = float(np.clip(params[6], -0.5, 0.5))
     beta = float(np.clip(params[7], -0.5, 0.5))
     xs = np.linspace(0.0, float(page_w), int(n))
     zp = 3.0 * (alpha + beta) * xs ** 2 - 2.0 * (2.0 * alpha + beta) * xs + alpha
+    if spine is not None:
+        zp = zp + spine.dz(xs)
     ds = np.sqrt(1.0 + zp * zp)
     s = np.concatenate([[0.0],
                         np.cumsum(0.5 * (ds[1:] + ds[:-1]) * np.diff(xs))])

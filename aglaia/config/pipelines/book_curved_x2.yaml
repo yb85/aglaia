@@ -61,6 +61,17 @@ pipeline:
   processor: PageDewarper
   options:
     backend: auto
+    # LM camera upgrades (#60). This step runs right after
+    # TrapezoidalCorrection, which is exactly the post-keystone case they
+    # were measured on: the composed camera needs a principal point, and the
+    # binding-side residuals need up-weighting to stop the fit under-curling
+    # at the gutter. binding_side stays `auto` — PageDetector stamps
+    # page_side on the x2 split.
+    principal_point: true
+    spine_weight_boost: 4.0
+    spine_weight_zone: 0.25
+    spine_gammas: 0.02, 0.05, 0.10
+    spine_gamma_scale: 0.15
     max_oob: 400
     min_spans: 4
     min_span_width_ratio: 0.2
