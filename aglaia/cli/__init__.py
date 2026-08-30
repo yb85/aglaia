@@ -18,7 +18,6 @@ from __future__ import annotations
 import sys
 from typing import Annotated, Optional
 
-import click
 import typer
 
 from aglaia.cli.commands import gui as _gui
@@ -28,6 +27,19 @@ from aglaia.cli.commands import run as _run
 from aglaia.cli.commands import server as _server
 from aglaia.cli.commands import setup as _setup
 from aglaia.cli.commands import version as _version
+
+#: The base class of the usage errors Typer raises (bad option, missing
+#: argument, …). Typer >= 0.26 VENDORS click as `typer._click` and drops the
+#: dependency on the standalone package, so `click.ClickException` — which is
+#: what an `import click` gives you — no longer catches anything Typer throws,
+#: and `import click` itself is an undeclared dependency that may not resolve
+#: at all. Taking the class from Typer keeps the handler correct on both sides
+#: of that split. (CI caught the regression: MissingParameter / NoSuchOption
+#: escaping `run()` as tracebacks instead of becoming exit code 2.)
+try:                                              # typer >= 0.26
+    from typer._click.exceptions import ClickException as _ClickException
+except ImportError:                               # typer <= 0.25
+    from click.exceptions import ClickException as _ClickException
 
 #: First-token names that are real commands (not the default `gui`).
 KNOWN_COMMANDS = {"gui", "run", "ocr", "setup", "server", "list", "version"}
@@ -90,11 +102,11 @@ def run(argv: Optional[list[str]] = None) -> int:
     try:
         command(args=args, standalone_mode=False)
         return 0
-    except click.exceptions.Exit as exc:          # typer.Exit / --help / --version
-        return int(exc.exit_code)
-    except click.exceptions.Abort:                # Ctrl-C
+    except typer.Exit as exc:                     # typer.Exit / --version
+        return int(getattr(exc, "exit_code", 0))
+    except typer.Abort:                           # Ctrl-C
         return 130
-    except click.ClickException as exc:           # usage errors, etc.
+    except _ClickException as exc:                # usage errors, etc.
         exc.show()
         return exc.exit_code
     except SystemExit as exc:                     # spec parsers raise SystemExit

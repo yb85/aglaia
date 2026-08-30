@@ -24,6 +24,11 @@ misc/
 #log and lock files
 *.log
 *.lock
+# ...but uv.lock is the dependency pin, not a stray sentinel: without it CI
+# re-resolves from scratch every run and silently floats (typer 0.25 -> 0.27
+# vendored click and broke the CLI dispatch handler). Committing it is what
+# makes "CI = an exact mirror of the local checks" true.
+!uv.lock
 
 #model files
 *.pb
