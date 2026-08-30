@@ -45,6 +45,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Slope-based x decompression** (`slope_emphasis`, default 0 = unchanged).
+  The arc-length grid corrects the *surface-length* term; it does not correct
+  **projective foreshortening**, where the page recedes steeply near the spine
+  and the camera compresses those glyphs however the surface is
+  parameterised. `slope_emphasis` (k) weights the grid measure by
+  `(1+z′²)^(k/2)` so steep regions claim more output width, and is carried in
+  the replay stamp so a replayed page is sized like the live one.
+
+  The effect scales with z′², so it is negligible on mild curl and large on
+  strong: at k = 1, +0.3% output width at max|z′| = 0.1 but **+16.9%** at 1.67,
+  with the steepest quarter's share of output columns going 0.318 → 0.403.
+
+  **Ships at k = 1**, matching the iOS port where it is device-validated. That
+  rests on iOS validation plus the maintainer's judgement, not on a local
+  measurement: the A/B harness scores baseline straightness (vertical) and this
+  changes horizontal scale, so it can only confirm no regression — which it
+  does, 0.926 px vs 0.923 at the noise floor. `slope_emphasis: 0` recovers the
+  exact previous geometry, and projects stamped before this option replay at 0
+  regardless of the default.
+
 - **Same-line footnotes** (`mistral_same_line`, default off). Critical editions
   pack several notes onto one physical line (`"(12) premier. (13) second."`).
   Every marker after the first never sits at a line start, so it never entered

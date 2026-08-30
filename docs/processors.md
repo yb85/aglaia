@@ -238,11 +238,58 @@ the output text baselines from a straight line:**
 | bspline_twist | MLX | 1.648 px | 3.053 | 635 |
 | sine_twist | MLX | 1.645 px | 3.051 | 681 |
 
+Measured with `slope_emphasis: 0`; the shipped default of 1 scores 0.926 px,
+inside the noise floor (that option changes horizontal scale, which this
+vertical metric cannot see — see below).
+
 The cylindrical + spine-curl model wins on **every one of the 12 pages**. Most
 of that margin is the LM solver and the principal point (an 8-param Powell fit
 of the same model scores 2.04 px); the γ term itself adds a further ~4% on the
 mean and ~11% on the worst page, for ~3× the fit time (the grid is 6 extra LM
 fits). The twist family never wins on any page.
+
+### Slope-based x decompression (`slope_emphasis`, default 0)
+
+The arc-length grid corrects the **surface-length** term: paper is
+inextensible, so sampling uniformly in x stretches text by √(1+z′²) where the
+sheet is steep. It does *not* correct **projective foreshortening** — where the
+page recedes steeply near the spine the camera sees those glyphs compressed
+however the surface is parameterised, and arc length alone gives them no extra
+output pixels.
+
+`slope_emphasis` (k) weights the grid measure by `(1 + z′²)^(k/2)`, so steep
+regions claim proportionally more output width. z′ is recovered per segment
+from the measure itself (`ds/dx = √(1+z′²)`), so it needs no model derivative.
+**k = 0 reproduces the arc-length grid exactly** — the path every
+already-stamped project replays through — and the value is carried in the
+replay stamp so a replayed page is sized like the live one.
+
+**When it matters.** The weight is `(1 + z′²)^(k/2)`, so the effect scales
+with the *square* of the sheet slope — negligible on a mildly curled page,
+substantial on a strongly curled one. Measured at k = 1 (output width, and the
+share of output columns landing in the steepest quarter of page-x):
+
+| max \|z′\| | width k=0 → k=1 | steep-quarter share |
+|---|---|---|
+| 0.10 | +0.3% | 0.251 → 0.251 |
+| 0.25 | +0.5% | 0.252 → 0.253 |
+| 0.50 | +1.5% | 0.256 → 0.262 |
+| 1.67 | **+16.9%** | 0.318 → **0.403** |
+
+**Default k = 1**, matching the iOS port, where it is device-validated on real
+captures. Be clear about what backs that: it is device validation there plus
+the maintainer's judgement on his own scans — **not** a local measurement. The
+A/B harness scores *baseline straightness*, a vertical property, and this
+changes only horizontal scale, so the harness is structurally blind to it. What
+the harness can say is that it does not regress: k = 1 over the corpus scores
+0.926 px against k = 0's 0.923, at the run-to-run noise floor (~0.002 px, see
+`docs/development.md`). The fixture corpus also fits mild curl, where the table
+above puts the effect under 1% — so a null result there is what the mechanism
+predicts, not evidence either way.
+
+Set `slope_emphasis: 0` to recover the exact pre-#70 arc-length geometry.
+Projects stamped before this option carry no key and replay at 0 regardless of
+the current default — they render exactly as they were fitted.
 
 ### Failure ladder
 
