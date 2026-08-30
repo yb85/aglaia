@@ -45,7 +45,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Spine-aware keystone estimation** (`spine_aware`, default on). Near the
+- **Spine-aware keystone estimation** (`spine_aware`, default off). Near the
   binding the page curls out of plane, so the bottom-most ink sits
   progressively lower than the true baseline — evidence that is systematically
   *wrong*, not merely noisy. Using the binding side (PageDetector's
@@ -60,10 +60,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   baseline tilt by **57-69%**. **The fixture corpus does not corroborate it**:
   mean 0.926 → 0.929 px, median 0.879 → 0.897 (worse, ~9× the noise floor),
   worst page 1.206 → 1.128 (better), and the per-page benefit correlates
-  **+0.275** with curl — the opposite of the mechanism's premise. On by
-  default on the maintainer's call, backed by the iOS port's device
-  validation on handheld captures; the fixtures are rig captures, a different
-  regime. `spine_aware: false` restores the exact side-agnostic behaviour.
+  **+0.275** with curl — the opposite of the mechanism's premise. Shipped
+  **off** on that evidence, but kept and documented rather than dropped: the
+  direct measurement is strong and the iOS port device-validated it on
+  handheld captures, a curl regime the rig-capture fixtures do not cover.
+  Turn it on for handheld or strongly-curled material.
 
 - **Slope-based x decompression** (`slope_emphasis`, default 0 = unchanged).
   The arc-length grid corrects the *surface-length* term; it does not correct

@@ -153,7 +153,7 @@ options:
 
 Falls back to passthrough (`Status.REVIEW`) when too few baselines or the quad fails convexity/area/aspect sanity checks.
 
-### Spine-aware estimation (`spine_aware`, default on)
+### Spine-aware estimation (`spine_aware`, default off)
 
 Near the binding the page curls out of plane, so the bottom-most ink sits
 progressively lower than the true baseline. That is evidence which is
@@ -180,15 +180,20 @@ since 2026-08 — allows three corrections:
 `spine_aware: false` gives the exact side-agnostic behaviour, and the option
 is inert on single-page scans (no `page_side` to resolve).
 
-> **The local corpus does not corroborate this.** On the 12 fixture pages:
-> mean 0.926 → 0.929 px, median 0.879 → 0.897 (worse, and ~9× the noise
-> floor), worst page 1.206 → 1.128 (better). More importantly the per-page
-> benefit correlates **+0.275** with page curl — the *opposite* of the
-> mechanism's premise, with low-curl pages gaining (−0.024 mean) and
-> high-curl pages losing (+0.031). It is on by default on the maintainer's
-> call, backed by the iOS port's device validation on handheld captures; the
-> fixture corpus is rig captures, a different regime. If you are scanning on a
-> rig and comparing carefully, `spine_aware: false` is a reasonable choice.
+> **Off by default, on the corpus evidence.** It was briefly enabled and then
+> reverted. On the 12 fixture pages: mean 0.926 → 0.929 px, median
+> 0.879 → 0.897 (worse, ~9× the noise floor), worst page 1.206 → 1.128
+> (better). More tellingly the per-page benefit correlates **+0.275** with
+> page curl — the *opposite* of the mechanism's premise, with low-curl pages
+> gaining (−0.024 mean) and high-curl pages losing (+0.031).
+>
+> It is kept rather than removed because the two measurements genuinely
+> disagree and the direct one is strong: −57 to −69% curl-induced baseline
+> tilt on synthetic sag, plus the iOS port's device validation on **handheld**
+> captures. The fixture corpus is rig captures — a different curl regime, and
+> the most plausible reconciliation, though that is a hypothesis rather than
+> something measured here. **Turn it on for handheld or strongly-curled
+> material**, where the corpus above says nothing useful either way.
 
 ## PageDewarper (`aglaia/processors/PageDewarper.py`)
 
