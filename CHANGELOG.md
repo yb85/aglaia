@@ -43,6 +43,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl clamp), which is why `principal_point` defaults on and a rejected LM
   fit now retries on Powell instead of falling straight through to grayscale.
 
+### Fixed
+
+- **The keystone de-rotate no longer shears a page whose deskew failed.**
+  `detect_column_quad_from_baselines` re-centres near-parallel tilted margins
+  onto the median baseline angle, on the premise that the page was deskewed
+  upstream so level baselines are ground truth. That premise fails exactly
+  when `pages_deskew` returns 0 on a fanned page (no peak in its projection
+  profile): the baselines keep their tilt, and margins disagreeing with them
+  are real shear, not invented rotation. Un-gated it forced the sides onto the
+  baseline angle — flat text lines, sheared verticals, the quad corner ~100 px
+  off the ink. Now gated on `|median baseline angle| < 1°`. Backported from
+  the iOS port, where it was found on a real capture and verified against the
+  desktop reference byte-for-byte.
+
 ### Added
 
 - **A flat-fit rung in the dewarp failure ladder.** When a fit's remap

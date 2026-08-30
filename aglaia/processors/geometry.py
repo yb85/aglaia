@@ -1458,8 +1458,19 @@ def detect_column_quad_from_baselines(
     # two margins CONVERGING (different slopes) — left untouched, so we
     # never flatten a real perspective. A > 3° parallel margin tilt on a
     # page whose baselines say ~0° rotation is the invented-rotation bug.
+    #
+    # …and only when the baselines really ARE level. The whole premise is
+    # "the page was deskewed upstream, so level baselines are ground truth",
+    # which fails exactly when `pages_deskew` returned 0 on a fanned page (no
+    # peak in its projection profile): the baselines keep their tilt, and
+    # margins disagreeing with them are REAL shear. Un-gated this forced the
+    # sides onto the baseline angle — flat text lines, sheared verticals, the
+    # quad corner ~100 px off the ink (field case: baselines −2.09°, true
+    # margins +2.0/+1.15°, both edges well supported at 26/20 members).
     convergence = abs(th_l - th_r)
-    if convergence < np.radians(1.0) and abs(delta) > np.radians(3.0):
+    if (abs(base_ang) < np.radians(1.0)
+            and convergence < np.radians(1.0)
+            and abs(delta) > np.radians(3.0)):
         def _retilt(members, fallback_pts, new_th):
             pts = (all_left if fallback_pts is all_left else all_right)
             pts = pts[list(members)] if len(members) else pts
