@@ -244,11 +244,29 @@ of the same model scores 2.04 px); the γ term itself adds a further ~4% on the
 mean and ~11% on the worst page, for ~3× the fit time (the grid is 6 extra LM
 fits). The twist family never wins on any page.
 
-**Selection hazard.** The γ grid keeps the lowest objective, and the objective
-cannot see a wild remap: on one fixture page γ = −0.10 (the grid edge) scored
-*below* γ = 0 while producing a remap that blew the `max_oob` gate. A rejected
-fit therefore backs off to the plain cubic (~125 ms) before the page is
-conceded to the grayscale fallback.
+### Failure ladder
+
+A fit is judged by the `max_oob` gate on its remap, not by its objective — the
+objective cannot see a wild remap. On one fixture page γ = −0.10 (the grid
+edge) scored *below* γ = 0 while overshooting the gate. A rejected fit walks
+down, cheapest rung first:
+
+| rung | what | cost | why it can fail |
+|---|---|---|---|
+| 1 | LM fit, γ grid searched | ~660 ms | the γ grid can select a wild surface |
+| 2 | diverged `page_dims` → rough dims, let the gate judge | free | — |
+| 3 | re-fit with the γ grid off (plain cubic) | ~125 ms | the curl itself can run away |
+| 4 | re-fit with the **curl frozen at 0** — pose and page dims around a flat sheet | ~6 ms | cannot: a zero-curl surface has no runaway remap |
+| 5 | grayscale passthrough, `Status.ERROR` | — | — |
+
+Rung 4 gives a page that is perspective- and pose-corrected but **not**
+curl-corrected — worse than a good fit, much better than a grey one. It is
+also the only rung that answers the *other* documented failure: LM parking a
+shape DOF on the ±0.5 curl clamp at a competitive objective but a wild remap.
+It is dormant on healthy pages (0 firings across the 12-page corpus) and its
+result is deliberately **not** recorded in the warm-start ring — a curl of 0 by
+construction is not a measurement, and seeding the next page with it would
+propagate one page's failure.
 
 **LM with the plain 8-param camera is not uniformly better than Powell**,
 even though it reaches an equal-or-better objective.
@@ -259,9 +277,10 @@ removes the degeneracy, which is why it is on by default. If you turn
 `principal_point` off, expect the pre-#60 quality band, not the numbers above.
 
 > The iOS port retries a rejected fit on Powell, which is right where Powell
-> costs ~540 ms. On the desktop it is 25-80 s per page, and the chain drops a
-> page whose step outlives the run (#64) — so a Powell retry loses the very
-> page it is meant to save. The γ back-off is the desktop equivalent.
+> costs ~540 ms. On the desktop it is 25-80 s per page — 200× the γ back-off
+> for the same recovery — and until #64 the chain dropped a page whose step
+> outlived the run, so the Powell retry lost the very page it was meant to
+> save. Rungs 3 and 4 are the desktop equivalent, at 125 ms and 6 ms.
 
 ### The sheet model
 

@@ -43,6 +43,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl clamp), which is why `principal_point` defaults on and a rejected LM
   fit now retries on Powell instead of falling straight through to grayscale.
 
+### Added
+
+- **A flat-fit rung in the dewarp failure ladder.** When a fit's remap
+  overshoots the `max_oob` gate, the page now falls back to a zero-curl fit
+  (pose and page dims around a flat sheet, ~6 ms) before being conceded to the
+  grayscale passthrough. A zero-curl surface cannot produce the runaway remap
+  that trips the gate, so this rung always has an answer — the page comes out
+  perspective-corrected but not curl-corrected, rather than not processed.
+
+  It also covers the one failure the rung above does not: LM parking a shape
+  DOF on the ±0.5 curl clamp at a competitive objective but a wild remap (the
+  case the iOS port answers with Powell, which costs 25-80 s here). Dormant on
+  healthy pages — 0 firings across the 12-page corpus, output unchanged at
+  0.923 px — and deliberately not recorded in the warm-start ring, since a
+  curl of 0 by construction is not a measurement.
+
 ### Fixed
 
 - **A headless run no longer abandons a page whose step outlives it** (#64).
