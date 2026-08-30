@@ -43,6 +43,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   curl clamp), which is why `principal_point` defaults on and a rejected LM
   fit now retries on Powell instead of falling straight through to grayscale.
 
+### Added
+
+- **Same-line footnotes** (`mistral_same_line`, default off). Critical editions
+  pack several notes onto one physical line (`"(12) premier. (13) second."`).
+  Every marker after the first never sits at a line start, so it never entered
+  the entry set — and since a footnote is recognised by refs ∩ entries, it was
+  never classified as a footnote **at all**: its ref stayed a bare `(13)` in
+  the body and its text stayed glued to note 12. With the toggle on, markers
+  inside a line that already starts with an entry marker also count, and such
+  a line is split at each of them. Only markers already in that page's mapping
+  cut (a citation inside a note never splits it), and the bare `N.` form never
+  cuts mid-line (too ambiguous against dates and verse references).
+
 ### Fixed
 
 - **The keystone de-rotate no longer shears a page whose deskew failed.**

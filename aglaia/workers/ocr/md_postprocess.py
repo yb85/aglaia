@@ -79,10 +79,32 @@ def _norm_usup(md: str, mode: str) -> tuple[str, set[str]]:
     return usup_re.sub(repl, md), seen
 
 
-def _sup_and_entries(md: str, mode: str) -> tuple[set[str], set[str]]:
+def _same_line_pats(mode: str) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    """(line-starts-with-an-entry, marker-anywhere-in-the-line).
+
+    The inner pattern deliberately omits the bare ``N.`` form: mid-line it is
+    hopelessly ambiguous against dates, verse references and enumerations
+    ("voir Jn 3. 16"), so only superscript and parenthesised markers can cut."""
+    cls = _marker_class(mode)
+    starts = [rf"^\s*\$\^\{{{cls.pattern}\}}\$\s", rf"^\s*{cls.pattern}\.\s"]
+    inner = [rf"\$\^\{{({cls.pattern})\}}\$"]
+    if mode == "numeric":
+        starts.append(r"^\s*\(\d{1,3}\)\s")
+        inner.append(r"\((\d{1,3})\)")
+    return re.compile("|".join(starts)), re.compile("|".join(inner))
+
+
+def _sup_and_entries(md: str, mode: str, *,
+                     same_line: bool = False) -> tuple[set[str], set[str]]:
     """One page's (footnote refs, line-start entries) after Unicode folding.
     Refs = LaTeX/Unicode superscripts + (numeric) parenthesized ``(7)``;
-    entries = line-start ``N.`` / ``$^{N}$`` / ``(N)``."""
+    entries = line-start ``N.`` / ``$^{N}$`` / ``(N)``.
+
+    With ``same_line``, markers found INSIDE a line that already starts with an
+    entry marker also count as entries. Critical editions pack several notes on
+    one physical line ("(12) premier. (13) second."), so every marker after the
+    first never sits at a line start — and since a footnote is recognised by
+    refs ∩ entries, it is never classified as a footnote at all."""
     cls = _marker_class(mode)
     md, _ = _norm_usup(md, mode)
     sup = {m.group(1).strip() for m in _SUP_RE.finditer(md)
@@ -94,6 +116,15 @@ def _sup_and_entries(md: str, mode: str) -> tuple[set[str], set[str]]:
     if mode == "numeric":
         sup |= set(_PAREN_RE.findall(md))
         entries |= set(_PAREN_ENTRY_RE.findall(md))
+    if same_line:
+        start_re, inner_re = _same_line_pats(mode)
+        for line in md.split("\n"):
+            if not start_re.search(line):
+                continue
+            for m in inner_re.finditer(line):
+                g = next((x for x in m.groups() if x), None)
+                if g:
+                    entries.add(g.strip())
     return sup, entries
 
 
@@ -107,8 +138,8 @@ def _page_text(page) -> str:
     return str(page or "")
 
 
-def windowed_markers(pages, mode: str = "numeric",
-                     window: int = 1) -> "list[set[str] | None]":
+def windowed_markers(pages, mode: str = "numeric", window: int = 1, *,
+                     same_line: bool = False) -> "list[set[str] | None]":
     """Per-page footnote markers, paired within a ±``window``-page span.
 
     The ref (``$^{1}$``, body) and its definition (``1.``, footer field) sit on
@@ -119,7 +150,8 @@ def windowed_markers(pages, mode: str = "numeric",
     n = len(pages)
     if mode not in ("numeric", "alphabetic"):
         return [None] * n
-    per = [_sup_and_entries(_page_text(p), mode) for p in pages]
+    per = [_sup_and_entries(_page_text(p), mode, same_line=same_line)
+           for p in pages]
     out: list[set[str] | None] = []
     for i in range(n):
         sup: set[str] = set()
@@ -164,8 +196,9 @@ def _ordered_footnote_numbers(page, mode: str,
     return seen
 
 
-def assign_page_mappings(pages, mode: str = "numeric",
-                         window: int = 1) -> "list[dict[str, str] | None]":
+def assign_page_mappings(pages, mode: str = "numeric", window: int = 1, *,
+                         same_line: bool = False
+                         ) -> "list[dict[str, str] | None]":
     """Per-page ``{original_number: unique_anchor}`` maps. Footnote numbers reset
     per chapter, so the SAME number recurs; each occurrence gets a unique anchor
     that keeps the original number (``1`` first, then ``1-2``, ``1-3``, …) so GFM
@@ -174,7 +207,8 @@ def assign_page_mappings(pages, mode: str = "numeric",
     n = len(pages)
     if mode not in ("numeric", "alphabetic"):
         return [None] * n
-    marker_sets = windowed_markers(pages, mode, window)
+    marker_sets = windowed_markers(pages, mode, window,
+                                   same_line=same_line)
     seen: dict[str, int] = {}
     out: list[dict[str, str] | None] = []
     for page, markers in zip(pages, marker_sets):
@@ -187,9 +221,34 @@ def assign_page_mappings(pages, mode: str = "numeric",
     return out
 
 
+def _same_line_cuts(text: str, mode: str,
+                    mapping: "dict[str, str]") -> "list[tuple[str, str]]":
+    """Split one packed definition line at its in-line markers.
+
+    Returns ``[("", head), (num, text), …]`` — the leading definition keeps
+    everything before the first cut, and each subsequent marker owns the text
+    up to the next one. Only markers ALREADY in this page's mapping cut, so a
+    stray citation inside a note ("voir Migne (3) col. 44") never splits it.
+    Empty when nothing cuts."""
+    _starts, inner_re = _same_line_pats(mode)
+    cuts = []
+    for m in inner_re.finditer(text):
+        g = next((x for x in m.groups() if x), None)
+        if g and g.strip() in mapping:
+            cuts.append((g.strip(), m.start(), m.end()))
+    if not cuts:
+        return []
+    out = [("", text[:cuts[0][1]].strip())]
+    for i, (num, _start, end) in enumerate(cuts):
+        stop = cuts[i + 1][1] if i + 1 < len(cuts) else len(text)
+        out.append((num, text[end:stop].strip()))
+    return out
+
+
 def convert_footnotes(md: str, mode: str = "numeric", *,
                       mapping: "dict[str, str] | None" = None,
-                      markers: "set[str] | None" = None) -> str:
+                      markers: "set[str] | None" = None,
+                      same_line: bool = False) -> str:
     """Superscript refs (LaTeX ``$^{N}$`` **and** Unicode ``¹⁷⁰``) + line-start
     entries → GFM footnotes.
 
@@ -202,7 +261,7 @@ def convert_footnotes(md: str, mode: str = "numeric", *,
     md, _ = _norm_usup(md, mode)   # fold Unicode superscripts into $^{…}$ form
     if mapping is None:
         if markers is None:
-            sup, entries = _sup_and_entries(md, mode)
+            sup, entries = _sup_and_entries(md, mode, same_line=same_line)
             markers = {x for x in (sup & entries) if x.lower() not in _ORDINAL}
         mapping = {x: x for x in markers}
 
@@ -221,7 +280,17 @@ def convert_footnotes(md: str, mode: str = "numeric", *,
             num = g[0] or g[1] or (g[2] if mode == "numeric" else None)
             text = g[-1]
             if num and num in mapping:
-                out.append(f"[^{mapping[num]}]: {text}")
+                # Packed line ("(12) premier. (13) second."): each in-line
+                # marker starts its own definition instead of staying glued
+                # into the first one's text.
+                pieces = (_same_line_cuts(text, mode, mapping)
+                          if same_line else [])
+                if pieces:
+                    out.append(f"[^{mapping[num]}]: {pieces[0][1]}")
+                    for pnum, ptext in pieces[1:]:
+                        out.append(f"[^{mapping[pnum]}]: {ptext}")
+                else:
+                    out.append(f"[^{mapping[num]}]: {text}")
                 continue
         out.append(line)
     md = "\n".join(out)
@@ -241,12 +310,13 @@ def convert_footnotes(md: str, mode: str = "numeric", *,
     return md
 
 
-def postprocess_page(md: str, *, footnotes: str | None = "numeric") -> str:
+def postprocess_page(md: str, *, footnotes: str | None = "numeric",
+                     same_line: bool = False) -> str:
     """Footnote-only per-page pass. ``footnotes`` = ``numeric`` | ``alphabetic``
     | None. Header/footer are handled by ``postprocess_mistral_page`` from the
     engine's API fields (no markdown heuristic)."""
     if footnotes:
-        md = convert_footnotes(md, footnotes)
+        md = convert_footnotes(md, footnotes, same_line=same_line)
     return md
 
 
@@ -261,7 +331,8 @@ def _split_defs(text: str) -> tuple[str, str]:
 
 def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
                              headers: bool = True,
-                             mapping: "dict[str, str] | None" = None) -> str:
+                             mapping: "dict[str, str] | None" = None,
+                             same_line: bool = False) -> str:
     """One raw Mistral page → post-processed markdown. Applied at **markdown
     export** time (``md_export.write_markdown``), NOT at OCR import — so
     re-exporting a project always reflects the current toggles and code without
@@ -283,7 +354,8 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
     carries the original number.
     """
     if footnotes in ("numeric", "alphabetic"):
-        md = convert_footnotes(md, footnotes, mapping=mapping)
+        md = convert_footnotes(md, footnotes, mapping=mapping,
+                               same_line=same_line)
     if not isinstance(page, dict):
         return md
 
@@ -294,7 +366,10 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
         if not text:
             continue
         if footnotes in ("numeric", "alphabetic"):
-            text = convert_footnotes(text, footnotes, mapping=mapping)
+            # The footer is where Mistral puts the DEFINITIONS, so this is the
+            # field the same-line split actually acts on.
+            text = convert_footnotes(text, footnotes, mapping=mapping,
+                                     same_line=same_line)
         d, rest = _split_defs(text)
         if d:
             defs.append(d)
@@ -315,14 +390,16 @@ def postprocess_mistral_page(md: str, page, *, footnotes: str = "numeric",
     return "\n\n".join(parts)
 
 
-def mistral_settings() -> tuple[str, bool]:
-    """(footnotes_mode, wrap_headers) from the config DB — the Markdown export
-    card toggles. Best-effort; defaults ``("numeric", True)``. Read at export
-    time by ``md_export.write_markdown``."""
+def mistral_settings() -> tuple[str, bool, bool]:
+    """(footnotes_mode, wrap_headers, same_line) from the config DB — the
+    Markdown export card toggles. Best-effort; defaults
+    ``("numeric", True, False)``. Read at export time by
+    ``md_export.write_markdown``."""
     try:
         from aglaia.app_data import db as _cfg
         with _cfg.session() as _c:
             return (str(_cfg.get(_c, _cfg.KEY_MISTRAL_FOOTNOTES, "numeric")),
-                    bool(_cfg.get(_c, _cfg.KEY_MISTRAL_HEADERS, True)))
+                    bool(_cfg.get(_c, _cfg.KEY_MISTRAL_HEADERS, True)),
+                    bool(_cfg.get(_c, _cfg.KEY_MISTRAL_SAME_LINE, False)))
     except Exception:
-        return "numeric", True
+        return "numeric", True, False
