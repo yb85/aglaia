@@ -71,3 +71,37 @@ def test_real_keystone_is_preserved():
     quad, _ = res
     # still converging — not flattened to a rectangle
     assert abs(_left_tilt(quad) - _right_tilt(quad)) > 0.8
+
+
+def _bl_tilted(xl, xr, y, tan_base):
+    """A baseline whose right endpoint drops by `tan_base` × width — i.e. a
+    page whose text lines are genuinely tilted, not level."""
+    w = float(xr) - float(xl)
+    return (np.array([float(xl), float(y)]),
+            np.array([float(xr), float(y) + tan_base * w]))
+
+
+def test_sheared_page_keeps_its_margin_tilt():
+    """A SHEARED page must keep the margins the estimator actually found.
+
+    The de-rotate above rests on "the page was deskewed upstream, so level
+    baselines are ground truth". That premise fails exactly when `pages_deskew`
+    returns 0 on a fanned page (its projection profile has no peak): the
+    baselines keep their tilt, and margins disagreeing with them are REAL
+    shear, not invented rotation. Un-gated, the de-rotate forced the sides onto
+    the baseline angle — flat text lines, sheared verticals, and the quad
+    corner ~100 px off the ink.
+
+    Geometry is the field case (iOS scan 8 B, verified against the desktop
+    reference byte-for-byte): baselines ≈ −2°, left margin drifting +0.03
+    going down, sides near-parallel.
+    """
+    bls = [_bl_tilted(60 + 0.03 * (y - 700.0), 60 + 0.03 * (y - 700.0) + 1100.0,
+                      y, -0.035)
+           for y in (120.0 + 60 * i for i in range(20))]
+    res = detect_column_quad_from_baselines(bls, ransac_trials=200)
+    assert res is not None
+    quad, _ = res
+    # tan 0.03 ≈ 1.7°; require the sides to follow the drift, not flatten.
+    assert _left_tilt(quad) > 0.86, f"left edge lost the shear: {_left_tilt(quad):.2f}°"
+    assert _right_tilt(quad) > 0.86, f"right edge lost the shear: {_right_tilt(quad):.2f}°"
