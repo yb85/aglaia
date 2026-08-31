@@ -152,7 +152,15 @@ cloud = [
     # Credential Locker / Linux Secret Service), with a plaintext
     # APP_DATA/.env fallback when no keychain backend is available
     # (headless Linux/Windows).
-    "mistralai>=1.0.0",
+    # PINNED <2: the 2.x SDK is a restructure, not an API bump — the top-level
+    # `mistralai` became a NAMESPACE package (no __init__), so
+    # `from mistralai import Mistral` fails with the tell-tale
+    # "cannot import name 'Mistral' from 'mistralai' (unknown location)".
+    # `Mistral` moved to `mistralai.client`, and the surface this code uses
+    # (files.upload / get_signed_url / download, ocr.process,
+    # batch.jobs.create|get|cancel|list) needs re-verifying against a PAID API
+    # before we can move. Lift the ceiling only with that done.
+    "mistralai>=1.0.0,<2",
     "keyring>=24.0.0",
 ]
 # Optional `keyring` backends — install one to keep the Mistral key in a
