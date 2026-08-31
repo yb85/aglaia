@@ -4,7 +4,9 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0rc4] — 2026-08-31
+
+Point release: cloud OCR was broken in every rc3 artifact.
 
 ### Fixed
 
@@ -26,8 +28,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fires in CI, which is where a future `uv lock --upgrade` would reintroduce
   this.
 
-  Only source installs were affected; the released DMG does not bundle the
-  `cloud` extra.
+  **All rc3 artifacts were affected** — the DMG, the Windows installer and
+  the AppImage all ship the `cloud` extra, so every one of them bundled the
+  broken 2.9.4. rc4 exists to replace them.
 
 ## [0.1.0rc3] — 2026-08-30
 
