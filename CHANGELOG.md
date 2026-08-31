@@ -4,6 +4,31 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Cloud OCR (Mistral) broken by a dependency upgrade.** `uv lock --upgrade`
+  in the 0.1.0rc3 cycle moved `mistralai` 1.5.2 → 2.9.4, which is a
+  restructure rather than an API bump: the top-level `mistralai` became a
+  **namespace package** (no `__init__.py`) and `Mistral` moved to
+  `mistralai.client`. Every run failed with
+  `ImportError: cannot import name 'Mistral' from 'mistralai' (unknown
+  location)`. Pinned to `<2` — the 1.x surface this code calls
+  (`files.upload` / `get_signed_url` / `download`, `ocr.process`,
+  `batch.jobs.create|get|cancel|list`) all needs re-verifying against a paid
+  API before the ceiling can be lifted.
+
+  Nothing caught it because cloud OCR needs a paid key and is never exercised
+  in CI. Added `tests/workers/test_mistral_sdk_contract.py`: key-free,
+  network-free checks that the SDK is shaped the way the code calls it, plus a
+  guard on the pin itself — the latter runs without the `cloud` extra, so it
+  fires in CI, which is where a future `uv lock --upgrade` would reintroduce
+  this.
+
+  Only source installs were affected; the released DMG does not bundle the
+  `cloud` extra.
+
 ## [0.1.0rc3] — 2026-08-30
 
 A dewarp cycle: the sheet fit is ~100× faster and measurably straighter, the
