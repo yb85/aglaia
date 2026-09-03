@@ -45,12 +45,13 @@ class PageOption(AbstractProcessorOption):
     # Apple Vision only: smallest detectable text as a fraction of image
     # height. Lower = catches small running heads / page numbers. 0 = default.
     min_text_height: float = 0.01
-    # Reject pages whose pixel dynamic range is below this fraction of
-    # the MAX range across all merged pages in the same scan.
-    # Polarity-agnostic, robust to global contrast variation, and works
-    # for sparse text (one-line bboxes still span ink-to-paper range):
-    #   range_i  = p95 - p5 inside page i
+    # Reject pages whose INK dynamic range is below this fraction of the
+    # MAX range across all merged pages in the same scan. Polarity-agnostic
+    # and robust to global contrast variation:
+    #   range_i  = p95 - p5 under page i's detection boxes
     #   relative = range_i / max(range_j)
+    # Measured under the BOXES, not over the page bbox — see `ink_contrast`,
+    # where the bbox measure is a density proxy that deletes sparse pages.
     # Single-page scans always normalise to 1.0 → never dropped.
     # Well-lit pages sit > 0.7, but a real page in the gutter shadow / under
     # uneven lighting can dip to ~0.6 (e.g. a 2-page spread where one side is
@@ -144,6 +145,41 @@ def xy_cut(boxes, *, page_w, min_gap_frac=0.02):
               max(x[2] for x in g), max(x[3] for x in g))
              for g in groups if g]
     return sorted(rects, key=lambda r: r[0])
+
+def ink_contrast(gray, pages, boxes):
+    """Per-page ink contrast, each relative to the strongest page: a list of
+    floats in [0, 1], one per rect in `pages`.
+
+    The measure is `p95 - p5` of the grayscale pixels UNDER THE PAGE'S
+    DETECTION BOXES. Polarity-agnostic — it reads the spread between ink and
+    the paper immediately around it, whichever is darker — and it is what
+    tells a bleed-through ghost from a real page: a ghost is pale WHERE ITS
+    INK IS.
+
+    Measuring over the page's whole bbox instead, as this did until 2026-09,
+    turned it into a density proxy. A sparse layout is mostly paper, so p5
+    lands on paper too and the range collapses however black the ink: a title
+    page, two chapter openings and two chronology date columns were deleted
+    on `delbrel-oc9` at 0.12-0.35, where the ink measure puts the worst page
+    of the whole book at 0.68.
+    """
+    g_h, g_w = gray.shape[:2]
+    ranges = []
+    for (lx1, ly1, lx2, ly2) in pages:
+        px = [gray[max(0, b[1]):min(g_h, b[3]),
+                   max(0, b[0]):min(g_w, b[2])].ravel()
+              for b in boxes
+              if lx1 <= (b[0] + b[2]) / 2 <= lx2
+              and ly1 <= (b[1] + b[3]) / 2 <= ly2]
+        px = [a for a in px if a.size]
+        if not px:
+            ranges.append(0.0)
+            continue
+        p5, p95 = np.percentile(np.concatenate(px), (5, 95))
+        ranges.append(float(p95 - p5))
+    top = max(ranges) if ranges else 0.0
+    return [(r / top) if top > 0.0 else 1.0 for r in ranges]
+
 
 def tighten_x(inner, *, rect_x, gap_frac=0.10,
               spine_side=None, gutter_x=None):
@@ -400,10 +436,10 @@ class PageDetector(AbstractImageProcessor):
                               "page crop would otherwise clip. 0 = Vision's default (~0.03).",
                               advanced=True),
         "min_contrast": _f(0.5, 0.0, 1.0, 0.05,
-                           "Drop pages whose (p95−p5) pixel range is below this fraction "
-                           "of the max across all merged pages in the scan. Well-lit pages "
-                           "> 0.7, dim/shadowed-but-real pages ~0.6; bleed-through < 0.5. "
-                           "0 = disabled."),
+                           "Drop pages whose (p95−p5) range UNDER THEIR DETECTION BOXES "
+                           "is below this fraction of the max across all merged pages in "
+                           "the scan. Well-lit pages > 0.7, dim/shadowed-but-real pages "
+                           "~0.6; bleed-through < 0.5. 0 = disabled."),
         "gutter_min_frac": _f(0.02, 0.005, 0.2, 0.005,
                               "XY-cut: minimum vertical whitespace-gutter width (as a "
                               "fraction of page width) to split columns/pages. Below "
@@ -593,27 +629,25 @@ class PageDetector(AbstractImageProcessor):
         pages.sort(key=lambda b: b[0])
 
         # Contrast filter — HARD DROP at the page level (post-merge).
-        # Metric: (p95 - p5) of grayscale pixels inside the page,
-        # normalised by the max across all pages in the scan. Works for
-        # sparse text (a tight bbox around one line still spans ink-to-paper)
-        # and is polarity-agnostic. Layouts whose rel_range falls below
+        # Metric: (p95 - p5) of the grayscale pixels UNDER THE PAGE'S
+        # DETECTION BOXES, normalised by the max across all pages in the
+        # scan. Polarity-agnostic. Layouts whose rel_range falls below
         # `min_contrast` are removed before smart_merge runs — kills
         # bleed-through ghosts that would otherwise survive even an
         # absorption-friendly merge pass.
+        #
+        # Measuring over the page's whole BBOX instead, as this did until
+        # 2026-09, made the metric a density proxy: a sparse layout is
+        # mostly paper, so p5 lands on paper too and the range collapses
+        # however black its ink. It deleted real content on 5 of the 141
+        # spreads of `delbrel-oc9` — a title page, two chapter openings and
+        # two chronology date columns, scoring 0.12-0.35 — while under the
+        # ink metric the worst page of the whole book scores 0.68. A
+        # bleed-through ghost is pale WHERE ITS INK IS, which is exactly
+        # what the box pixels measure and the bbox pixels dilute.
         if pages and self.min_contrast > 0.0 and len(pages) > 1:
             gray = img_cv if img_cv.ndim == 2 else cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-            ranges = []
-            for (lx1, ly1, lx2, ly2) in pages:
-                lx1c = max(0, int(lx1)); ly1c = max(0, int(ly1))
-                lx2c = min(gray.shape[1], int(lx2)); ly2c = min(gray.shape[0], int(ly2))
-                if lx2c <= lx1c or ly2c <= ly1c:
-                    ranges.append(0.0)
-                    continue
-                roi = gray[ly1c:ly2c, lx1c:lx2c]
-                p5, p95 = np.percentile(roi, (5, 95))
-                ranges.append(float(p95 - p5))
-            max_range = max(ranges) if ranges else 0.0
-            rels = [(r / max_range) if max_range > 0.0 else 1.0 for r in ranges]
+            rels = ink_contrast(gray, pages, boxes)
             kept = []
             dropped = []
             for (lay, rel) in zip(pages, rels):
