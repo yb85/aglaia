@@ -31,6 +31,7 @@ cleared so there's a single source of truth.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from . import app_data_dir
@@ -162,15 +163,27 @@ def _env_file_clear(key: str) -> None:
         _write_env_file(values)
 
 
+def keychain_read_prompts() -> bool:
+    """True when READING a keychain item can pop a system password prompt.
+
+    macOS only. The Keychain asks the user to authorise each application the
+    first time it reads an item, so a UI must not probe before the user has
+    engaged the feature. The Linux Secret Service and the Windows Credential
+    Locker hand the item back silently once the session is unlocked — which
+    it is, from login — so deferring the probe there only hides a key that is
+    in fact stored.
+    """
+    return sys.platform == "darwin"
+
+
 def mistral_key_location(*, include_keychain: bool = True) -> str:
     """Where the key currently resolves from — for UI status. One of
     ``"env"`` (process env), ``"keychain"``, ``"env_file"``, or ``""``.
 
     ``include_keychain=False`` checks only the env var + ``.env`` file and
-    NEVER touches the OS keychain. Reading a keychain item the app isn't yet
-    trusted for pops a system-password prompt, so the GUI calls this with
-    ``include_keychain=False`` at startup (no surprise prompt) and only probes
-    the keychain once the user actively engages Cloud OCR."""
+    NEVER touches the OS keychain. Callers pass it where a prompt would be
+    unwelcome — see `keychain_read_prompts`, which says whether reading can
+    prompt at all on this platform."""
     if os.environ.get(ENV_MISTRAL, "").strip():
         return "env"
     if _read_env_file().get(ENV_MISTRAL, "").strip():

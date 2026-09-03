@@ -182,6 +182,14 @@ Engine cards:
   Optional password-manager backends: `uv sync --extra keyring-bitwarden` /
   `--extra keyring-1password` (keyring auto-discovers them).
 
+  *Key status line* — the card says where the key resolves from. Reading a
+  keychain item pops a system password prompt on **macOS only**
+  (`secrets.keychain_read_prompts`), so there the card probes the keychain
+  only once the user engages Cloud OCR, and shows a neutral hint until then.
+  On Linux (Secret Service) and Windows (Credential Locker) the read is
+  silent, so the card probes at startup — deferring there only hid a key that
+  was stored.
+
 **Gating** (`aglaia/workers/ocr/apple_caps.py`): not macOS → both Apple cards
 disabled ("macOS only"); macOS pre-26 → only the Document card disabled
 ("Requires macOS 26+"); macOS 26+ → both enabled. If the default card ends up

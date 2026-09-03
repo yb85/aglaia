@@ -76,3 +76,16 @@ def test_env_file_ignores_comments_and_blanks(sec, tmp_path):
     (tmp_path / ".env").write_text(
         "# a comment\n\nMISTRAL_API_KEY = \"sk-quoted\"\nOTHER=1\n")
     assert sec.get_mistral_api_key() == "sk-quoted"
+
+
+# ── keychain probe policy ─────────────────────────────────────────────
+
+def test_keychain_read_prompts_only_on_macos(sec, monkeypatch):
+    """Only the macOS Keychain asks the user to authorise a reading app. The
+    Linux Secret Service and the Windows Credential Locker answer silently
+    once the session is unlocked, so a UI that defers the probe there hides a
+    key that is in fact stored — which is how a stored key looked missing on
+    Linux for a whole session."""
+    for plat, prompts in (("darwin", True), ("linux", False), ("win32", False)):
+        monkeypatch.setattr(sec.sys, "platform", plat)
+        assert sec.keychain_read_prompts() is prompts

@@ -833,16 +833,24 @@ class OcrTab(QWidget):
         """Update the cloud-key status line.
 
         ``probe_keychain`` defaults to False so the common path (startup,
-        engine seeding) never reads the OS keychain — that read pops a system
-        password prompt the user hasn't asked for. We probe the keychain only
-        when the user actively engages Cloud OCR (picks the cloud engine, or
-        opens the key dialog). Until then, a key that lives only in the
-        keychain shows as a neutral 'click to check' hint rather than a prompt."""
+        engine seeding) never reads the OS keychain — on macOS that read pops
+        a system password prompt the user hasn't asked for. There we probe
+        only when the user actively engages Cloud OCR (picks the cloud engine,
+        or opens the key dialog), and until then a key that lives only in the
+        keychain shows as a neutral 'click to check' hint.
+
+        Everywhere else the read is silent (`keychain_read_prompts`), so the
+        deferral buys nothing and costs the truth: a session that STARTS on
+        Cloud OCR never engages it — `_on_engine_picked` only fires on a real
+        switch — so the hint stood for the whole session over a key that was
+        there all along."""
         lbl = getattr(self, "_cloud_key_status", None)
         if lbl is None:
             return
         try:
-            from aglaia.app_data.secrets import mistral_key_location
+            from aglaia.app_data.secrets import (keychain_read_prompts,
+                                                 mistral_key_location)
+            probe_keychain = probe_keychain or not keychain_read_prompts()
             where = mistral_key_location(include_keychain=probe_keychain)
         except Exception:
             where = ""
