@@ -570,6 +570,17 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._scans_scroll = scroll
+        # "Stick to the newest card" latch: `_spawn_widget` arms it for
+        # SCANS_PIN_BOTTOM_MS, and while it's up any scrollbar-range growth
+        # re-pins to the bottom. See `_on_scans_range_changed` for why the
+        # deferred setValue alone misses a card that opens a new row.
+        self._scans_pin_bottom = False
+        self._scans_pin_timer = QTimer(self)
+        self._scans_pin_timer.setSingleShot(True)
+        self._scans_pin_timer.timeout.connect(
+            lambda: setattr(self, "_scans_pin_bottom", False))
+        scroll.verticalScrollBar().rangeChanged.connect(
+            self._on_scans_range_changed)
         from aglaia.gui.FlowLayout import FlowLayout, FlowContentWidget
         self.scroll_content = FlowContentWidget()
         self.scroll_content.card_dropped.connect(self._on_card_dropped)
@@ -1015,13 +1026,37 @@ class MainWindow(QMainWindow):
         self.scan_widgets_by_scan[scan_id] = widget
         self.history.append(scan_id)
         # FlowLayout needs to lay out the new row before the scrollbar
-        # range updates — defer the scroll-to-bottom by one event loop.
+        # range updates — defer the scroll-to-bottom by one event loop, and
+        # latch so the range-growth path catches the new-row case too.
+        self._scans_pin_bottom = True
+        self._scans_pin_timer.start(self.SCANS_PIN_BOTTOM_MS)
         QTimer.singleShot(0, self._scroll_scans_to_bottom)
         return widget
 
     def _scroll_scans_to_bottom(self):
         bar = self._scans_scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
+
+    SCANS_PIN_BOTTOM_MS = 400
+    """How long after a card is spawned the scans grid keeps following the
+    bottom. Long enough to cover the layout passes triggered by the new card
+    (including the thumbnail that sets its final height), short enough that a
+    user who then scrolls up is left alone."""
+
+    def _on_scans_range_changed(self, _lo: int, hi: int) -> None:
+        """Finish a pending scroll-to-newest once the range has grown.
+
+        `insertWidget` only invalidates the FlowLayout; the scroll host's
+        heightForWidth — and so the scrollbar's maximum — is recomputed in a
+        posted layout pass. When the new card lands on the CURRENT row the
+        range doesn't move and the deferred `setValue(maximum())` lands it;
+        when it opens a NEW ROW that setValue runs against the pre-growth
+        maximum and silently does nothing — the reported symptom. So follow
+        the range while the post-spawn latch is up.
+        """
+        if not getattr(self, "_scans_pin_bottom", False):
+            return
+        self._scans_scroll.verticalScrollBar().setValue(hi)
 
     def _open_debug_viewer(self, node_id: int, label: str):
         """Open a debug viewer for `node_id` as a new closable tab.
@@ -3040,7 +3075,13 @@ class MainWindow(QMainWindow):
                 pass
         elif mode == "gallery" and self._scans_gallery is not None:
             try:
-                self._scans_gallery.reload()
+                # A brand-new scan is what the user wants to look at — the
+                # gallery showing only one scan at a time otherwise stays
+                # parked on whatever was focused and the capture looks lost.
+                # `jump_to_latest` also puts the gallery in follow mode, so it
+                # advances through the stages as this scan's nodes land
+                # (see ScansGalleryView.reload).
+                self._scans_gallery.reload(jump_to_latest=True)
             except Exception:
                 pass
 
@@ -3067,9 +3108,11 @@ class MainWindow(QMainWindow):
             self._scans_table.refresh()
         elif mode == "gallery" and self._scans_gallery is not None:
             # Preserve the user's current focus across background events
-            # (scan_imported, branch_ready). Yanking them to the newest
-            # scan mid-review is annoying. `reload()` without
-            # `jump_to_latest` keeps `prev_scan` + `prev_stage`.
+            # (branch_ready, OCR). Yanking them to the newest scan
+            # mid-review is annoying. `reload()` without `jump_to_latest`
+            # keeps `prev_scan` + `prev_stage` — unless the gallery is still
+            # following a just-captured scan, in which case it advances that
+            # scan's stage as nodes land (see ScansGalleryView.reload).
             # `invalidate_nodes`: branch_ready means a (re)processed scan
             # just landed new node ids — drop the cached node_ids so the
             # per-stage toggle doesn't point at a dead node.

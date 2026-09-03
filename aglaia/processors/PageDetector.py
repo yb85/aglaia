@@ -26,6 +26,13 @@ class PageOption(AbstractProcessorOption):
     # works at ANY value, independent of margin_mm — raise it when a tight
     # detector (DBnet) would otherwise clip the page margins. In the editor.
     roi_margin_mm: float = 4.0
+    # Shape of the ROI polygon handed downstream: True = convex hull of the
+    # page's text boxes (dilated by roi_margin_mm), False = axis-aligned
+    # bounding rect. The hull matches the iOS app and is what you want on a
+    # slanted / perspective capture: the bounding rect of a rotated text
+    # block swallows the corners, which is exactly where the fingers
+    # holding the book sit. See `process`.
+    roi_hull: bool = True
     max_pages: int = 2
     # When more pages than max_pages are found: "merge" them into one
     # (default), or "discard" the extras (keep the largest) — single-page
@@ -306,7 +313,8 @@ class PageDetector(AbstractImageProcessor):
     REPLAY_TRAIT = ReplayTrait.ROI  # crop + branch → fixed barrier / source anchor
     OPTION_CLASS = PageOption
     PROVIDES_META = {
-        "roi": "detected page polygon [[x,y],...] in the child's coords",
+        "roi": "page polygon [[x,y],...] in the child's coords — convex "
+               "hull of the text boxes when roi_hull, else the bbox",
         "page_side": "'left' | 'right' for a split 2-page spread",
         "parent_crop_xywh": "[x,y,w,h] of this child's bbox in parent coords",
     }
@@ -319,6 +327,13 @@ class PageDetector(AbstractImageProcessor):
                             "hard-erases outside this ROI. Raise it to keep wider "
                             "margins; works at any value (the crop adds margin_mm "
                             "of masked halo on top)."),
+        "roi_hull": _b(True,
+                       "ROI shape: on = convex hull of the page's text boxes "
+                       "(dilated by roi_margin_mm), off = axis-aligned "
+                       "bounding rect. The hull is tighter on a slanted / "
+                       "perspective capture, where a rect swallows the "
+                       "corners — and with them the fingers holding the book. "
+                       "The Binarizer erases everything outside it."),
         "max_pages": _i(2, 0, 8,
                           "Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap)."),
         "over_cap": _e("merge", ["merge", "discard"],
@@ -393,6 +408,7 @@ class PageDetector(AbstractImageProcessor):
             self.detector.min_text_height = float(getattr(options, "min_text_height", 0.01))
         self.margin_mm = options.margin_mm
         self.roi_margin_mm = options.roi_margin_mm
+        self.roi_hull = bool(getattr(options, "roi_hull", True))
         self.max_pages = options.max_pages
         self.over_cap = str(getattr(options, "over_cap", "merge"))
         self.rescale_threshold = options.rescale_threshold
@@ -404,6 +420,71 @@ class PageDetector(AbstractImageProcessor):
         self.merge_width_weight = float(getattr(options, "merge_width_weight", 0.6))
         self.merge_gap_norm_cap = float(getattr(options, "merge_gap_norm_cap", 0.15))
         self.uses_gpu = bool(getattr(self.detector, "uses_gpu", False))
+
+    # Hull dilation is capped at 2 mm all round, even when roi_margin_mm is
+    # larger. Ported from iOS (`PageDetector.swift`, user call 2026-07-11):
+    # DBnet boxes hug the ink far tighter than Vision's line boxes, so a
+    # smaller pad was clipping ascenders/descenders at the hull edge, while a
+    # larger one gives back the corner area the hull exists to remove. The
+    # rect path keeps the full roi_margin_mm.
+    HULL_PAD_MM = 2.0
+
+    @staticmethod
+    def _hull_roi(boxes, *, rect, pad: float, crop, clamp_to):
+        """Convex hull of the text boxes inside `rect`, dilated by `pad`,
+        expressed in the child's (cropped) coordinates.
+
+        The axis-aligned bbox is the wrong ROI shape for a page that isn't
+        shot square-on: a text block photographed at an angle, or bent, has
+        its corners far outside the printed area, and that is precisely where
+        the fingers holding the book — or the facing page, or a dark paper
+        edge — show up. (On iOS those corners were observed surviving the
+        Wolf wipe.) The hull hugs the text outline instead, so the Binarizer
+        erases them.
+
+        Dilation is exact rather than a centroid-outward nudge: growing every
+        box by `pad` on all four sides and re-hulling yields
+        ``hull(boxes) ⊕ square(pad)`` (the hull of a Minkowski sum is the
+        Minkowski sum of the hull), so no vertex is under-padded and sharp
+        corners can't blow up the way a miter offset would.
+
+        `clamp_to` is the rect ROI as (x1, y1, x2, y2) in child coords; the
+        hull is clamped into it, so this can only ever tighten the ROI.
+        Returns `None` when there is too little to hull and the caller should
+        keep the rect. Mirrors iOS `PageDetector.swift`'s `hullROI` branch.
+        """
+        rx1, ry1, rx2, ry2 = rect
+        members = [b for b in boxes
+                   if rx1 <= (b[0] + b[2]) / 2 <= rx2
+                   and ry1 <= (b[1] + b[3]) / 2 <= ry2]
+        if len(members) < 3:
+            # Under 3 boxes the hull is a segment or a single padded box —
+            # no better than the rect, which is already clamped to the image.
+            return None
+        cx1, cy1 = crop[0], crop[1]
+        lo_x, lo_y, hi_x, hi_y = clamp_to
+        corners = np.empty((len(members) * 4, 2), dtype=np.float32)
+        for i, (bx1, by1, bx2, by2) in enumerate(members):
+            # Clamp each box INTO the tight bounds before dilating, so a box
+            # poking past them (the horizontal outlier trim, the running-head
+            # band) can't drag the hull back out over what was trimmed.
+            x0 = max(float(rx1), float(bx1)) - pad
+            x1 = min(float(rx2), float(bx2)) + pad
+            y0 = max(float(ry1), float(by1)) - pad
+            y1 = min(float(ry2), float(by2)) + pad
+            corners[i * 4:i * 4 + 4] = (
+                (x0, y0), (x1, y0), (x1, y1), (x0, y1),
+            )
+        hull = cv2.convexHull(corners)
+        if hull is None or len(hull) < 3:
+            return None
+        # cv2's default (clockwise=False, y-up) is clockwise in image
+        # coords — the same winding as the rect path's TL,TR,BR,BL, which
+        # `cv2.intersectConvexConvex` in `process` relies on.
+        pts = hull.reshape(-1, 2).astype(float)
+        pts[:, 0] = np.clip(pts[:, 0] - cx1, lo_x, hi_x)
+        pts[:, 1] = np.clip(pts[:, 1] - cy1, lo_y, hi_y)
+        return pts.tolist()
 
     def process(self, input_buf: ImageBuffer) -> ImageBuffer:
         if not self.detector:
@@ -649,6 +730,17 @@ class PageDetector(AbstractImageProcessor):
                 [float(roi_x2), float(roi_y2)],
                 [float(roi_x1), float(roi_y2)],
             ]
+            if self.roi_hull:
+                hull = self._hull_roi(
+                    boxes,
+                    rect=(tight_lx1, tight_ly1, tight_lx2, tight_ly2),
+                    pad=min(float(roi_pad),
+                            (self.HULL_PAD_MM / 25.4) * dpi),
+                    crop=(fx1, fy1, fx2, fy2),
+                    clamp_to=(roi_x1, roi_y1, roi_x2, roi_y2),
+                )
+                if hull is not None:
+                    child_roi = hull
             if parent_roi := input_buf.meta.get("roi"):
                 # Intersect text-tight child_roi (in child coords) with
                 # parent_roi (translated to child coords). The previous code

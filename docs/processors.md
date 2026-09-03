@@ -87,13 +87,15 @@ Apple Vision text detection → merge overlapping x-spans → optional reduce-to
 2. The configured `LayoutBackend` (`auto` → `apple_vision` on macOS) `.detect(img)` returns bounding boxes.
 3. `smart_merge(boxes)` merges horizontally overlapping / close boxes into column groups, scored by the `merge_*` weights.
 4. If `max_pages > 0` and result count exceeds it, the `over_cap` strategy reduces the surplus: `"merge"` folds the best-scoring pair together (default), while `"discard"` drops the smallest page. Single-page modes (`sheet`, `book_flat_x1`) use `over_cap: discard` so marginal text bleeding in from a facing page is thrown away rather than merged into the kept page. Genuine over-splits scoring ≥ `merge_threshold` always merge regardless of strategy.
-5. For each page, crop the original image with `margin_mm` margin, build a child `ImageBuffer`. Intersect the parent's `meta["roi"]` polygon with the crop rect via `cv2.intersectConvexConvex` and propagate the result.
+5. For each page, crop the original image with `margin_mm` margin, build a child `ImageBuffer`. Intersect the parent's `meta["roi"]` polygon with the child ROI via `cv2.intersectConvexConvex` and propagate the result.
+6. The child ROI — the region the downstream `Binarizer` KEEPS, everything outside it is erased — is the page's text boxes dilated by `roi_margin_mm`. With `roi_hull` (default) that's their **convex hull**; with it off, their axis-aligned bounding rect. Prefer the hull on any capture that isn't shot square-on: a text block photographed at an angle has its corners well outside the printed area, and that is exactly where the fingers holding the book, or the facing page, appear. Dilation is exact — every box is grown by the pad and the corners re-hulled, which is `hull(boxes) ⊕ square(pad)` — so no vertex is under-padded and a sharp corner can't blow up the way a miter offset would. The hull is always a subset of the padded bbox, so turning it on can only tighten the ROI.
 7. Returns `input_buf.children` (list of buffers). The chain re-injects each child into the pipeline starting at the next step and prunes the parent file from output.
 
 ```yaml
 options:
   margin_mm: 2.0           # crop margin around each page bbox
   roi_margin_mm: 4.0       # ROI padding for the Binarizer; raise if margins clip
+  roi_hull: true           # ROI = convex hull of the text boxes (false = bbox)
   max_pages: 2           # 0 = infinity
   over_cap: merge          # over-cap reduction: merge | discard (drop smallest)
   processing_dpi: 150.0    # null = no downscale

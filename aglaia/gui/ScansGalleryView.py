@@ -141,6 +141,13 @@ class ScansGalleryView(QWidget):
         self._stages: list[str] = ["raw"]
         self._scan_idx: int = 0
         self._stage_idx: int = 0
+        # scan_id the view is FOLLOWING: set by `reload(jump_to_latest=True)`
+        # when a freshly captured scan lands, cleared as soon as the user
+        # navigates. While set, a same-scan refresh re-picks the stage instead
+        # of holding the current one, so the view walks raw → … → output as
+        # the pipeline fills the scan in. Without it a new scan would be shown
+        # at `raw` and stay there (the no-yank rule below would pin it).
+        self._follow_scan: Optional[int] = None
         # Strong focus so arrow keys / WASD route here when the user
         # tabs in or clicks the view.
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -228,18 +235,31 @@ class ScansGalleryView(QWidget):
                 else max(0, len(self._scans) - 1)
         else:
             self._scan_idx = 0
-        # Stage focus. On a *same-scan* refresh (toggle rerun, branch_ready,
-        # thumb-ready — the focused scan id didn't change) keep the user on
-        # the stage they're viewing; otherwise yanking back to the DB-chosen
-        # output (replay) on every background event makes stage navigation
-        # and the disable toggle unusable. Only consult the default-stage
-        # provider when the focused scan actually changed (scan switch /
-        # jump-to-latest / first load).
         new_scan = self._scans[self._scan_idx][0] if self._scans else None
-        same_scan = (prev_scan is not None and new_scan == prev_scan
-                     and not jump_to_latest)
-        self._stage_idx = self._pick_default_stage(prev_stage,
-                                                   prefer_prev=same_scan)
+        if jump_to_latest:
+            self._follow_scan = new_scan
+        elif new_scan != prev_scan:
+            self._follow_scan = None
+        # Stage focus, three cases:
+        #
+        # * FOLLOWING a just-captured scan — re-pick every refresh, ignoring
+        #   the stage we happen to be on. A new scan only has `raw` when it
+        #   first appears; holding that stage would leave the view stuck on
+        #   the unprocessed photo for the rest of the session. Passing
+        #   prev_stage=None skips the "preserve current stage" rule so this
+        #   walks forward to the last stage that has a node.
+        # * Same-scan refresh (toggle rerun, branch_ready, thumb-ready — the
+        #   focused scan id didn't change) — hold the stage the user is on;
+        #   yanking back to the DB-chosen output on every background event
+        #   makes stage navigation and the disable toggle unusable.
+        # * Scan actually changed — consult the default-stage provider.
+        if new_scan is not None and self._follow_scan == new_scan:
+            self._stage_idx = self._pick_default_stage(None, prefer_prev=False)
+        else:
+            same_scan = (prev_scan is not None and new_scan == prev_scan
+                         and not jump_to_latest)
+            self._stage_idx = self._pick_default_stage(prev_stage,
+                                                       prefer_prev=same_scan)
         # Evict cache entries for now-missing scans.
         valid = {s[0] for s in self._scans}
         for key in list(self._cache.keys()):
@@ -282,22 +302,26 @@ class ScansGalleryView(QWidget):
         return 0
 
     def go_left(self) -> None:
+        self._follow_scan = None
         if self._stage_idx > 0:
             self._stage_idx -= 1
             self._present()
 
     def go_right(self) -> None:
+        self._follow_scan = None
         if self._stage_idx + 1 < len(self._stages):
             self._stage_idx += 1
             self._present()
 
     def go_up(self) -> None:
+        self._follow_scan = None
         if self._scan_idx > 0:
             self._scan_idx -= 1
             self._stage_idx = self._carry_stage_across_scan(self._stage_idx)
             self._present()
 
     def go_down(self) -> None:
+        self._follow_scan = None
         if self._scan_idx + 1 < len(self._scans):
             self._scan_idx += 1
             self._stage_idx = self._carry_stage_across_scan(self._stage_idx)
