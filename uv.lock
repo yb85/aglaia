@@ -37,7 +37,7 @@ wheels = [
 
 [[package]]
 name = "aglaia"
-version = "0.1.0rc3"
+version = "0.1.0rc4"
 source = { editable = "." }
 dependencies = [
     { name = "doxapy" },

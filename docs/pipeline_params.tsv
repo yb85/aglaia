@@ -10,6 +10,7 @@ PageDetector	margin_mm	bounded_float	Padding around each detected text bbox befo
 PageDetector	max_layouts	bounded_int	Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap).	false	2
 PageDetector	rescale_threshold	bounded_float	Minimum DPI scale-factor delta to trigger a resize.	false	0.01
 PageDetector	roi_margin_mm	bounded_float	ROI margin (≤ margin_mm) propagated downstream for Binarizer masking.	false	1.0
+PageDetector	roi_hull	bool	ROI shape: on = convex hull of the page's text boxes (dilated by roi_margin_mm), off = axis-aligned bounding rect. The hull is tighter on a slanted / perspective capture, where a rect swallows the corners — and with them the fingers holding the book.	false	true
 PageDetector	processing_dpi	bounded_float	Downsample to this DPI for detection; full-res used for cropping. Empty = no downscale.	false
 PageDetector	merge_threshold	bounded_float	Column-merge score cutoff for combining horizontally-overlapping boxes.	true	0.6
 PageDetector	merge_gap_weight	bounded_float	Weight of the inter-box gap term in the merge score.	true	0.4

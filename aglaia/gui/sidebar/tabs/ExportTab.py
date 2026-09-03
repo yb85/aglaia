@@ -20,7 +20,9 @@ The PDF card carries two toggles:
   ``set_ocr_layer_available()`` whenever OCR state changes.
 
 The Markdown card is disabled until OCR data is available; MainWindow
-calls ``set_markdown_available()`` whenever OCR runs land.
+calls ``set_markdown_available()`` whenever OCR runs land. While both are
+disabled, ``lbl_ocr_hint`` says why and what to do about it — a greyed-out
+control with no reason given reads as a broken app.
 
 MainWindow wires the single export click handler on ``btn_export`` and
 reads the picked format via ``format_group.current_key()``. Compression
@@ -192,6 +194,21 @@ class ExportTab(QWidget):
 
         self.format_group.set_current_key("pdf")
 
+        # ── Why-is-this-greyed-out hint ────────────────────────────
+        # The Markdown card and the PDF OCR-layer toggle both go dead
+        # without an OCR run, and a disabled control with no explanation
+        # reads as a bug. Shown only while OCR is missing; hidden the
+        # moment a layer exists (see `_set_ocr_hint`).
+        self.lbl_ocr_hint = QLabel(self.tr(
+            "Run OCR to enable Markdown export and the PDF text layer. "
+            "A batched cloud OCR only counts once its result is downloaded "
+            "— hit “Check result” in the OCR tab."
+        ))
+        self.lbl_ocr_hint.setWordWrap(True)
+        self.lbl_ocr_hint.setStyleSheet(
+            f"color: {COLOR_FONT_DIM}; font-size: 11px; padding: 2px 0 4px 0;")
+        outer.addWidget(self.lbl_ocr_hint)
+
         # ── OCR-layer selector — which engine's OCR to export ──────
         # Applies to BOTH the PDF text layer and Markdown. Hidden until at
         # least one OCR layer exists; "Latest" = the most recent layer (the
@@ -266,12 +283,17 @@ class ExportTab(QWidget):
 
     # ── MainWindow-facing API ──────────────────────────────────────
 
+    def _set_ocr_hint(self, available: bool) -> None:
+        """Show the hint only while the OCR-gated controls are disabled."""
+        self.lbl_ocr_hint.setVisible(not available)
+
     def set_markdown_available(self, available: bool) -> None:
         """Toggle Markdown card. When the active selection was Markdown
         and it just became unavailable, fall back to PDF."""
         self.format_group.set_card_enabled("markdown", available)
         if not available and self.format_group.current_key() == "markdown":
             self.format_group.set_current_key("pdf")
+        self._set_ocr_hint(available)
 
     def set_ocr_layer_available(self, available: bool) -> None:
         """OCR layer checkbox lives inside the PDF card; flip enable +
@@ -279,6 +301,7 @@ class ExportTab(QWidget):
         what the user almost always wants."""
         was_enabled = self.chk_ocr_layer.isEnabled()
         self.chk_ocr_layer.setEnabled(available)
+        self._set_ocr_hint(available)
         if not available:
             self.chk_ocr_layer.setChecked(False)
         elif not was_enabled:
