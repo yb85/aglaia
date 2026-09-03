@@ -145,6 +145,52 @@ def xy_cut(boxes, *, page_w, min_gap_frac=0.02):
              for g in groups if g]
     return sorted(rects, key=lambda r: r[0])
 
+def tighten_x(inner, *, rect_x, gap_frac=0.10,
+              spine_side=None, gutter_x=None):
+    """Horizontal bounds of one page: `(tight_x1, tight_x2)`.
+
+    Drops outlier detector boxes — a cable, a hand, the edge of a cup — that
+    intrude on the X axis. An intruder sits a large gap past the dense text
+    cluster, so walk in from each extreme and stop at the first step below
+    `gap_frac × page width`. NOT a blanket 5/95 percentile, which trimmed the
+    rightmost ~5% of legitimate justified text on clean scans.
+
+    The gap test cannot tell an intruder from a legitimate element that simply
+    stands alone: a lone date in a chronology column, a marginal note, or the
+    two longest lines of a short ragged block. What separates the two is the
+    SIDE. Hands, cup and cable come from outside the book, never from the
+    gutter — so on a two-page spread the spine side needs no gap test at all.
+    It is bounded by the crease, and `gutter_x` is where the crease is;
+    clamping there refuses anything from the facing page and keeps everything
+    of this one (#86). Single-page captures have no crease and keep the test
+    on both sides.
+
+    Under 4 boxes there is nothing to call an outlier against, so the page
+    rect stands as it is.
+    """
+    x1, x2 = rect_x
+    if len(inner) < 4:
+        return x1, x2
+    gap = gap_frac * max(1, x2 - x1)
+    if spine_side == "right" and gutter_x is not None:
+        tight_x2 = int(min(x2, gutter_x))
+    else:
+        xr = np.sort(np.array([b[2] for b in inner]))
+        i = len(xr) - 1
+        while i > 0 and xr[i] - xr[i - 1] > gap:
+            i -= 1
+        tight_x2 = int(xr[i])
+    if spine_side == "left" and gutter_x is not None:
+        tight_x1 = int(max(x1, gutter_x))
+    else:
+        xl = np.sort(np.array([b[0] for b in inner]))
+        j = 0
+        while j < len(xl) - 1 and xl[j + 1] - xl[j] > gap:
+            j += 1
+        tight_x1 = int(xl[j])
+    return tight_x1, tight_x2
+
+
 def _pair_score(a, b, *, page_w, page_h,
                 gap_weight, width_weight, gap_norm_cap,
                 contrast_bonus=0.0):
@@ -646,6 +692,7 @@ class PageDetector(AbstractImageProcessor):
         # right edge). Decided from coordinates, NOT page order — the
         # A/B suffix follows list order, which is not guaranteed sorted.
         spread_sides = None
+        spread_gutter = None
         if len(pages) == 2:
             (ax1, ay1, ax2, ay2), (bx1, by1, bx2, by2) = pages
             dx = abs((ax1 + ax2) - (bx1 + bx2)) / 2.0
@@ -654,6 +701,11 @@ class PageDetector(AbstractImageProcessor):
                 left_first = (ax1 + ax2) <= (bx1 + bx2)
                 spread_sides = (("left", "right") if left_first
                                 else ("right", "left"))
+                # The gutter between the two pages, i.e. where the crease
+                # is. It is the SPINE-side bound of both pages, so the gap
+                # trim below can stand down on that side (see the loop).
+                inner_x = ((ax2, bx1) if left_first else (bx2, ax1))
+                spread_gutter = (inner_x[0] + inner_x[1]) / 2.0
 
         def suffix_generator():
             for i in itertools.count():
@@ -665,30 +717,16 @@ class PageDetector(AbstractImageProcessor):
             suffix = next(suffixes)
             filestem = f"{base}_{suffix}"
 
-            # Tighten the page horizontally: drop outlier detector boxes
-            # (cables, hands, cup edges intruding on the X axis) via a gap test
-            # — NOT a blanket 5/95 percentile, which trimmed the rightmost ~5%
-            # of legitimate justified text on clean scans. An intruder sits a
-            # large gap past the dense text cluster; walk in from each extreme
-            # and stop at the first sub-gap step.
+            # A left page is bound on its RIGHT edge, and vice versa.
+            spine_side = None
+            if spread_sides is not None and spread_gutter is not None:
+                spine_side = "right" if spread_sides[idx] == "left" else "left"
             inner = [b for b in boxes
                      if lx1 <= (b[0] + b[2]) / 2 <= lx2
                      and ly1 <= (b[1] + b[3]) / 2 <= ly2]
-            if len(inner) >= 4:
-                page_w = max(1, lx2 - lx1)
-                gap = 0.10 * page_w
-                xr = np.sort(np.array([b[2] for b in inner]))
-                xl = np.sort(np.array([b[0] for b in inner]))
-                i = len(xr) - 1
-                while i > 0 and xr[i] - xr[i - 1] > gap:
-                    i -= 1
-                tight_lx2 = int(xr[i])
-                j = 0
-                while j < len(xl) - 1 and xl[j + 1] - xl[j] > gap:
-                    j += 1
-                tight_lx1 = int(xl[j])
-            else:
-                tight_lx1, tight_lx2 = lx1, lx2
+            tight_lx1, tight_lx2 = tighten_x(
+                inner, rect_x=(lx1, lx2),
+                spine_side=spine_side, gutter_x=spread_gutter)
             # Extend the vertical extent to include a running head above / a
             # page number below the merged body rect: boxes inside the page's
             # text column (X span) but just outside its Y span. Search a band
