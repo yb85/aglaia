@@ -410,13 +410,60 @@ def _trap_renderer(img: np.ndarray, parent: Optional[np.ndarray],
              "label": "source <-> output"}]
 
 
+def dewarp_grid_lattice(rp: dict, n_grid_x: int,
+                        n_grid_y: int) -> np.ndarray:
+    """The dewarp overlay grid, in the coordinates of the step's INPUT image.
+
+    Returns an ``(n_grid_y, n_grid_x, 2)`` lattice of pixel positions: the
+    page lattice the remap samples, projected back onto the un-padded source.
+
+    This has to mirror `PageDewarper._sample_grid` term for term. Anything it
+    feeds the projection and this does not draws a grid for a DIFFERENT
+    surface than the one that was fitted — the overlay then reads as a broken
+    dewarp although the output is correct. Two terms were being dropped: the
+    10-param camera's principal point (#60) and the fitted spine curl, worth
+    several hundred px of offset on a curled page. The twist/spline keywords
+    that stood in their place described a sheet model retired in 2026-08;
+    `project_xy_model` only swallowed them.
+    """
+    from aglaia.processors.lm_solver import SpineCurl
+    from aglaia.processors.PageDewarper import PageDewarper
+    from aglaia.processors.sheet_models import arclength_x, project_xy_model
+
+    pw, ph = float(rp["page_dims"][0]), float(rp["page_dims"][1])
+    params = np.asarray(rp["params"], dtype=np.float64)
+    focal = float(rp.get("focal_length", 1.2))
+    # Pre-#60 stamps carry neither key: the 8-param pinhole with no spine
+    # term is exactly the surface they were fitted on.
+    n_cam = int(rp.get("camera_np", 8))
+    spine = SpineCurl.from_dict(rp.get("spine"))
+    # Arc-length-uniform x, weighted toward the steep zones, as the remap
+    # builds it. Absent on pre-#70 stamps -> 0.0, i.e. plain arc length.
+    axs, asd = arclength_x(params, pw, spine=spine)
+    asd = PageDewarper._emphasise(
+        axs, asd, float(rp.get("slope_emphasis", 0.0) or 0.0))
+    gx = np.interp(np.linspace(0.0, float(asd[-1]), n_grid_x), asd, axs)
+    gy = np.linspace(0, ph, n_grid_y)
+    xs, ys = np.meshgrid(gx, gy)
+    xy = np.column_stack([xs.ravel(), ys.ravel()]).astype(np.float32)
+    proj_norm = project_xy_model(xy, params, focal_length=focal,
+                                 n_cam=n_cam, spine=spine).reshape(-1, 2)
+    # norm2pix: scale is 0.5 * max(h, w), offset is the image centre.
+    src_h, src_w = int(rp["src_shape"][0]), int(rp["src_shape"][1])
+    half_max = max(src_h, src_w) / 2.0
+    pad_px = int(rp.get("pad_px", 0))
+    pixel = np.empty_like(proj_norm)
+    pixel[:, 0] = proj_norm[:, 0] * half_max + src_w / 2.0 - pad_px
+    pixel[:, 1] = proj_norm[:, 1] * half_max + src_h / 2.0 - pad_px
+    return pixel.reshape(n_grid_y, n_grid_x, 2)
+
+
 def _dewarp_renderer(img: np.ndarray, parent: Optional[np.ndarray],
                      meta: dict) -> list[dict]:
     rp = meta.get("replay_params") or {}
     params = rp.get("params")
     page_dims = rp.get("page_dims")
     src_shape = rp.get("src_shape")
-    pad_px = int(rp.get("pad_px", 0))
 
     if parent is not None:
         src_canvas = _to_bgr(parent).copy()
@@ -532,52 +579,7 @@ def _dewarp_renderer(img: np.ndarray, parent: Optional[np.ndarray],
 
     try:
         if params and page_dims and src_shape:
-            # Model-aware projection — the library project_xy is
-            # cylindrical-only and reads the global-cfg focal (1.2 in
-            # this process): under a twist model / calibrated focal the
-            # grid was unrelated to the fitted correction.
-            from aglaia.processors.sheet_models import (arclength_x,
-                                                     project_xy_model)
-            pw, ph = float(page_dims[0]), float(page_dims[1])
-            params_arr = np.asarray(params, dtype=np.float64)
-            model = str(rp.get("sheet_model", "cylindrical"))
-            n_modes = int(rp.get("spline_modes", 0))
-            model_dims = rp.get("model_dims") or [pw, ph]
-            focal = float(rp.get("focal_length", 1.2))
-            support = rp.get("support_x")
-            support_y = rp.get("support_y")
-            support_decay = rp.get("support_decay")
-            grading = float(rp.get("knot_grading", 1.0))
-            flip = bool(rp.get("binding_flip", False))
-            if rp.get("arc_len"):
-                # Match the remap's arc-length-uniform x sampling.
-                axs, asd = arclength_x(params_arr, pw, model=model,
-                                       n_modes=n_modes,
-                                       model_dims=model_dims,
-                                       support=support,
-                                       support_decay=support_decay,
-                                       grading=grading, flip=flip)
-                gx = np.interp(np.linspace(0.0, float(asd[-1]), n_grid_x),
-                               asd, axs)
-            else:
-                gx = np.linspace(0, pw, n_grid_x)
-            gy = np.linspace(0, ph, n_grid_y)
-            xs, ys = np.meshgrid(gx, gy)
-            xy = np.column_stack([xs.ravel(), ys.ravel()]).astype(np.float32)
-            proj_norm = project_xy_model(
-                xy, params_arr, model=model, n_modes=n_modes,
-                model_dims=model_dims, focal_length=focal,
-                support=support, support_y=support_y,
-                support_decay=support_decay,
-                grading=grading, flip=flip).reshape(-1, 2)
-            src_H, src_W = int(src_shape[0]), int(src_shape[1])
-            half_max = max(src_H, src_W) / 2.0
-            cx, cy = src_W / 2.0, src_H / 2.0
-            pixel = np.empty_like(proj_norm)
-            pixel[:, 0] = proj_norm[:, 0] * half_max + cx
-            pixel[:, 1] = proj_norm[:, 1] * half_max + cy
-            pixel = pixel - np.array([pad_px, pad_px])
-            lattice = pixel.reshape(n_grid_y, n_grid_x, 2)
+            lattice = dewarp_grid_lattice(rp, n_grid_x, n_grid_y)
             for row in lattice:
                 cv2.polylines(src_canvas, [row.astype(np.int32)],
                               False, grid_color,

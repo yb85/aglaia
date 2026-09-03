@@ -679,7 +679,15 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         from page_dewarp.dewarp import norm2pix, round_nearest_multiple
 
         from aglaia.processors.sheet_models import arclength_x, project_xy_model
-        target_h = round_nearest_multiple(0.5 * page_dims_h * zoom * ref_h, decimate)
+        # `page_dims` is in norm2pix units, whose scale is 0.5 * max(h, w) —
+        # so the output height must be measured against the LONGER reference
+        # side, not against ref_h. Upstream page-dewarp used img.shape[0]
+        # here, which silently assumes a portrait crop; on a landscape one (a
+        # chapter opening, a part-title, any short page whose text block is
+        # wider than tall) it scaled the whole remap by ref_h / ref_w — a
+        # 1289x533 page came out 520x224 while still stamped 300 dpi.
+        target_h = round_nearest_multiple(
+            0.5 * page_dims_h * zoom * max(ref_h, ref_w), decimate)
         # Arc-length-uniform x grid: width sized from the sheet's arc length,
         # x samples spaced uniformly in s (else the steep gutter side comes
         # out horizontally stretched by sqrt(1+z'^2)).
