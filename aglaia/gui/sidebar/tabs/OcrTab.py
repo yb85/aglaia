@@ -653,9 +653,12 @@ class OcrTab(QWidget):
         col.setSpacing(4)
 
         if not sdk_available:
+            # The SDK is a base dependency (#139), so getting here means a
+            # damaged install rather than a missing option — say that, not
+            # "run this command to enable a feature you already have".
             hint = QLabel(self.tr(
-                "Cloud OCR needs the 'cloud' extra:\n"
-                "uv sync --extra cloud"))
+                "Aglaïa could not load the component Cloud OCR needs. "
+                "Reinstalling Aglaïa should fix it."))
             hint.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
             hint.setWordWrap(True)
             col.addWidget(hint)

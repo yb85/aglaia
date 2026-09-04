@@ -47,6 +47,7 @@ dependencies = [
     { name = "jaxlib" },
     { name = "keyring" },
     { name = "langcodes", extra = ["data"] },
+    { name = "mistralai" },
     { name = "ml-dtypes" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -66,9 +67,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-cloud = [
-    { name = "mistralai" },
-]
 cuda = [
     { name = "jax", extra = ["cuda12"] },
     { name = "optax" },
@@ -135,7 +133,7 @@ requires-dist = [
     { name = "jaxlib", specifier = ">=0.9.0" },
     { name = "keyring", specifier = ">=24.0.0" },
     { name = "langcodes", extras = ["data"], specifier = ">=3.5.1" },
-    { name = "mistralai", marker = "extra == 'cloud'", specifier = ">=1.0.0,<2" },
+    { name = "mistralai", specifier = ">=1.0.0,<2" },
     { name = "ml-dtypes", specifier = ">=0.5.4" },
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'macos'", specifier = ">=0.30" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'macos'", specifier = ">=0.28" },

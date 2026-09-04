@@ -418,7 +418,7 @@ Engine cards:
   `meta.truncated` → `OcrWorker` `fail()`s them); a Log-tab advisory tells
   the user to **run OCR again** to continue. Page mapping is positional
   (Mistral page *i* → the *i*-th selected scan). Needs the `cloud` extra
-  (`uv sync --extra cloud`) and an API key. See
+  and an API key. See
   `aglaia/workers/ocr/mistral_cloud.py`.
 
   *API key* — set via the card's **Set API key…** button (masked dialog).

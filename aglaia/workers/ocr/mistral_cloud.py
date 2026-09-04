@@ -216,8 +216,9 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
                         ) -> list[OcrResult]:
         if not self.available:
             raise RuntimeError(
-                "Cloud OCR unavailable — install the extra: "
-                "`uv sync --extra cloud` (mistralai).")
+                "Cloud OCR unavailable — the `mistralai` package would not "
+                "import. It is a base dependency, so this is a damaged "
+                "install; reinstalling Aglaïa should fix it.")
 
         from aglaia.app_data.secrets import get_mistral_api_key
         api_key = get_mistral_api_key()
@@ -267,8 +268,9 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
         truncated tail is flagged so OcrWorker keeps those pending)."""
         if not self.available:
             raise RuntimeError(
-                "Cloud OCR unavailable — install the extra: "
-                "`uv sync --extra cloud` (mistralai).")
+                "Cloud OCR unavailable — the `mistralai` package would not "
+                "import. It is a base dependency, so this is a damaged "
+                "install; reinstalling Aglaïa should fix it.")
         from aglaia.app_data.secrets import get_mistral_api_key
         api_key = get_mistral_api_key()
         if not api_key:

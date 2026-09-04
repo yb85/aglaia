@@ -33,6 +33,20 @@ dependencies = [
     # `pip install aglaia` whose bundled plugins raise ImportError the first
     # time you click Send is worse than not shipping them.
     "httpx>=0.27",
+    # Mistral Document AI — the Cloud OCR engine. Base, not an extra, for the
+    # same reason as `keyring`: the card is in the OCR tab of every build, and
+    # a card that raises ImportError the first time it is clicked is a broken
+    # feature, not an optional one. ~8 MB installed, most of it the
+    # opentelemetry tail the SDK pulls in.
+    # PINNED <2: the 2.x SDK is a restructure, not an API bump — the top-level
+    # `mistralai` became a NAMESPACE package (no __init__), so
+    # `from mistralai import Mistral` fails with the tell-tale
+    # "cannot import name 'Mistral' from 'mistralai' (unknown location)".
+    # `Mistral` moved to `mistralai.client`, and the surface this code uses
+    # (files.upload / get_signed_url / download, ocr.process,
+    # batch.jobs.create|get|cancel|list) needs re-verifying against a PAID API
+    # before we can move. Lift the ceiling only with that done.
+    "mistralai>=1.0.0,<2",
     # Secret storage — the OS keychain (macOS Keychain, Windows Credential
     # Locker, Linux Secret Service). Base, not an extra: EVERY export plugin
     # that reaches a server needs somewhere to put a password, and an install
@@ -157,20 +171,12 @@ jbig2 = [
     #   cd aglaia_jbig2 && uv run maturin develop --release
     "aglaia_jbig2",
 ]
-cloud = [
-    # Cloud OCR card — Mistral Document AI (OCR) over HTTPS. The API key
-    # goes to the OS keychain like every other secret; `keyring` is a base
-    # dependency, so this extra is only the SDK.
-    # PINNED <2: the 2.x SDK is a restructure, not an API bump — the top-level
-    # `mistralai` became a NAMESPACE package (no __init__), so
-    # `from mistralai import Mistral` fails with the tell-tale
-    # "cannot import name 'Mistral' from 'mistralai' (unknown location)".
-    # `Mistral` moved to `mistralai.client`, and the surface this code uses
-    # (files.upload / get_signed_url / download, ocr.process,
-    # batch.jobs.create|get|cancel|list) needs re-verifying against a PAID API
-    # before we can move. Lift the ceiling only with that done.
-    "mistralai>=1.0.0,<2",
-]
+# Kept as an empty alias so `uv sync --extra cloud` and every README, CI
+# workflow and habit that names it keep working. Both of its contents —
+# `mistralai` and `keyring` — are base dependencies now (#139): Cloud OCR and
+# secret storage are features of every build, and a feature that raises
+# ImportError when clicked is broken, not optional.
+cloud = []
 # Optional `keyring` backends — install one to keep secrets in a password
 # manager instead of the OS keychain. keyring auto-discovers any
 # installed backend (highest-priority wins); no code change needed.
