@@ -3345,7 +3345,9 @@ class MainWindow(QMainWindow):
         box.setInformativeText(self.tr(
             "Manual per-page tuning (deskew angle, page ROI, dewarp curl) "
             "survives a rerun — the pages come back as you corrected them. "
-            "Clear it only if you want the pipeline's own estimate back."))
+            "Clear it only if you want the pipeline's own estimate back.\n\n"
+            "Per-page step disables are a different thing and are NOT "
+            "cleared: keep using their toggles in the scans views."))
         run_btn = box.addButton(self.tr("Reprocess all"),
                                 QMessageBox.ButtonRole.AcceptRole)
         # DestructiveRole so the platform places it as such; the colour says

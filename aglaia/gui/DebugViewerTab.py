@@ -272,6 +272,7 @@ class DebugViewerWidget(QWidget):
         self._overlay_geom: list[dict] = []
         self._pending_edit: dict = {}
         self._current_geom: dict = {}
+        self._busy = False
         # Must exist before `_load()`: seeding the strip selects a row, which
         # paints through `_on_row_changed`.
         self._overlay_bytes: list[Optional[bytes]] = []
@@ -684,6 +685,7 @@ class DebugViewerWidget(QWidget):
         self.leaf_node_id = int(leaf)
         row = self.strip.currentRow()
         self._rebuild(keep_row=row)
+        self._set_busy(False)
         return True
 
     def _resolve_leaf(self, scan_id: int, branch_path: str) -> Optional[int]:
@@ -710,17 +712,23 @@ class DebugViewerWidget(QWidget):
                 job.failed.disconnect()
             except Exception:
                 pass
+        # One repaint, not three. `_load` seeds the selection on the LAST row
+        # and the restore moves it back; unblocked, the user sees the view
+        # jump to the end of the chain and back on every rerun.
         self.strip.blockSignals(True)
-        self.strip.clear()
-        self.strip.blockSignals(False)
-        self._row_widgets.clear()
-        self._row_zebra.clear()
-        self._overlay_bytes = []
-        self._overlay_geom = []
+        try:
+            self.strip.clear()
+            self._row_widgets.clear()
+            self._row_zebra.clear()
+            self._overlay_bytes = []
+            self._overlay_geom = []
+            self._load()
+            if 0 <= keep_row < self.strip.count():
+                self.strip.setCurrentRow(keep_row)
+        finally:
+            self.strip.blockSignals(False)
         self._overlay_note.setText(self.tr("Rendering overlays…"))
-        self._load()
-        if 0 <= keep_row < self.strip.count():
-            self.strip.setCurrentRow(keep_row)
+        self._on_row_changed(self.strip.currentRow())
         self._overlay_job = _OverlayJob(self.db_path, self.leaf_node_id, self)
         self._overlay_job.done.connect(self._on_overlay_ready)
         self._overlay_job.failed.connect(self._on_overlay_failed)
@@ -780,9 +788,10 @@ class DebugViewerWidget(QWidget):
             sl.blockSignals(False)
             self._slider_labels[k].setText(
                 "—" if v is None else self._fmt(k, float(v)))
+        mine = self._stage_stored(row)
         self._manual_note.setText(
-            self.tr("manual: {fields}").format(fields=", ".join(stored))
-            if stored else "")
+            self.tr("manual: {fields}").format(fields=", ".join(mine))
+            if mine else "")
         self._sync_run_controls()
 
     @staticmethod
@@ -833,34 +842,57 @@ class DebugViewerWidget(QWidget):
             fields = dict(fields, frame_wh=list(frame))
         try:
             with db_session(self.db_path) as conn:
-                stored = ManualOverrideRepo(conn).set(
-                    int(key[0]), key[1], fields)
+                ManualOverrideRepo(conn).set(int(key[0]), key[1], fields)
                 conn.commit()
         except Exception:
             return
+        mine = self._stage_stored(row)
         self._manual_note.setText(
-            self.tr("manual: {fields}").format(fields=", ".join(stored))
-            if stored else "")
+            self.tr("manual: {fields}").format(fields=", ".join(mine))
+            if mine else "")
         self._pending_edit = {"scan_id": int(key[0]), "branch_path": key[1]}
         self._sync_run_controls()
+        self._reprocess_if_auto()
+
+    def _reprocess_if_auto(self) -> None:
         if self.auto_chk.isChecked():
             self._reprocess()
+
+    #: What each stage owns in the payload. The payload is per BRANCH — one
+    #: row for the whole page — so "Clear override" under the dewarp sliders
+    #: must drop the curl and leave a deskew correction alone.
+    _STAGE_FIELDS = {
+        "SkewFinder": ("skew_deg",),
+        "PageDetector": ("roi", "frame_wh"),
+        "PageDewarper": ("curl",),
+    }
+
+    def _stage_stored(self, row: int) -> dict:
+        """The part of the stored payload THIS stage owns."""
+        key = self._row_key(row)
+        fields = self._STAGE_FIELDS.get(key[2] if key else "", ())
+        stored = self._stored(row)
+        return {k: v for k, v in stored.items()
+                if k in fields and k != "frame_wh"}
 
     def _clear_override(self) -> None:
         row = self.strip.currentRow()
         key = self._row_key(row)
         if key is None:
             return
+        fields = self._STAGE_FIELDS.get(key[2], ())
+        if not fields:
+            return
         try:
             with db_session(self.db_path) as conn:
-                ManualOverrideRepo(conn).clear(int(key[0]), key[1])
+                ManualOverrideRepo(conn).set(int(key[0]), key[1],
+                                             {f: None for f in fields})
                 conn.commit()
         except Exception:
             return
         self._pending_edit = {"scan_id": int(key[0]), "branch_path": key[1]}
         self._configure_editor(row)
-        if self.auto_chk.isChecked():
-            self._reprocess()
+        self._reprocess_if_auto()
 
     def _on_auto_toggled(self, on: bool) -> None:
         # Session-wide, so opening another page keeps the mode.
@@ -868,10 +900,13 @@ class DebugViewerWidget(QWidget):
         self._sync_run_controls()
 
     def _sync_run_controls(self) -> None:
+        if self._busy:
+            return
         auto = self.auto_chk.isChecked()
         # Dimmed while auto-process is on: there is nothing for it to do.
         self.reprocess_btn.setEnabled(bool(self._pending_edit) and not auto)
-        self._clear_btn.setEnabled(bool(self._stored(self.strip.currentRow())))
+        self._clear_btn.setEnabled(
+            bool(self._stage_stored(self.strip.currentRow())))
 
     def _reprocess(self, *, force: bool = False) -> None:
         pending = self._pending_edit
@@ -881,14 +916,33 @@ class DebugViewerWidget(QWidget):
             self._overlay_note.setText(
                 self.tr("Saved. Reprocess from the scans view."))
             return
+        self._set_busy(True)
         try:
             self._reprocess_cb(pending["scan_id"], pending["branch_path"])
         except Exception as e:
+            self._set_busy(False)
             self._overlay_note.setText(
                 self.tr("Reprocess failed: {err}").format(err=e))
             return
         self._pending_edit = {}
         self._sync_run_controls()
+
+    def _set_busy(self, on: bool) -> None:
+        """Show the page is being reprocessed and freeze the controls.
+
+        The rerun is a background worker, and its result arrives as a whole
+        new chain (`reload_for`). Without this the sliders stay live over a
+        view that is about to be replaced, so a second drag would race the
+        rebuild and land on rows that no longer exist."""
+        self._busy = bool(on)
+        self._overlay_note.setText(
+            self.tr("Reprocessing…") if on else "")
+        self._editor_stack.setEnabled(not on)
+        if on:
+            self.reprocess_btn.setEnabled(False)
+            self._clear_btn.setEnabled(False)
+        else:
+            self._sync_run_controls()
 
 
 class DebugViewerDialog(QDialog):
