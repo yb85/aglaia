@@ -526,6 +526,127 @@ class StepOverrideRepo:
         self.conn.execute("DELETE FROM step_overrides WHERE scan_id = ?", (scan_id,))
 
 
+class ManualOverrideRepo:
+    """Per-page MANUAL parameter overrides (M9 #91).
+
+    `StepOverrideRepo` says "skip this step for this layout". This one says
+    "run it, but with THIS value" — the user correcting what the pipeline
+    estimated. Keyed the same way, so the worker loads both alike:
+    `branch_path=""` is the pre-split trunk, "A"/"B" one PageDetector layout.
+
+    The payload is one JSON object per (scan, branch), every field optional —
+    ``skew_deg``, ``roi``, ``curl`` (``alpha``/``beta``/``gamma``) and
+    ``frame_wh``. It is written whole: a partial write would leave the other
+    fields' provenance ambiguous. `set` MERGES into the stored payload, so a
+    caller that edits one field does not have to read-modify-write; passing
+    ``None`` for a field drops it.
+
+    Ported from iOS `ManualOverrides`. See `schema/0013_manual_overrides.sql`.
+    """
+
+    #: Fields whose meaning depends on the frame they were drawn on.
+    SPATIAL_FIELDS = ("roi",)
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def get(self, scan_id: int, branch_path: str) -> dict:
+        row = self.conn.execute(
+            "SELECT payload_json FROM manual_overrides "
+            "WHERE scan_id = ? AND branch_path = ?",
+            (int(scan_id), str(branch_path)),
+        ).fetchone()
+        if row is None:
+            return {}
+        try:
+            payload = json.loads(row["payload_json"])
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def set(self, scan_id: int, branch_path: str, fields: dict) -> dict:
+        """Merge `fields` into the stored payload; returns the result.
+
+        A key mapped to ``None`` is REMOVED — that is how the UI clears one
+        editor without touching the others. An empty result deletes the row,
+        so "no override" is the absence of a row, exactly as with
+        `StepOverrideRepo`."""
+        payload = self.get(scan_id, branch_path)
+        for k, v in (fields or {}).items():
+            if v is None:
+                payload.pop(k, None)
+            else:
+                payload[k] = v
+        if not payload:
+            self.clear(scan_id, branch_path)
+            return {}
+        now = _now()
+        self.conn.execute(
+            "INSERT INTO manual_overrides "
+            "(scan_id, branch_path, payload_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(scan_id, branch_path) DO UPDATE SET "
+            "payload_json = excluded.payload_json, updated_at = excluded.updated_at",
+            (int(scan_id), str(branch_path),
+             json.dumps(payload, ensure_ascii=False), now, now),
+        )
+        return payload
+
+    def clear(self, scan_id: int, branch_path: str) -> None:
+        self.conn.execute(
+            "DELETE FROM manual_overrides WHERE scan_id = ? AND branch_path = ?",
+            (int(scan_id), str(branch_path)),
+        )
+
+    def map_for_scan(self, scan_id: int) -> dict[str, dict]:
+        """``{branch_path: payload}`` for one scan — the worker's lookup."""
+        out: dict[str, dict] = {}
+        for r in self.conn.execute(
+            "SELECT branch_path, payload_json FROM manual_overrides "
+            "WHERE scan_id = ?", (int(scan_id),),
+        ).fetchall():
+            try:
+                payload = json.loads(r["payload_json"])
+            except Exception:
+                continue
+            if isinstance(payload, dict) and payload:
+                out[r["branch_path"]] = payload
+        return out
+
+    def clear_scan(self, scan_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM manual_overrides WHERE scan_id = ?", (int(scan_id),))
+
+
+def validate_frame(payload: dict, frame_wh) -> tuple[dict, list[str]]:
+    """Drop spatial overrides that were drawn on a DIFFERENT frame.
+
+    Returns ``(payload_without_stale_fields, dropped_field_names)``. A polygon
+    is expressed in the pixels of the image it was drawn on; applying it to a
+    frame of another size would silently shift or rescale it, and a page that
+    is quietly wrong is worse than one the pipeline decided alone. iOS learned
+    this as `roiFrameWH` (#200 there) — validate, drop, and say so.
+
+    A payload with no ``frame_wh`` predates the provenance field and is
+    accepted as unvalidatable, not rejected.
+    """
+    stored = payload.get("frame_wh")
+    if not stored or frame_wh is None:
+        return dict(payload), []
+    try:
+        same = (int(stored[0]) == int(frame_wh[0])
+                and int(stored[1]) == int(frame_wh[1]))
+    except Exception:
+        return dict(payload), []
+    if same:
+        return dict(payload), []
+    out = dict(payload)
+    dropped = [f for f in ManualOverrideRepo.SPATIAL_FIELDS if f in out]
+    for f in dropped:
+        out.pop(f, None)
+    return out, dropped
+
+
 class OcrRepo:
     """OCR runs per branch.
 

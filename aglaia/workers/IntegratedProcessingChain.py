@@ -668,7 +668,8 @@ class IntegratedProcessingChain:
         _memray_target = int(_os.environ.get("AGLAIA_MEMRAY_PAGES", "3"))
         from aglaia.storage.db import open_db, in_transaction
         from aglaia.storage.persister import Persister, encode_image
-        from aglaia.storage.repo import NodeRepo, BranchRepo, ImageRepo, StepOverrideRepo
+        from aglaia.storage.repo import (NodeRepo, BranchRepo, ImageRepo,
+                                         StepOverrideRepo, ManualOverrideRepo)
 
         conn = open_db(db_path)
         persister = Persister(conn)
@@ -934,6 +935,13 @@ class IntegratedProcessingChain:
                 StepOverrideRepo(conn).map_for_scan(int(current.scan_id))
                 if current.scan_id is not None else set()
             )
+            # Per-page MANUAL parameter overrides (M9 #92): the value the user
+            # set where the processor would have estimated. Same shape as the
+            # skip set above — loaded once per run, keyed by branch path.
+            manual_overrides: dict[str, dict] = (
+                ManualOverrideRepo(conn).map_for_scan(int(current.scan_id))
+                if current.scan_id is not None else {}
+            )
             for i in range(start_idx, N):
                 config = elements_config[i]
                 processor = processors[i]
@@ -976,6 +984,27 @@ class IntegratedProcessingChain:
                     continue
                 start_t = time.time()
                 old_type = current.type
+                # Hand this layout's manual overrides to the processor on the
+                # buffer, for the duration of the call only. The buffer is the
+                # right carrier: processors are built once per worker from the
+                # pipeline YAML, so a per-scan value must never touch the
+                # shared instance. Popped below — SkewFinder mutates its input
+                # meta in place, so an override left here would ride onto every
+                # downstream step and be read by a processor it was not meant
+                # for.
+                _manual = manual_overrides.get(current.branch_path or "") or {}
+                if _manual:
+                    current.meta["manual_overrides"] = _manual
+                # A branch-EMITTING step (PageDetector) runs before the
+                # branches exist, so its per-layout overrides are not on its
+                # own buffer — they are keyed by the labels it is about to
+                # create. Hand it the whole map and let it pick per child.
+                _manual_all = (manual_overrides
+                               if manual_overrides
+                               and getattr(type(processor), "REPLAY_TRAIT", None)
+                               is ReplayTrait.ROI else None)
+                if _manual_all:
+                    current.meta["manual_overrides_all"] = _manual_all
                 # Snapshot replay stamp BEFORE in-place mutation; used to clear
                 # stale stamps that would leak across non-replay steps.
                 old_replay_kind = (current.meta or {}).get("replay_kind")
@@ -1054,6 +1083,14 @@ class IntegratedProcessingChain:
                     outputs = result.children
                 else:
                     outputs = [result]
+
+                # Drop the injected overrides again (see above). The input's
+                # meta dict is shared with any output the processor mutated in
+                # place, so clear both.
+                if _manual or _manual_all:
+                    for m in [current.meta] + [t.meta for t in outputs if t.meta]:
+                        m.pop("manual_overrides", None)
+                        m.pop("manual_overrides_all", None)
 
                 # BW palette preservation across non-binarizing steps
                 if old_type == ImageType.BW:

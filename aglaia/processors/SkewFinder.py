@@ -11,6 +11,7 @@ import math
 from dataclasses import dataclass
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
+from aglaia.processors.manual import manual_value, stamp_manual
 from aglaia.processors.option_specs import _b, _f, _i
 from aglaia.processors.utils import to_gray, is_binary
 
@@ -82,7 +83,25 @@ class SkewFinder(AbstractImageProcessor):
         """
         image = img_buf.buffer
         current_skew = 0.0
-        
+
+        # Manual angle (M9 #93): the user corrected what the estimator found,
+        # so the estimator must not run at all. Run-then-discard would be
+        # cheaper to write and wrong to live with — the next rerun would
+        # re-derive a different angle and the correction would drift.
+        manual_deg = manual_value(img_buf, "skew_deg")
+        if manual_deg is not None:
+            try:
+                current_skew = float(manual_deg)
+            except (TypeError, ValueError):
+                manual_deg = None
+        if manual_deg is not None:
+            if not img_buf.meta:
+                img_buf.meta = {}
+            img_buf.meta["skew"] = current_skew
+            stamp_manual(img_buf, "skew_deg")
+            self._rotate(img_buf, current_skew)
+            return self._finish(img_buf, current_skew)
+
         try:
             # 1. Estimation — downscale FIRST so the gray conversion and
             # Otsu run on the 400-px analysis image instead of the full
@@ -110,68 +129,82 @@ class SkewFinder(AbstractImageProcessor):
             img_buf.meta["skew"] = current_skew
 
             # 2. Application
-            if self.apply_rotation and abs(current_skew) >= self.min_angle:
-                (sh, sw) = img_buf.buffer.shape[:2]
-                center = (sw // 2, sh // 2)
-                M = cv2.getRotationMatrix2D(center, -current_skew, 1.0)
-                # Replay params: stored so the replay pass can re-apply
-                # this rotation on the original colour buffer with a single
-                # composite interpolation.
-                img_buf.meta["replay_kind"] = "rotate"
-                img_buf.meta["replay_params"] = {
-                    "angle_deg": float(current_skew),
-                    "center_xy": [float(center[0]), float(center[1])],
-                    "wh": [int(sw), int(sh)],
-                }
-                
-                # Determine Border Value
-                border_val = (255, 255, 255) if len(img_buf.buffer.shape) == 3 else 255
-                if self.k_cluster > 1:
-                     bg_color = self._detect_background_color(img_buf.buffer, self.k_cluster)
-                     if bg_color is not None:
-                         border_val = bg_color
+            self._rotate(img_buf, current_skew)
 
-                # NN on BW (no smudging across the 0/255 jump), cubic on
-                # gray/colour where smooth resampling avoids stair-stepping.
-                input_is_bw = img_buf.type == ImageType.BW or is_binary(img_buf.buffer)
-                interp_flag = cv2.INTER_NEAREST if input_is_bw else cv2.INTER_CUBIC
-                img_buf.buffer = cv2.warpAffine(img_buf.buffer, M, (sw, sh), flags=interp_flag, borderMode=cv2.BORDER_CONSTANT, borderValue=border_val)
-                
-                # Update ROI
-                # ROI is stored as list of points (x,y)
-                if not img_buf.meta.get("roi"):
-                    # Init to full image rect if missing
-                    img_buf.meta["roi"] = [(0,0), (sw, 0), (sw, sh), (0, sh)]
-                
-                old_roi = np.array(img_buf.meta["roi"], dtype=np.float32)
-                # cv2.transform expects shape (N, 1, 2) for points or (N, 2) depending on call
-                # But transform needs 3x2, warpAffine does 2x3. M is 2x3.
-                # cv2.transform(src, m) -> dst
-                # src: array of elements to transform
-                
-                # Reshape for transform: (N, 1, 2)
-                pts = old_roi.reshape((-1, 1, 2))
-                new_pts = cv2.transform(pts, M)
-                img_buf.meta["roi"] = new_pts.reshape((-1, 2)).tolist()
-
-                # Check binary integrity. NEAREST warp preserves binarity,
-                # CUBIC never yields a binary result — input_is_bw already
-                # answers this without rescanning the rotated frame.
-                if input_is_bw:
-                    # Re-binarize to ensure sharp edges after rotation interpolation
-                    _, img_buf.buffer = cv2.threshold(img_buf.to_gray(), 127, 255, cv2.THRESH_BINARY)
-                    img_buf.type = ImageType.BW
-
-        except Exception as e:
-            # print(f"SkewFinder Error: {e}")
+        except Exception:
+            # Estimation failed; leave the buffer as it came in.
             pass
 
+        return self._finish(img_buf, current_skew)
+
+    def _finish(self, img_buf, current_skew: float):
+        """Shared tail: the op-log stats both the estimated and the manual
+        path report."""
         self.last_stats = {
             "angle": f"{current_skew:+.2f}°",
             "rotated": bool(self.apply_rotation
-                             and abs(current_skew) >= self.min_angle),
+                            and abs(current_skew) >= self.min_angle),
         }
         return img_buf
+
+    def _rotate(self, img_buf, current_skew: float) -> None:
+        """Rotate the buffer by `current_skew` and carry the ROI with it.
+
+        Shared by the estimated and the manual path (M9 #93) — a manual angle
+        must land through exactly the same warp, border and ROI transform, or
+        a corrected page would differ from an estimated one by more than the
+        angle."""
+        if self.apply_rotation and abs(current_skew) >= self.min_angle:
+            (sh, sw) = img_buf.buffer.shape[:2]
+            center = (sw // 2, sh // 2)
+            M = cv2.getRotationMatrix2D(center, -current_skew, 1.0)
+            # Replay params: stored so the replay pass can re-apply
+            # this rotation on the original colour buffer with a single
+            # composite interpolation.
+            img_buf.meta["replay_kind"] = "rotate"
+            img_buf.meta["replay_params"] = {
+                "angle_deg": float(current_skew),
+                "center_xy": [float(center[0]), float(center[1])],
+                "wh": [int(sw), int(sh)],
+            }
+            
+            # Determine Border Value
+            border_val = (255, 255, 255) if len(img_buf.buffer.shape) == 3 else 255
+            if self.k_cluster > 1:
+                 bg_color = self._detect_background_color(img_buf.buffer, self.k_cluster)
+                 if bg_color is not None:
+                     border_val = bg_color
+
+            # NN on BW (no smudging across the 0/255 jump), cubic on
+            # gray/colour where smooth resampling avoids stair-stepping.
+            input_is_bw = img_buf.type == ImageType.BW or is_binary(img_buf.buffer)
+            interp_flag = cv2.INTER_NEAREST if input_is_bw else cv2.INTER_CUBIC
+            img_buf.buffer = cv2.warpAffine(img_buf.buffer, M, (sw, sh), flags=interp_flag, borderMode=cv2.BORDER_CONSTANT, borderValue=border_val)
+            
+            # Update ROI
+            # ROI is stored as list of points (x,y)
+            if not img_buf.meta.get("roi"):
+                # Init to full image rect if missing
+                img_buf.meta["roi"] = [(0,0), (sw, 0), (sw, sh), (0, sh)]
+            
+            old_roi = np.array(img_buf.meta["roi"], dtype=np.float32)
+            # cv2.transform expects shape (N, 1, 2) for points or (N, 2) depending on call
+            # But transform needs 3x2, warpAffine does 2x3. M is 2x3.
+            # cv2.transform(src, m) -> dst
+            # src: array of elements to transform
+            
+            # Reshape for transform: (N, 1, 2)
+            pts = old_roi.reshape((-1, 1, 2))
+            new_pts = cv2.transform(pts, M)
+            img_buf.meta["roi"] = new_pts.reshape((-1, 2)).tolist()
+
+            # Check binary integrity. NEAREST warp preserves binarity,
+            # CUBIC never yields a binary result — input_is_bw already
+            # answers this without rescanning the rotated frame.
+            if input_is_bw:
+                # Re-binarize to ensure sharp edges after rotation interpolation
+                _, img_buf.buffer = cv2.threshold(img_buf.to_gray(), 127, 255, cv2.THRESH_BINARY)
+                img_buf.type = ImageType.BW
 
     def _find_skew_angle(self, binary):
         # 3. Coarse Search

@@ -35,6 +35,7 @@ from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.batching import BatchableTrait, BatchItem
 from aglaia.processors import utils
+from aglaia.processors.manual import manual_value, stamp_manual
 from aglaia.Status import Status
 
 # Global JAX status
@@ -473,6 +474,10 @@ class _DewarpCtx:
     binding_side: Any = None
     weights: Any = None
     spine: Any = None
+    # Manual curl (M9 #95): (alpha, beta, gamma) the user set. The sheet is
+    # frozen there and only the pose is re-optimised — moving alpha alone
+    # against a free pose makes the page swim, which is why iOS freezes too.
+    manual_curl: Any = None
     # Filled in by process() after the solve, only for the spline RMS log.
     params_initial: Any = None
 
@@ -1544,6 +1549,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                     spine_right=(binding_side == "right"))
 
             ctx = _DewarpCtx(
+                manual_curl=manual_value(img_buf, "curl"),
                 n_cam=n_cam, binding_side=binding_side, weights=weights,
                 img=img, small=small, pad_px=pad_px, is_bw=is_bw,
                 input_dpi=input_dpi, char_h_frac=char_h_frac,
@@ -1590,6 +1596,36 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
 
         def _fit(spine):
             return lm_solver.minimize(_objective(spine), ctx.params)
+
+        if ctx.manual_curl is not None:
+            # The user set the sheet. Freeze it and re-optimise ONLY the pose
+            # around it (iOS `ManualOverrides.Curl`: "pose is re-optimized
+            # with curl frozen"). Same `freeze_curl` path the flat rung uses —
+            # one frozen-shape solve, not two.
+            try:
+                alpha = float(ctx.manual_curl.get("alpha", 0.0))
+                beta = float(ctx.manual_curl.get("beta", 0.0))
+                gamma = float(ctx.manual_curl.get("gamma", 0.0) or 0.0)
+            except (AttributeError, TypeError, ValueError):
+                ctx.manual_curl = None
+            else:
+                x0 = np.asarray(ctx.params, dtype=np.float64).copy()
+                x0[6], x0[7] = alpha, beta
+                spine = None
+                if gamma and ctx.binding_side is not None:
+                    from aglaia.processors.lm_solver import SpineCurl
+                    w_m = float(ctx.model_dims[0])
+                    spine = SpineCurl(
+                        gamma,
+                        self.spine_gamma_scale * w_m,
+                        w_m if ctx.binding_side == "right" else 0.0)
+                fit = lm_solver.minimize(_objective(spine), x0,
+                                         freeze_curl=True)
+                ctx.spine = spine
+                print(f"[PageDewarper] manual curl a={alpha:+.4f} "
+                      f"b={beta:+.4f} g={gamma:+.4f}: obj={fit.fun:.6g} "
+                      f"(pose re-fitted, curl frozen).", flush=True)
+                return fit.x.astype(np.float32)
 
         if self._flat_fit:
             # Pose + page dims around a flat sheet. A zero-curl surface cannot
@@ -1800,6 +1836,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # replay engine rebuilds the grid from `params` + `page_dims`
         # against the source image shape and applies a single warp.
         img_buf.meta["replay_kind"] = "dewarp"
+        if ctx.manual_curl is not None:
+            # The stamped `params` already carry the frozen alpha/beta and the
+            # stamped `spine` the gamma, so replay rebuilds the surface the
+            # user chose. This only says WHO chose it.
+            stamp_manual(img_buf, "curl")
         img_buf.meta["replay_params"] = {
             "params": params.tolist(),
             "page_dims": [float(page_dims[0]), float(page_dims[1])],
