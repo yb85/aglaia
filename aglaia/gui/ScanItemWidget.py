@@ -562,6 +562,35 @@ class ScanItemWidget(QWidget):
                     self.items[parent_stem]["children"].append(stem)
         return self.items[stem]
 
+    def forget_layouts(self) -> None:
+        """Drop every per-layout column, keeping only the raw source.
+
+        `handle_event` only ever ADDS a stem, so a rerun that produces FEWER
+        layouts left the extra ones on the card: deleting a layout still
+        showed its thumbnail, from nodes the rerun had already removed from
+        the DB (#123). Called before a whole-scan rerun; the incoming events
+        rebuild whatever the new run actually produces.
+
+        The raw entry stays — it is the source the rerun feeds from, not a
+        result of it — and so do the steps it already carries."""
+        raw = self.raw_filestem
+        keep = self.items.get(raw)
+        dropped = [st for st in self.items if st != raw]
+        if not dropped:
+            return
+        self.items = {raw: keep} if keep is not None else {}
+        if keep is not None:
+            keep["children"] = []
+            keep["current_idx"] = self.current_history_idx
+        # Node → stem and per-node caches point at rows that no longer exist.
+        self._stem_for_node = {
+            nid: st for nid, st in self._stem_for_node.items()
+            if st == raw}
+        if keep is not None:
+            for nid in list(self._stem_for_node):
+                if nid not in keep["node_to_step"]:
+                    self._stem_for_node.pop(nid, None)
+
     def _register_node(self, stem: str, step_name: str, *, node_id: Optional[int],
                        image_id: Optional[int], meta: Optional[dict]):
         entry = self.items[stem]

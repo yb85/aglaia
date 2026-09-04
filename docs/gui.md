@@ -217,6 +217,13 @@ lets a layout be added to a page the detector saw as blank, and what lets the
 crop follow the polygon instead of the other way round. `smart_merge` and
 `max_pages` are skipped — they guard a guess, and this is not one.
 
+A whole-scan rerun goes through `MainWindow._rerun_scans_from_raw`, which
+calls `ScanItemWidget.forget_layouts()` on each card first. `handle_event`
+only ever ADDS a stem, so a rerun producing FEWER layouts left the extra ones
+on the card — a deleted layout kept showing its thumbnail, built from nodes
+the rerun had already dropped from the DB (#123). The raw entry survives (it
+is what the rerun feeds from); the incoming events rebuild the rest.
+
 Editing the set reruns the **whole scan**, not one branch: which branches
 exist is exactly what is being decided, so resuming from the split point would
 rerun children about to be renumbered or deleted. Each resulting child is

@@ -1070,6 +1070,29 @@ class MainWindow(QMainWindow):
             return
         self._scans_scroll.verticalScrollBar().setValue(hi)
 
+    def _rerun_scans_from_raw(self, scan_ids) -> None:
+        """Reprocess these scans from their raw image.
+
+        Drops each card's per-layout columns first. `handle_event` only ever
+        ADDS a stem, so a rerun that produces FEWER layouts left the extra
+        ones on the card — deleting a layout still showed its thumbnail, from
+        nodes the rerun had already removed from the DB (#123). The incoming
+        events rebuild whatever the new run actually produces."""
+        cb = self._reprocess_snaps_callback
+        ids = {int(s) for s in (scan_ids or set())}
+        if cb is None or not ids:
+            return
+        for sid in ids:
+            w = self.scan_widgets_by_scan.get(sid)
+            if w is None:
+                continue
+            try:
+                w.forget_layouts()
+                w.set_processing(True)
+            except Exception:
+                pass
+        cb(ids)
+
     def _refresh_debug_tabs(self, scan_id: int, branch_path: str,
                             node_id=None) -> None:
         """Point every open debug tab of that page-branch at the new nodes.
@@ -1101,7 +1124,6 @@ class MainWindow(QMainWindow):
         from the split point, and a scan that isn't split (or a missing branch
         callback) falls back to the whole-scan rerun rather than silently
         doing nothing."""
-        snaps = self._reprocess_snaps_callback
         # An empty branch_path means the SPLIT itself changed — the layout set
         # was edited (#118), so which branches exist is what is being decided.
         # Resuming from a split point would rerun children about to be
@@ -1110,8 +1132,7 @@ class MainWindow(QMainWindow):
         # label and never match `branch_label = ''` — but relying on that is
         # relying on an accident.)
         if not str(branch_path or ""):
-            if snaps is not None:
-                snaps({int(scan_id)})
+            self._rerun_scans_from_raw({int(scan_id)})
             return
         cb = self._reprocess_branch_callback
         if cb is not None:
@@ -1120,8 +1141,7 @@ class MainWindow(QMainWindow):
                 return
             except Exception:
                 pass
-        if snaps is not None:
-            snaps({int(scan_id)})
+        self._rerun_scans_from_raw({int(scan_id)})
 
     def _open_debug_viewer(self, node_id: int, label: str):
         """Open a debug viewer for `node_id` as a new closable tab.
@@ -2924,10 +2944,9 @@ class MainWindow(QMainWindow):
             return
 
         def _reprocess(scan_ids: set) -> None:
-            cb = self._reprocess_snaps_callback
-            if cb is None or not scan_ids:
+            if not scan_ids:
                 return
-            cb(set(scan_ids))
+            self._rerun_scans_from_raw(set(scan_ids))
             self.status_bar_widget.progress.reset()
 
         from aglaia.gui.ScansDpiTab import ScansDpiTab
@@ -4358,12 +4377,10 @@ class MainWindow(QMainWindow):
                 return
             except Exception:
                 pass
-        cb = self._reprocess_snaps_callback
-        if cb is not None:
-            try:
-                cb({int(scan_id)})
-            except Exception:
-                pass
+        try:
+            self._rerun_scans_from_raw({int(scan_id)})
+        except Exception:
+            pass
 
     def toggle_step_disabled(self, scan_id: int, node_id: int) -> None:
         """Flip a step's disabled state for its layout (view click handler)."""
