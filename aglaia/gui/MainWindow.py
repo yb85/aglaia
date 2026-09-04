@@ -1527,7 +1527,7 @@ class MainWindow(QMainWindow):
             lambda: self._on_report_bug(),
         )
         self.sidebar.add_bottom_action(
-            "plugins", "plug", self.tr("Plugins"),
+            "plugins", "unplug", self.tr("Plugins"),
             lambda: self.open_plugins_tab(),
         )
         self.sidebar.add_bottom_action(
