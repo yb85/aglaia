@@ -44,6 +44,9 @@ _POLY_LINE = QColor(60, 220, 60)
 _POLY_VERTEX = QColor(255, 255, 255)
 _POLY_ACTIVE = QColor(255, 190, 60)
 _ROT_LINE = QColor(255, 190, 60)
+#: The live dewarp preview. Deliberately NOT the renderer's green: that grid
+#: is what was fitted, this one is what the sliders are asking for.
+_PREVIEW_LINE = QColor(255, 90, 200)
 
 
 class EditCanvas(ZoomCanvas):
@@ -74,6 +77,9 @@ class EditCanvas(ZoomCanvas):
         # A keystone is a projective map from FOUR points; a fifth would have
         # no meaning, so its polygon refuses insertion (M9 #100).
         self._allow_insert = True
+        # Read-only polylines in stage coordinates, drawn through the same
+        # mapping as the handles — the dewarp's live grid preview.
+        self._preview: list = []
         self._drag_vertex: Optional[int] = None
         self._drag_rot = False
 
@@ -105,6 +111,15 @@ class EditCanvas(ZoomCanvas):
         """Move the handle without emitting — for a slider driving the same
         value, which would otherwise echo back and fight the user."""
         self._rot_deg = float(deg)
+        self.update()
+
+    def set_preview(self, lines) -> None:
+        """Install read-only polylines (stage coords), or clear with None.
+
+        The dewarp has no handle — its shape is three numbers — so the only
+        way to know what a slider did was to reprocess and look. This draws
+        the sheet the sliders describe, live, before anything is rerun."""
+        self._preview = [list(pl) for pl in (lines or [])]
         self.update()
 
     def is_editing(self) -> bool:
@@ -243,10 +258,17 @@ class EditCanvas(ZoomCanvas):
     # ── paint ─────────────────────────────────────────────────────
     def paintEvent(self, ev) -> None:  # noqa: N802
         super().paintEvent(ev)
-        if self._pix is None or (self._poly is None and self._rot_deg is None):
+        if self._pix is None or (self._poly is None and self._rot_deg is None
+                                 and not self._preview):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._preview:
+            p.setPen(QPen(_PREVIEW_LINE, 1))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            for line in self._preview:
+                pts = QPolygonF([self._to_view(x, y) for x, y in line])
+                p.drawPolyline(pts)
         if self._poly:
             poly = QPolygonF([self._to_view(x, y) for x, y in self._poly])
             p.setPen(QPen(_POLY_LINE, 2))

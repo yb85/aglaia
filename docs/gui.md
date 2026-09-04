@@ -122,7 +122,40 @@ See [storage.md](storage.md#per-page-manual-overrides-manual_overrides) and
 |---|---|
 | SkewFinder | a rotation handle on the image and a slider, both on the same angle |
 | PageDetector | the ROI polygon — drag a vertex, double-click an edge to add one |
-| PageDewarper | sliders for the curl α, β and the spine γ |
+| TrapezoidalCorrection | the column quad — drag a corner. **Four corners, no more**: a keystone is a projective map from exactly four points, so this polygon refuses insertion. When the step fell back and found no quad, the corners are seeded from the frame — that is precisely the page a user wants to draw one on |
+| PageDewarper | sliders for **arch**, **tilt** and the spine γ, plus **Force dewarp**. The grid previews the sheet live |
+
+**Arch and tilt are not the fitted parameters.** The solver fits α and β,
+which are the sheet's slopes at the LEFT and RIGHT page edges (`z'(0) = α`,
+`z'(1) = β`, and `z` is pinned to 0 at both). Neither moves one visible thing
+on its own — every drag of either reshapes the whole surface — which is what
+made them unusable by hand. The editor rotates the pair:
+
+```
+arch = (α − β)/2        tilt = (α + β)/2
+α    = arch + tilt      β    = tilt − arch
+```
+
+`z(0.5) = (α − β)/8 = arch/4`, so **arch alone sets the mid-page rise** — the
+arch of a bound page, the thing the eye reads — and **tilt alone slides its
+crest** left or right. The arch slider shows that rise as a percentage of the
+page width beside its raw value. Ranges cover the whole `delbrel-oc9` corpus
+(276 fitted pages: |arch| ≤ 0.325, |tilt| ≤ 0.250, |γ| ≤ 0.100) at a 0.001
+step, about one step per slider pixel.
+
+**The grid previews live.** Dragging a curl slider redraws the sheet in
+magenta over the fitted grid, from the same builder the remap uses
+(`dewarp_grid_lattice`) with the row's stamp and the edited curl substituted —
+so it is the surface, not an approximation of it. The pose is the last fit's:
+a rerun re-optimises it around the frozen shape, so the final page shifts a
+little. Magenta deliberately, not the renderer's green: green is what was
+fitted, magenta is what the sliders are asking for.
+
+**Force dewarp** runs the fit past the `min_spans` guard and the `max_oob`
+gate. Both are right by default and both are sometimes wrong — a sparse page
+whose few spans are perfectly good, a wide fit the gate reads as runaway. The
+result may be worse; the node records `manual: force` (and `oob_forced` when
+the gate was the thing overridden), so a bad page stays explainable.
 
 Handles are vector, painted by `DebugEditCanvas.EditCanvas` over the raster.
 The renderers hand them the geometry as numbers (`geom`), in the coordinates

@@ -32,8 +32,9 @@ from aglaia.gui.DebugEditCanvas import EditCanvas                # noqa: E402
 def _mouse(kind, pos):
     """A real QMouseEvent — the handlers fall through to Qt's own, which
     rejects a stand-in object."""
-    return QMouseEvent(kind, QPointF(pos), Qt.MouseButton.LeftButton,
-                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    return QMouseEvent(kind, QPointF(pos), QPointF(pos),
+                       Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                       Qt.KeyboardModifier.NoModifier)
 
 
 @pytest.fixture()
@@ -158,3 +159,54 @@ def test_a_quad_refuses_a_fifth_corner(canvas):
     mid = canvas._to_view(50, 0).toPoint()
     canvas.mouseDoubleClickEvent(_mouse(QEvent.Type.MouseButtonDblClick, mid))
     assert len(canvas.polygon()) == 4
+
+
+# ── the dewarp's derived controls ─────────────────────────────────────
+
+def test_arch_and_tilt_round_trip_through_the_fitted_pair(qapp_or_skip):
+    from aglaia.gui.DebugViewerTab import DebugViewerWidget as W
+    for a, b in ((0.07, 0.168), (-0.35, 0.0), (0.0, 0.0), (0.12, -0.04)):
+        d = W._from_curl({"alpha": a, "beta": b, "gamma": 0.03})
+        back = W._to_curl(d["arch"], d["tilt"], d["gamma"])
+        assert back["alpha"] == pytest.approx(a)
+        assert back["beta"] == pytest.approx(b)
+        assert back["gamma"] == pytest.approx(0.03)
+
+
+def test_arch_alone_sets_the_mid_page_rise(qapp_or_skip):
+    """The point of the reparametrisation. α and β are the sheet's slopes at
+    the two page EDGES: neither moves one visible thing on its own, which is
+    what made them unusable by hand. `arch` moves the mid-page rise and
+    nothing else; `tilt` slides the crest and leaves the rise alone."""
+    from aglaia.gui.DebugViewerTab import DebugViewerWidget as W
+    from aglaia.processors.sheet_models import cylindrical_z
+
+    def mid(arch, tilt):
+        c = W._to_curl(arch, tilt, 0.0)
+        return float(cylindrical_z(0.5, c["alpha"], c["beta"]))
+
+    # tilt does not touch the mid-page rise
+    assert mid(0.20, -0.10) == pytest.approx(mid(0.20, 0.10))
+    # arch does, linearly, and exactly at arch/4
+    assert mid(0.20, 0.0) == pytest.approx(0.20 / 4.0)
+    assert mid(-0.08, 0.05) == pytest.approx(-0.08 / 4.0)
+
+
+def test_the_slider_ranges_cover_the_corpus(qapp_or_skip):
+    """Measured over 276 fitted pages of `delbrel-oc9`: |arch| <= 0.325,
+    |tilt| <= 0.250, |gamma| <= 0.100. A range that clipped a real page would
+    make it untunable."""
+    from aglaia.gui.DebugViewerTab import DebugViewerWidget as W
+    for key, seen in (("arch", 0.325), ("tilt", 0.250), ("gamma", 0.100)):
+        lo, hi, step = W._RANGES[key]
+        assert lo <= -seen and hi >= seen
+        assert step <= 0.001            # ~one step per slider pixel
+
+
+def test_a_preview_can_be_drawn_and_cleared(canvas):
+    canvas.set_editable(frame_wh=(200, 150))
+    assert canvas._preview == []
+    canvas.set_preview([[(0, 0), (100, 10)], [(0, 50), (100, 60)]])
+    assert len(canvas._preview) == 2
+    canvas.set_preview(None)
+    assert canvas._preview == []

@@ -360,17 +360,43 @@ class DebugViewerWidget(QWidget):
         self._overlay_job.start()
 
     #: Slider ranges, chosen for MANUAL tuning rather than for the fit's own
-    #: freedom. The solver clamps curl at ±0.5 (`sheet_models.CURL_CLIP`) but
-    #: a page past ±0.35 is already extreme, and a full-width slider over the
-    #: solver's range would make every useful value a two-pixel move. Skew is
-    #: the deskew step's own ±15° working band; γ is the spine term of #60,
-    #: whose automatic grid searches ±0.10.
+    #: freedom, and measured against the corpus rather than guessed. Steps are
+    #: 0.001 so a full-width slider is about one step per pixel.
+    #:
+    #: `arch` and `tilt` are NOT the fitted parameters. The solver fits α and
+    #: β, which are the sheet's slopes at the LEFT and RIGHT page edges
+    #: (z'(0) = α, z'(1) = β, and z is pinned to 0 at both). Neither moves one
+    #: visible thing on its own — every drag of either changes the whole
+    #: surface, which is why they are unusable by hand. The rotation of the
+    #: pair is:
+    #:
+    #:     arch = (α − β)/2      tilt = (α + β)/2
+    #:     α = arch + tilt       β = tilt − arch
+    #:
+    #: and z(0.5) = (α − β)/8 = arch/4, so **arch alone sets the mid-page
+    #: rise** — the arch of a bound page, the thing the eye actually reads —
+    #: while `tilt` alone slides its crest left or right. They decouple.
+    #:
+    #: Ranges cover the whole `delbrel-oc9` corpus (276 fitted pages):
+    #: |arch| ≤ 0.325, |tilt| ≤ 0.250, |γ| ≤ 0.100.
     _RANGES = {
         "skew_deg": (-15.0, 15.0, 0.05),
-        "alpha": (-0.35, 0.35, 0.002),
-        "beta": (-0.35, 0.35, 0.002),
-        "gamma": (-0.15, 0.15, 0.002),
+        "arch": (-0.35, 0.35, 0.001),
+        "tilt": (-0.25, 0.25, 0.001),
+        "gamma": (-0.12, 0.12, 0.001),
     }
+
+    @staticmethod
+    def _to_curl(arch: float, tilt: float, gamma: float) -> dict:
+        return {"alpha": tilt + arch, "beta": tilt - arch,
+                "gamma": gamma}
+
+    @staticmethod
+    def _from_curl(curl: dict) -> dict:
+        a = float(curl.get("alpha", 0.0) or 0.0)
+        b = float(curl.get("beta", 0.0) or 0.0)
+        return {"arch": (a - b) / 2.0, "tilt": (a + b) / 2.0,
+                "gamma": float(curl.get("gamma", 0.0) or 0.0)}
 
     def _build_editor(self) -> QWidget:
         """Per-stage manual controls, plus the run mode.
@@ -420,9 +446,11 @@ class DebugViewerWidget(QWidget):
             self._editor_stack.addWidget(quad_page))
 
         curl_page, curl_layout = self._slider_page(
-            [("alpha", self.tr("Curl α")), ("beta", self.tr("Curl β")),
+            [("arch", self.tr("Arch")), ("tilt", self.tr("Tilt")),
              ("gamma", self.tr("Spine γ"))],
-            self.tr("The sheet is frozen at these; the pose is re-fitted."))
+            self.tr("Arch is the mid-page rise, tilt slides its crest. "
+                    "The grid previews the sheet live; the pose is re-fitted "
+                    "on reprocess, so the final page shifts a little."))
         # "Force dewarp" belongs beside the sliders: a user forcing the fit
         # usually then sets the curl by hand (M9 #101).
         self.force_chk = QCheckBox(self.tr("Force dewarp (bypass the "
@@ -808,13 +836,16 @@ class DebugViewerWidget(QWidget):
             allow_insert=(processor != "TrapezoidalCorrection"))
         self._poly_field = ("quad" if processor == "TrapezoidalCorrection"
                             else "roi")
+        # A preview belongs to the row it was drawn for.
+        self.canvas.set_preview(None)
         self.force_chk.blockSignals(True)
         self.force_chk.setChecked(bool(stored.get("force")))
         self.force_chk.blockSignals(False)
 
         curl = stored.get("curl") or (geom.get("curl") or {})
-        values = {"skew_deg": skew, "alpha": curl.get("alpha"),
-                  "beta": curl.get("beta"), "gamma": curl.get("gamma")}
+        values = {"skew_deg": skew}
+        values.update(self._from_curl(curl) if curl
+                      else {"arch": None, "tilt": None, "gamma": None})
         for k, sl in self._sliders.items():
             v = values.get(k)
             lo, _hi, step = self._RANGES[k]
@@ -832,7 +863,14 @@ class DebugViewerWidget(QWidget):
 
     @staticmethod
     def _fmt(key: str, value: float) -> str:
-        return f"{value:+.2f}°" if key == "skew_deg" else f"{value:+.3f}"
+        if key == "skew_deg":
+            return f"{value:+.2f}°"
+        if key == "arch":
+            # z(0.5) = arch/4, in page-width units. The percentage is the
+            # number a user can judge against the picture; the raw value is
+            # kept for the record.
+            return f"{value:+.3f}  ({value / 4.0 * 100:+.1f}%)"
+        return f"{value:+.3f}"
 
     def _on_slider(self, key: str, raw: int) -> None:
         lo, _hi, step = self._RANGES[key]
@@ -841,11 +879,55 @@ class DebugViewerWidget(QWidget):
         if key == "skew_deg":
             self.canvas.set_rotation_deg(value)
             self._store({"skew_deg": float(value)})
-        else:
-            curl = dict(self._stored(self.strip.currentRow()).get("curl")
-                        or (self._current_geom.get("curl") or {}))
-            curl[key] = float(value)
-            self._store({"curl": curl})
+            return
+        row = self.strip.currentRow()
+        base = (self._stored(row).get("curl")
+                or (self._current_geom.get("curl") or {}))
+        derived = self._from_curl(base)
+        derived[key] = float(value)
+        curl = self._to_curl(derived["arch"], derived["tilt"],
+                             derived["gamma"])
+        self._preview_curl(curl)
+        self._store({"curl": curl})
+
+    def _preview_curl(self, curl: dict) -> None:
+        """Draw the sheet the curl sliders describe, without reprocessing.
+
+        The grid comes from the SAME builder the remap uses
+        (`debug_renderers.dewarp_grid_lattice`), with the row's stamp and the
+        edited curl substituted — so what the user sees is the surface, not an
+        approximation of it. The POSE is the last fit's: a rerun re-optimises
+        it around the frozen shape, so the final page shifts a little. That is
+        stated in the hint above the sliders."""
+        row = self.strip.currentRow()
+        item = self.strip.item(row)
+        meta = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
+        rp = dict((meta or {}).get("replay_params") or {})
+        if not rp.get("params"):
+            return
+        params = list(rp["params"])
+        if len(params) < 8:
+            return
+        params[6] = float(curl.get("alpha", 0.0) or 0.0)
+        params[7] = float(curl.get("beta", 0.0) or 0.0)
+        rp["params"] = params
+        gamma = float(curl.get("gamma", 0.0) or 0.0)
+        spine = dict(rp.get("spine") or {})
+        if gamma and spine:
+            spine["gamma"] = gamma
+            rp["spine"] = spine
+        elif not gamma:
+            rp["spine"] = None
+        try:
+            from aglaia.storage.debug_renderers import dewarp_grid_lattice
+            lattice = dewarp_grid_lattice(rp, 18, 28)
+        except Exception:
+            return
+        lines = [[(float(x), float(y)) for x, y in row_pts]
+                 for row_pts in lattice]
+        lines += [[(float(x), float(y)) for x, y in col_pts]
+                  for col_pts in lattice.transpose(1, 0, 2)]
+        self.canvas.set_preview(lines)
 
     def _on_canvas_edited(self, kind: str, value) -> None:
         if kind == "skew_deg":
