@@ -196,6 +196,10 @@ class LocalVlmServer:
         url = f"http://127.0.0.1:{self.port}/v1/models"
         while time.time() < deadline:
             try:
+                # Plain urllib on purpose: this is the LOCAL VLM server,
+                # which may legitimately answer on ::1. `aglaia.net`'s
+                # IPv4 preference is for the open internet and would break
+                # an IPv6 localhost to fix a problem it does not have.
                 with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310
                     if r.status == 200:
                         return True

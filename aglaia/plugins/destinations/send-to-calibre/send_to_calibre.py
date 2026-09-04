@@ -35,14 +35,15 @@ from pathlib import Path
 from urllib.parse import quote
 
 from aglaia.plugin_api import (
-    BookMeta, CheckResult, Destination, Field, SendResult, register_destination,
+    BookMeta, CheckResult, Destination, Field, SendResult, http_client,
+    register_destination,
 )
 
 
 @register_destination
 class CalibreDestination(Destination):
     name = "send-to-calibre"
-    display = "calibre library"
+    display = "Export to Calibre server"
     description = "Add the export to a calibre content server's library."
     # calibre reads metadata out of the file itself, and happily takes any
     # format it knows. These are the ones Aglaïa produces.
@@ -95,9 +96,11 @@ class CalibreDestination(Destination):
         return httpx.DigestAuth(user, pwd)
 
     def _client(self):
-        import httpx
-        return httpx.Client(timeout=float(self.conf("timeout_s") or 120),
-                            auth=self._auth(), follow_redirects=True)
+        # The host's client, not a bare httpx one: it prefers IPv4, which on
+        # a network advertising IPv6 without routing it is the difference
+        # between 0.05 s and 24 s per request.
+        return http_client(float(self.conf("timeout_s") or 120),
+                           auth=self._auth())
 
     # ── check ─────────────────────────────────────────────────────────
     def check(self) -> CheckResult:

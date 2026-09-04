@@ -1,6 +1,6 @@
 [plugin]
 slug     = "send-to-kindle"
-name     = "Kindle (email)"
+name     = "Export to Kindle by email"
 version  = "1.0.0"
 summary  = "Mail a finished export to a Kindle address."
 author   = "Aglaïa <aglaia@bibli.cc>"

@@ -37,6 +37,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+from aglaia import net as _net
+
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
@@ -118,7 +120,7 @@ class DownloadWorker(QObject):
         if already > 0:
             req.add_header("Range", f"bytes={already}-")
         try:
-            resp = urllib.request.urlopen(req, timeout=30)
+            resp = _net.urlopen(req, timeout=30)
         except urllib.error.HTTPError as e:
             # 416 = the server has nothing past `already` → file already
             # complete; promote .partialdl atomically and call it a win.
@@ -248,7 +250,7 @@ class SuryaWorker(QObject):
         req = urllib.request.Request(url)
         req.add_header("User-Agent", self.USER_AGENT)
         req.add_header("Accept", "application/json")
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _net.urlopen(req, timeout=30) as r:
             data = json.load(r)
         out: list[tuple[str, int]] = []
         for s in data or []:
@@ -274,7 +276,7 @@ class SuryaWorker(QObject):
         req = urllib.request.Request(url, method="HEAD")
         req.add_header("User-Agent", self.USER_AGENT)
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with _net.urlopen(req, timeout=15) as r:
                 cl = r.headers.get("Content-Length")
                 return int(cl) if cl else 0
         except Exception:
@@ -303,7 +305,7 @@ class SuryaWorker(QObject):
         if already > 0:
             req.add_header("Range", f"bytes={already}-")
         try:
-            resp = urllib.request.urlopen(req, timeout=60)
+            resp = _net.urlopen(req, timeout=60)
         except urllib.error.HTTPError as e:
             if e.code == 416 and already > 0:
                 # Server says we're past EOF — partial is the full file.

@@ -59,13 +59,51 @@ def _hline() -> QFrame:
     return f
 
 
+#: A card's fixed width. The list is browsed, not read line by line, so a
+#: column of full-width rows wastes the pane and makes six plugins look like
+#: sixty.
+CARD_W = 330
+
+
 def _card(border: str = "") -> QFrame:
+    """A plugin card.
+
+    The stylesheet is scoped to `QFrame#pluginCard`, NOT to `QFrame` —
+    **`QLabel` is a subclass of `QFrame`**, so a bare `QFrame { … }` rule
+    paints a background and a border on every label inside the card too. That
+    is what turned each card into a stack of grey stripes."""
     f = QFrame()
+    f.setObjectName("pluginCard")
+    f.setFixedWidth(CARD_W)
     f.setStyleSheet(
-        f"QFrame {{ background: {COLOR_BG_OVERLAY_SOFT}; "
+        f"QFrame#pluginCard {{ background: {COLOR_BG_OVERLAY_SOFT}; "
         f"border: 1px solid {border or COLOR_OUTLINE_FAINT}; "
-        f"border-radius: 8px; }}")
+        f"border-radius: 10px; }}")
     return f
+
+
+def _pill(text: str, colour: str) -> QLabel:
+    """A small tag — a version, a kind. Scoped by object name for the same
+    reason `_card` is."""
+    lbl = QLabel(text)
+    lbl.setObjectName("pluginPill")
+    lbl.setStyleSheet(
+        f"QLabel#pluginPill {{ color: {colour}; font-size: 10px; "
+        f"font-weight: 600; border: 1px solid {colour}; border-radius: 7px; "
+        f"padding: 1px 6px; background: transparent; }}")
+    lbl.setSizePolicy(lbl.sizePolicy().horizontalPolicy().Fixed,
+                      lbl.sizePolicy().verticalPolicy().Fixed)
+    return lbl
+
+
+#: What a plugin kind is CALLED. "destinations" is what the code calls the
+#: folder; "export" is what the thing does, which is what a user is looking
+#: for in a list.
+KIND_LABEL = {
+    "destinations": "export",
+    "processors": "processing",
+    "ocr": "OCR",
+}
 
 
 class _IndexJob(QThread):
@@ -557,8 +595,8 @@ class PluginsTab(QWidget):
             empty.setStyleSheet(
                 f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
             self._body_layout.addWidget(empty)
-        for item in installed:
-            self._body_layout.addWidget(self._installed_card(item))
+        self._body_layout.addWidget(
+            self._grid([self._installed_card(i) for i in installed]))
 
         have = {i["slug"] for i in installed}
         entries = [e for e in (self._index.entries if self._index else [])
@@ -577,9 +615,22 @@ class PluginsTab(QWidget):
             lbl = QLabel(msg)
             lbl.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
             self._body_layout.addWidget(lbl)
-        for e in entries:
-            self._body_layout.addWidget(self._available_card(e))
+        self._body_layout.addWidget(
+            self._grid([self._available_card(e) for e in entries]))
         self._body_layout.addStretch(1)
+
+    def _grid(self, cards: list) -> QWidget:
+        """Cards that wrap to the pane's width.
+
+        `FlowLayout` is the app's own — the scans grid uses it — so the
+        wrapping behaves the way the rest of Aglaïa does instead of being a
+        second, subtly different one."""
+        from aglaia.gui.FlowLayout import FlowContentWidget, FlowLayout
+        host = FlowContentWidget()
+        lay = FlowLayout(host, h_spacing=10, v_spacing=10)
+        for c in cards:
+            lay.insertWidget(-1, c)
+        return host
 
     def _installed_card(self, item: dict) -> QWidget:
         from aglaia.app_data import plugin_registry as reg
@@ -592,22 +643,22 @@ class PluginsTab(QWidget):
         v.setContentsMargins(12, 10, 12, 10)
         v.setSpacing(6)
 
-        top = QHBoxLayout()
-        name = f"{man.name} {man.version}" if man else item["slug"]
-        lbl = QLabel(name)
+        lbl = QLabel(man.name if man else item["slug"])
+        lbl.setWordWrap(True)
         lbl.setStyleSheet(
-            f"color: {COLOR_FONT_PRIMARY}; font-weight: 700; font-size: 13px;")
-        top.addWidget(lbl)
+            f"color: {COLOR_FONT_PRIMARY}; font-weight: 700; font-size: 14px;")
+        v.addWidget(lbl)
+
+        tags = QHBoxLayout()
+        tags.setSpacing(5)
+        if man:
+            tags.addWidget(_pill(man.version, COLOR_FONT_MUTED))
+        tags.addWidget(_pill(KIND_LABEL.get(item["kind"], item["kind"]),
+                             COLOR_PRIMARY))
         if unreviewed:
-            tag = QLabel(self.tr("UNREVIEWED"))
-            tag.setStyleSheet(
-                f"color: {COLOR_ERROR}; font-size: 10px; font-weight: 800;")
-            top.addWidget(tag)
-        kind = QLabel(item["kind"])
-        kind.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
-        top.addWidget(kind)
-        top.addStretch(1)
-        v.addLayout(top)
+            tags.addWidget(_pill(self.tr("UNREVIEWED"), COLOR_ERROR))
+        tags.addStretch(1)
+        v.addLayout(tags)
 
         if item.get("error"):
             err = QLabel(item["error"])
@@ -651,14 +702,21 @@ class PluginsTab(QWidget):
         v = QVBoxLayout(card)
         v.setContentsMargins(12, 10, 12, 10)
         v.setSpacing(6)
-        top = QHBoxLayout()
-        lbl = QLabel(f"{entry.name} {entry.version}")
+        lbl = QLabel(entry.name)
+        lbl.setWordWrap(True)
         lbl.setStyleSheet(
-            f"color: {COLOR_FONT_PRIMARY}; font-weight: 700; font-size: 13px;")
-        top.addWidget(lbl)
-        kind = QLabel(entry.kind)
-        kind.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
-        top.addWidget(kind)
+            f"color: {COLOR_FONT_PRIMARY}; font-weight: 700; font-size: 14px;")
+        v.addWidget(lbl)
+
+        tags = QHBoxLayout()
+        tags.setSpacing(5)
+        tags.addWidget(_pill(entry.version, COLOR_FONT_MUTED))
+        tags.addWidget(_pill(KIND_LABEL.get(entry.kind, entry.kind),
+                             COLOR_PRIMARY))
+        tags.addStretch(1)
+        v.addLayout(tags)
+
+        top = QHBoxLayout()
         top.addStretch(1)
         busy = (self._installing == entry.slug)
         btn = QPushButton(self.tr("Installing…") if busy
@@ -668,13 +726,12 @@ class PluginsTab(QWidget):
         # the same status line for no benefit.
         btn.setEnabled(not self._installing)
         btn.clicked.connect(lambda _=False, e=entry: self._install(e))
-        top.addWidget(btn)
-        v.addLayout(top)
+
         if entry.summary:
-            s = QLabel(entry.summary)
-            s.setWordWrap(True)
-            s.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
-            v.addWidget(s)
+            sm = QLabel(entry.summary)
+            sm.setWordWrap(True)
+            sm.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+            v.addWidget(sm)
         byline = QLabel(
             self.tr("by Aglaïa") if entry.first_party
             else self.tr("by {who}").format(
@@ -687,6 +744,9 @@ class PluginsTab(QWidget):
             c.setWordWrap(True)
             c.setStyleSheet(f"color: {COLOR_WARNING}; font-size: 10px;")
             v.addWidget(c)
+        v.addStretch(1)
+        top.addWidget(btn)
+        v.addLayout(top)
         return card
 
     # ── actions ───────────────────────────────────────────────────────
@@ -771,9 +831,11 @@ class PluginsTab(QWidget):
         from aglaia.workers import destinations as dest
         d = dest.load_all().get(slug)
         if d is None:
-            QMessageBox.information(
-                self, self.tr("Not loaded"),
-                self.tr("{slug} did not load — check the Log tab.").format(
-                    slug=slug))
+            # Say WHY. "Check the Log tab" is not a diagnosis, and it leaves
+            # the user with a plugin that is installed, listed and inert.
+            why = dest.load_error(slug) or self.tr(
+                "it was not found among the loaded plugins")
+            QMessageBox.warning(
+                self, self.tr("{slug} did not load").format(slug=slug), why)
             return
         PluginSettingsDialog(d, self).exec()

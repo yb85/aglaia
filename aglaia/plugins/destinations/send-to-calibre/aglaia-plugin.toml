@@ -1,8 +1,8 @@
 [plugin]
 slug     = "send-to-calibre"
-name     = "calibre library"
+name     = "Export to Calibre server"
 version  = "1.0.0"
-summary  = "Add a finished export to a calibre content server's library."
+summary  = "Add a finished export to a Calibre content server's library."
 author   = "Aglaïa <aglaia@bibli.cc>"
 homepage = "https://aglaia.bibli.cc"
 license  = "MIT"

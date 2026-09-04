@@ -72,6 +72,15 @@ from aglaia.processors.option_specs import (                   # noqa: E402
     _i as option_int, _s as option_str,
 )
 
+# ── networking ────────────────────────────────────────────────────────
+# A plugin that talks to the internet should use this rather than building
+# its own client: it prefers IPv4, which on a network that advertises IPv6
+# without routing it is the difference between 0.05 s and 24 s per request
+# (see `aglaia/net.py` for the measurement). Declaring `network = true` is
+# what puts "network access" in the install dialog; this is what makes it
+# fast.
+from aglaia.net import http_client, http_get                   # noqa: E402
+
 # ── the context the host hands over ───────────────────────────────────
 from aglaia.app_data.plugin_ctx import (                       # noqa: E402
     PluginConfig, PluginContext, PluginSecrets,
@@ -315,6 +324,8 @@ __all__ = [
     "option_bool", "option_enum", "option_float", "option_int", "option_str",
     "to_gray", "to_rgb", "to_bw", "is_binary",
     "add_erase", "get_erase",
+    # networking
+    "http_client", "http_get",
     # ocr
     "OcrEngine", "OcrResult", "OcrLine", "register_ocr_engine",
     # destinations

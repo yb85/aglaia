@@ -32,7 +32,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from aglaia.plugin_api import (
-    BookMeta, CheckResult, Destination, Field, SendResult, register_destination,
+    BookMeta, CheckResult, Destination, Field, SendResult, http_client,
+    register_destination,
 )
 
 #: What the fiching chain can read, per the API docs. Sending anything else
@@ -45,7 +46,7 @@ ADMITTED = ("pdf", "epub", "djvu", "md", "txt", "docx", "doc", "odt", "rtf",
 @register_destination
 class CorpusDestination(Destination):
     name = "send-to-corpus"
-    display = "Corpus library"
+    display = "Export to Corpus library"
     description = "Upload the export to a Corpus library instance."
     # Both the PDF and the Markdown export are admitted, so both are offered.
     accepts = ("pdf", "md", "txt", "epub", "html")
@@ -78,9 +79,9 @@ class CorpusDestination(Destination):
         return {"X-API-Key": self.secret("api_key")}
 
     def _client(self):
-        import httpx
-        return httpx.Client(timeout=float(self.conf("timeout_s") or 300),
-                            follow_redirects=True)
+        # The host's client: IPv4-preferring, so a dead IPv6 route does not
+        # cost 24 s per request (see aglaia/net.py).
+        return http_client(float(self.conf("timeout_s") or 300))
 
     # ── check ─────────────────────────────────────────────────────────
     def check(self) -> CheckResult:

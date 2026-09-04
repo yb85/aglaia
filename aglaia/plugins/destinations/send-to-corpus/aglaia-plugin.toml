@@ -1,6 +1,6 @@
 [plugin]
 slug     = "send-to-corpus"
-name     = "Corpus library"
+name     = "Export to Corpus library"
 version  = "1.0.0"
 summary  = "Upload a finished export to a Corpus library instance."
 author   = "Aglaïa <aglaia@bibli.cc>"

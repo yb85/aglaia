@@ -134,6 +134,16 @@ def _import_entry(found: Found):
 
 
 _loaded: dict[str, Destination] = {}
+#: slug -> why it did not load. A plugin that fails must be able to SAY so:
+#: "check the Log tab" is not a diagnosis when nothing routes there, and the
+#: user is left with a plugin that is installed, listed, and inert.
+_errors: dict[str, str] = {}
+
+
+def load_error(slug: str) -> str:
+    """Why `slug` is not in `load_all()`, or "" if it is (or was never seen)."""
+    load_all()
+    return _errors.get(slug, "")
 
 
 def load_all(*, log: Optional[Callable[[str, str], None]] = None
@@ -143,14 +153,18 @@ def load_all(*, log: Optional[Callable[[str, str], None]] = None
     a worker."""
     if _loaded:
         return dict(_loaded)
+    _errors.clear()
+    found_slugs: list[str] = []
     for found in discover():
+        found_slugs.append(found.slug)
         try:
             _import_entry(found)
         except Exception as e:  # noqa: BLE001 — one bad plugin, not a dead app
-            msg = f"failed to import {found.slug}: {type(e).__name__}: {e}"
-            print(f"[destinations] {msg}")
+            msg = f"{type(e).__name__}: {e}"
+            _errors[found.slug] = f"it would not import — {msg}"
+            print(f"[destinations] failed to import {found.slug}: {msg}")
             if log:
-                log("WARNING", f"[destinations] {msg}")
+                log("WARNING", f"[destinations] {found.slug}: {msg}")
             continue
     caps_by_slug = {f.slug: (f.manifest.get("capabilities") or {})
                     for f in discover()}
@@ -160,6 +174,8 @@ def load_all(*, log: Optional[Callable[[str, str], None]] = None
         try:
             inst = cls()
         except Exception as e:  # noqa: BLE001
+            _errors[name] = (f"it imported but would not construct — "
+                             f"{type(e).__name__}: {e}")
             print(f"[destinations] {name} would not construct: {e}")
             continue
         caps = caps_by_slug.get(name, {})
@@ -171,9 +187,18 @@ def load_all(*, log: Optional[Callable[[str, str], None]] = None
             inst.ctx = build_context(name, version=vers_by_slug.get(name, "0"),
                                      wants_secrets=wants)
         except ValueError as e:
+            _errors[name] = f"its slug is unusable — {e}"
             print(f"[destinations] {name} has an unusable slug: {e}")
             continue
         _loaded[name] = inst
+    # A plugin directory that was discovered but registered nothing: the
+    # module imported and simply never called `@register_destination`, which
+    # is the one failure that leaves no exception behind to report.
+    for slug in found_slugs:
+        if slug not in _loaded and slug not in _errors:
+            _errors[slug] = ("it imported but registered no destination — is "
+                             "the class decorated with @register_destination, "
+                             "and does its `name` match the plugin slug?")
     return dict(_loaded)
 
 
@@ -193,3 +218,4 @@ def for_format(ext: str) -> list[Destination]:
 
 def reset_for_tests() -> None:
     _loaded.clear()
+    _errors.clear()

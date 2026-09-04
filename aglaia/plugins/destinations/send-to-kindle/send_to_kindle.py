@@ -49,7 +49,7 @@ _MIME = {
 @register_destination
 class KindleDestination(Destination):
     name = "send-to-kindle"
-    display = "Kindle (email)"
+    display = "Export to Kindle by email"
     description = "Mail the export to a Kindle address, or to anyone."
     accepts = ("pdf", "epub", "txt", "md", "docx")
 

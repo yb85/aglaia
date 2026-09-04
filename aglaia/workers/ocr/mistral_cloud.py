@@ -107,10 +107,15 @@ def make_mistral_client(api_key: str):
     # Explicit timeouts so a flaky network can't wedge a worker thread forever
     # (the batch-check QThread was hanging in a timeout-less socket connect →
     # "Check result" never completed). connect 10s / read 60s / total 120s.
+    # IPv4-preferring, for the same reason the plugin registry is: a host
+    # that resolves to IPv6 first on a network that does not route it costs
+    # the full connect timeout per dead address before IPv4 is reached — 24
+    # seconds measured, per request (`aglaia/net.py`). Billed page uploads are
+    # the last place to spend that.
+    from aglaia import net as _net
     return Mistral(api_key=api_key,
-                   client=httpx.Client(
-                       event_hooks={"request": [_tag_ua]},
-                       timeout=httpx.Timeout(120.0, connect=10.0, read=60.0)))
+                   client=_net.http_client(
+                       120.0, event_hooks={"request": [_tag_ua]}))
 
 
 def _is_bitonal(arr: np.ndarray) -> bool:
