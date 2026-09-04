@@ -6,9 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0rc5] — 2026-09-04
 
-Per-page manual tuning (milestone M9), and four output defects that had been
-degrading pages silently — three of them with no failing test, all three found
-by measuring a real book rather than by reading the code.
+Per-page manual tuning (milestone M9), editable capture shortcuts, and a
+run of output defects that had been degrading pages silently — most with no
+failing test, and all found by measuring real projects rather than by reading
+the code.
 
 ### Added
 
@@ -51,6 +52,17 @@ by measuring a real book rather than by reading the code.
 - **A hand-edited page is marked** in the table, the card grid and the gallery
   by one quiet dot, whose tooltip names what was touched.
 
+- **Capture shortcuts are editable, two per action** (#103). A pencil beside
+  the shortcut legend opens a modal; clicking a slot **arms** it and the next
+  key or combination pressed is what it becomes. Bindings persist per user and
+  override the YAML `keycontrols`.
+
+  The old matcher compared key NAMES against `event.text()` and a table of
+  seven names, and never looked at `event.modifiers()` — so no combination was
+  expressible at all. Matching moves to `QKeySequence`. That is what makes the
+  case this was built for work: a **presentation remote** whose fullscreen
+  button cycles between `Shift+F5` and `Esc`, both bound to capture.
+
 - **Convex-hull page ROI** (`roi_hull`, default on), backported from iOS. The
   child ROI is the region the Binarizer keeps; the axis-aligned bbox of a
   slanted text block swallows its corners, which is exactly where the fingers
@@ -67,7 +79,64 @@ by measuring a real book rather than by reading the code.
   from rc3 on published without it regardless. The `cuda` extra and
   `Aglaia.spec`'s slim-CUDA block are kept for a local build.
 
+### Changed
+
+- **The default page margin is 2 mm**, stated explicitly in all four shipped
+  pipelines. They said 5 and 15 — inconsistent between workflows as well as
+  within a page (#112).
+
+- **`min_spans` 4 → 3** (#108). That floor was tuned for the retired Powell
+  optimizer; the LM solver recovers a sheet from far fewer baselines, so the
+  guard was refusing pages it fits well.
+
 ### Fixed
+
+- **The margin you set was not the margin you got.** Measured over 40 pages of
+  a real project asking for 5 mm: top and bottom exact, left and right never
+  the requested value and varying 6.6 mm across pages (10.2–16.8 mm).
+  `MarginSetter._enforce_width_floor` padded the page back out to the step's
+  INPUT width whenever the crop came out narrower — which is every page,
+  because that input is the dewarp canvas and stripping its whitespace is the
+  crop's whole job. Horizontally the floor re-added exactly what the crop had
+  removed. It becomes `width_floor`, **off by default**. Re-measured on the
+  same 40 pages: every side 2.03 mm, zero spread; pages come out 16–25%
+  narrower, which is the leftover dewarp whitespace going away (#112).
+
+- **A reordered card vanished** (#105). `FlowLayout.removeWidget` hides the
+  widget on the way out, and `hide()` sets the explicit hide flag that
+  `addChildWidget` does not clear — so the card returned to the right slot and
+  stayed invisible. Under it sat a second defect: the list and the gallery
+  enumerated scans by `scan_id` while the grid ordered by `page_order`, so the
+  two agreed only until the first reorder. One source of display order now
+  serves all three views.
+
+- **The dewarp composite dropped to a bare image mid-rerun** (#106).
+  Committing a slider reruns the branch, and the rebuild cleared the rendered
+  overlays for as long as the background render took — so the picture the live
+  grid preview exists to be compared against disappeared exactly while the
+  comparison was being made.
+
+- **"No OS keychain was available" on a Mac whose Keychain works** (#107). The
+  real cause is that `keyring` is not installed: it ships in the `cloud`
+  extra, which the usual dev sync omits. One bare `except` around both the
+  import and the write reported a missing *package* as a missing *backend*,
+  and the key was silently downgraded to plain text. The dialog now warns
+  before the key is typed.
+
+- **One "Check result" click disabled the button for the session** (#111).
+  `deleteLater()` freed the worker wrapper while the attribute still pointed
+  at it, and `isRunning()` on a freed QThread raises rather than answering
+  False — so the guard unwound out of the slot before the worker was ever
+  constructed, and every later click was a no-op until the project was
+  reopened.
+
+- **The pipeline-mode artwork painted itself black** (#114). Those SVGs fill
+  with `currentColor`, which `QSvgRenderer` does not resolve — it falls back
+  to black, so the book artwork was near-invisible on the dark palette while
+  the Lucide icon beside it, already routed through the tinting renderer,
+  looked right. Measured on the bundled assets: the old path yields ink
+  `rgb(0, 0, 0)`; tinted, the hero comes out `(239, 239, 239)` on dark and
+  `(23, 23, 27)` on light.
 
 - **Landscape page crops came out downscaled, still stamped 300 dpi.** The
   remap sized its output height against `ref_h`, but `page_dims` lives in
