@@ -632,6 +632,16 @@ def _render_svg_tinted_cached(name: str, color: str, size: int):
     svg_src = _read_svg(name)
     if svg_src is None:
         return None
+    return _tint_and_render(svg_src, color, size)
+
+
+def _tint_and_render(svg_src: str, color: str, size: int):
+    """Substitute ``currentColor`` and rasterise at 2×.
+
+    QSvgRenderer does not resolve ``currentColor`` — it paints BLACK — so
+    every icon that relies on it has to be rewritten before rendering.
+    `_svg_color_opacity` handles the other trap, ``rgba()``, which the
+    renderer also silently blackens."""
     svg_color, opacity = _svg_color_opacity(color)
     tinted = (svg_src
               .replace('stroke="currentColor"', f'stroke="{svg_color}"')
@@ -648,6 +658,41 @@ def _render_svg_tinted_cached(name: str, color: str, size: int):
     renderer.render(p)
     p.end()
     return pix
+
+
+def svg_pixmap_path(path, *, color: Optional[str] = None,
+                    size: int = 64) -> QPixmap:
+    """Theme-tinted pixmap for an SVG addressed by PATH rather than by
+    Lucide name — the pipeline-mode artwork in `assets/modes/`.
+
+    Those files paint with ``fill="currentColor"`` too, and were being drawn
+    straight through `QIcon`, so they came out black on the dark palette
+    while the Lucide icon beside them was tinted correctly (#114).
+
+    A non-SVG icon (a user's own PNG) is rendered as-is: there is no
+    ``currentColor`` to substitute, and tinting someone's coloured artwork
+    would be wrong."""
+    if path is None:
+        return QPixmap()
+    p = str(path)
+    if not p.lower().endswith(".svg"):
+        return QIcon(p).pixmap(int(size), int(size))
+    if color is None:
+        color = QApplication.palette().color(QPalette.ColorRole.Text).name()
+    pix = _svg_pixmap_path_cached(p, color, int(size))
+    return pix if pix is not None else QPixmap()
+
+
+@lru_cache(maxsize=128)
+def _svg_pixmap_path_cached(path: str, color: str, size: int):
+    """Cached like the Lucide render. Keyed on the path: the mode artwork is
+    bundled and immutable for a session, and the picker rebuilds every card
+    each time it opens."""
+    try:
+        svg_src = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return _tint_and_render(svg_src, color, size)
 
 
 def lucide(name: str, *, color: Optional[str] = None, size: int = 20) -> QIcon:
