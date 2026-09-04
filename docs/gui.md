@@ -188,7 +188,15 @@ render — exactly while the user was comparing the live slider grid against
 it (#106).
 
 **Auto-process** (on by default, remembered for the session) reruns the page
-as soon as a value changes. Turn it off to make several edits and run once —
+once a value *settles* — never per drag step. `EditCanvas.edited` fires on
+every mouse-move so the handle tracks the cursor; `edit_finished` is the
+commit, emitted on release (and immediately for an atomic edit like a
+double-click vertex insert). Persisting and rerunning on `edited` launched a
+chain rerun per move event, hundreds deep into one drag, until memory ran out
+and the app died (#116). The sliders debounce the same way, on
+`sliderReleased`.
+
+Turn it off to make several edits and run once —
 the **Reprocess** button lights up, and is dimmed while auto-process is on
 because there would be nothing for it to do. **Clear override** drops this
 layout's stored values and restores the automatic result.

@@ -310,6 +310,10 @@ class DebugViewerWidget(QWidget):
         right_v.setSpacing(4)
         self.canvas = EditCanvas(placeholder=self.tr("Select a step"))
         self.canvas.edited.connect(self._on_canvas_edited)
+        self.canvas.edit_finished.connect(self._on_canvas_edit_finished)
+        # What the live drag is showing, not yet written. See
+        # `_on_canvas_edit_finished`.
+        self._pending_canvas: dict = {}
         bar = QHBoxLayout()
         bar.setContentsMargins(2, 0, 2, 0)
         self.zoom_bar = ZoomToolbar(self.canvas, default=2.0)
@@ -885,6 +889,7 @@ class DebugViewerWidget(QWidget):
         self.canvas.set_preview(None)
         self._slider_timer.stop()
         self._pending_slider = {}
+        self._pending_canvas = {}
         self.force_chk.blockSignals(True)
         self.force_chk.setChecked(bool(stored.get("force")))
         self.force_chk.blockSignals(False)
@@ -995,6 +1000,14 @@ class DebugViewerWidget(QWidget):
         self.canvas.set_preview(lines)
 
     def _on_canvas_edited(self, kind: str, value) -> None:
+        """A drag STEP. Update what the panel shows, stash the value, and —
+        while the mouse is still down — write nothing.
+
+        This used to persist and rerun here. `edited` fires per mouse-move,
+        so one drag across the canvas launched a chain rerun per move event;
+        they piled up until memory ran out and the app died (#116). The
+        commit is `_on_canvas_edit_finished`, exactly as the sliders beside
+        it commit on `sliderReleased`."""
         if kind == "skew_deg":
             lo, _hi, step = self._RANGES["skew_deg"]
             sl = self._sliders["skew_deg"]
@@ -1006,11 +1019,23 @@ class DebugViewerWidget(QWidget):
             sl.blockSignals(False)
             self._slider_labels["skew_deg"].setText(
                 self._fmt("skew_deg", float(value)))
-            self._store({"skew_deg": float(value)})
+            self._pending_canvas = {"skew_deg": float(value)}
         elif kind == "roi":
             # The canvas knows a polygon, not which field it is: the layout
             # ROI and the keystone quad are the same shape.
-            self._store({getattr(self, "_poly_field", "roi"): value})
+            self._pending_canvas = {
+                getattr(self, "_poly_field", "roi"): value}
+        else:
+            return
+        if not self.canvas.is_editing():
+            # No drag to wait for (a double-click insert): commit now.
+            self._on_canvas_edit_finished()
+
+    def _on_canvas_edit_finished(self) -> None:
+        """The drag ended — persist once, and let auto-process rerun once."""
+        fields, self._pending_canvas = self._pending_canvas, {}
+        if fields:
+            self._store(fields)
 
     def _store(self, fields: dict) -> None:
         """Persist an edit for the selected row, then rerun if asked to.

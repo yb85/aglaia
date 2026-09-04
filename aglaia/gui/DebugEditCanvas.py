@@ -52,13 +52,22 @@ _PREVIEW_LINE = QColor(255, 90, 200)
 class EditCanvas(ZoomCanvas):
     """A `ZoomCanvas` that can also hand back an edited overlay.
 
-    `edited` fires on every drag step, not only on release: with
-    auto-process off the user wants to see the handle follow the cursor, and
-    with it on the host is the one that decides to debounce a rerun.
+    `edited` fires on every drag step, not only on release, so the handle
+    follows the cursor. It is NOT a commit signal: persisting and rerunning
+    per step meant hundreds of chain reruns stacked up inside one drag, which
+    exhausted memory and killed the app (#116). `edit_finished` is the commit
+    — emitted once on release, and immediately for an atomic edit like a
+    double-click vertex insert.
     """
 
     #: ``(kind, value)`` — ``("roi", [[x, y], …])`` or ``("skew_deg", float)``.
+    #: Fires on every drag STEP so the handle tracks the cursor.
     edited = Signal(str, object)
+    #: The drag ended. This is the one to persist and rerun on: `edited`
+    #: alone had the host writing SQLite and launching a chain rerun per
+    #: mouse-move event, hundreds deep into a single drag, until memory ran
+    #: out and the app died (#116).
+    edit_finished = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None, **kw):
         super().__init__(parent, **kw)
@@ -217,6 +226,9 @@ class EditCanvas(ZoomCanvas):
             self._drag_rot = False
             self._drag_vertex = None
             self.update()
+            # AFTER clearing the flags: the host checks `is_editing()` to
+            # tell a drag step from a commit.
+            self.edit_finished.emit()
             return
         super().mouseReleaseEvent(ev)
 
@@ -253,6 +265,8 @@ class EditCanvas(ZoomCanvas):
             return
         self._poly.insert(best_i + 1, [src[0], src[1]])
         self.edited.emit("roi", self.polygon())
+        # Atomic — there is no drag to wait for, so it commits at once.
+        self.edit_finished.emit()
         self.update()
 
     # ── paint ─────────────────────────────────────────────────────
