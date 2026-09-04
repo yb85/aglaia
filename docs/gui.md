@@ -175,7 +175,13 @@ Every spatial edit stores the frame it was made on, so a polygon is validated
 rather than silently rescaled.
 
 **After a rerun** the branch's subtree is wiped and rewritten, so the tab's
-leaf node is a dead row. `MainWindow._refresh_debug_tabs`, on `branch_ready`,
+leaf node is a dead row. If the tab's own branch is *gone* — the layout set
+was edited and its layout deleted — `reload_for` re-targets the scan's first
+surviving branch instead of declining: `_reprocess` leaves the editor in a
+busy state that only `reload_for` clears, so declining left it disabled on
+"Reprocessing…" for the rest of the session over a page that had already
+finished (#121). A scan with nothing left at all clears the busy state and
+says so, rather than freezing. `MainWindow._refresh_debug_tabs`, on `branch_ready`,
 re-targets every open tab of that page-branch and re-keys `_debug_tabs` —
 without it the tab keeps showing the pre-edit chain and the editor reads as
 broken.
