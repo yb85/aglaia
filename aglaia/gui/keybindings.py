@@ -134,6 +134,40 @@ def matches(event, bindings: dict[str, list[str]], action: str) -> bool:
     return pressed in (bindings.get(action) or [])
 
 
+def action_for(event, bindings: dict[str, list[str]]) -> Optional[str]:
+    """Which action this press fires, or None. One pass over the table
+    instead of one `matches` call per action — this runs on every key."""
+    pressed = from_event(event)
+    if not pressed:
+        return None
+    for name, _label in ACTIONS:
+        if pressed in (bindings.get(name) or []):
+            return name
+    return None
+
+
+#: Widgets that own their keystrokes: a bound letter typed into one of these
+#: is text, not a command. Checked by class so a subclass counts too.
+def is_text_entry(widget) -> bool:
+    """True when `widget` is somewhere the user is typing.
+
+    The capture keys are taken before the focused widget sees them (#119), so
+    this is the line that keeps `s` a letter in a filename field — and keeps
+    the keybinding recorder, itself a `QLineEdit`, recording a key instead of
+    firing it.
+    """
+    if widget is None:
+        return False
+    from PySide6.QtWidgets import (QAbstractSpinBox, QComboBox, QLineEdit,
+                                   QPlainTextEdit, QTextEdit)
+    if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit,
+                           QAbstractSpinBox)):
+        return True
+    if isinstance(widget, QComboBox) and widget.isEditable():
+        return True
+    return False
+
+
 def legend(bindings: dict[str, list[str]]) -> dict[str, list[str]]:
     """The bindings shaped for the panel legend: labelled, and only the
     actions that have one."""

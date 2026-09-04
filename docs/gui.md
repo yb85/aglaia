@@ -289,6 +289,29 @@ combination was expressible at all. Every legacy default (`Space`, `S`,
 `Backspace`, `D`, `R`) parses as a `QKeySequence`, so a config written before
 the change keeps working untouched.
 
+### Priority over the focused widget
+
+The bindings are taken by an **application-level event filter**
+(`MainWindow.eventFilter`, installed on the `QApplication`), not by
+`keyPressEvent`. That method is the last stop in Qt's propagation: whatever
+has focus sees the press first, and anything it accepts never reaches the
+window. So `PgUp` paged the list view's scroll area instead of capturing —
+it worked in the gallery, which does not consume it — and the first press
+after a click was eaten by whatever had just taken focus, which reads as
+"I have to press twice" (#119). A filter on the window would not have helped:
+that is still downstream of its own children.
+
+The filter only pre-empts while capture is genuinely in front
+(`_capture_keys_have_priority`): the window is active, no modal dialog is
+open, the capture panel is visible, and focus is not in a text entry
+(`keybindings.is_text_entry` — `QLineEdit`, `QTextEdit`, `QPlainTextEdit`,
+`QAbstractSpinBox`, an editable `QComboBox`, and their subclasses). Those two
+exclusions are what keep `s` a letter in a filename field and let the
+keybinding recorder — itself a `QLineEdit`, inside a modal — **record** a
+bound key rather than fire it. Auto-repeat is ignored, so a stuck key cannot
+spray captures. `keyPressEvent` stays as the path for a press that reaches
+the window on its own.
+
 ## Input transforms
 
 `WebcamThread.set_transform(str)` parses a string like `"180+mirror"`: rotation in {0, 90, 180, 270}, plus optional `mirror` (horizontal) and `flip` (vertical). The GUI transform buttons mutate this state live.
