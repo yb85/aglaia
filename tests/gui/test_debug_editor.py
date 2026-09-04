@@ -23,10 +23,17 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPointF                               # noqa: E402
-from PySide6.QtGui import QPixmap                                # noqa: E402
+from PySide6.QtCore import QEvent, QPointF, Qt                   # noqa: E402
+from PySide6.QtGui import QMouseEvent, QPixmap                    # noqa: E402
 
 from aglaia.gui.DebugEditCanvas import EditCanvas                # noqa: E402
+
+
+def _mouse(kind, pos):
+    """A real QMouseEvent — the handlers fall through to Qt's own, which
+    rejects a stand-in object."""
+    return QMouseEvent(kind, QPointF(pos), Qt.MouseButton.LeftButton,
+                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
 
 
 @pytest.fixture()
@@ -79,13 +86,7 @@ def test_a_dragged_vertex_is_clamped_into_the_stage_frame(canvas):
                         origin=(0, 20), frame_wh=(100, 80))
     canvas._drag_vertex = 0
     far = canvas._to_view(1000, 1000).toPoint()
-
-    class _Ev:
-        @staticmethod
-        def position():
-            return QPointF(far)
-
-    canvas.mouseMoveEvent(_Ev())
+    canvas.mouseMoveEvent(_mouse(QEvent.Type.MouseMove, far))
     x, y = canvas.polygon()[0]
     assert x == pytest.approx(99.0)
     assert y == pytest.approx(79.0)
@@ -97,18 +98,7 @@ def test_double_click_inserts_a_vertex_on_the_nearest_edge(canvas):
     canvas.set_editable(polygon=[[0, 0], [100, 0], [100, 100], [0, 100]],
                         origin=(0, 0), frame_wh=(200, 150))
     mid = canvas._to_view(50, 0).toPoint()
-
-    class _Ev:
-        @staticmethod
-        def button():
-            from PySide6.QtCore import Qt
-            return Qt.MouseButton.LeftButton
-
-        @staticmethod
-        def position():
-            return QPointF(mid)
-
-    canvas.mouseDoubleClickEvent(_Ev())
+    canvas.mouseDoubleClickEvent(_mouse(QEvent.Type.MouseButtonDblClick, mid))
     poly = canvas.polygon()
     assert len(poly) == 5
     assert poly[1][0] == pytest.approx(50.0, abs=2.0)
@@ -157,3 +147,14 @@ def test_view_and_source_are_inverses_under_a_downscale(canvas):
     for src in ((0.0, 0.0), (60.0, 180.0), (240.0, 24.0)):
         back = canvas._to_src(canvas._to_view(*src).toPoint())
         assert back == pytest.approx(src, abs=2.0)
+
+
+def test_a_quad_refuses_a_fifth_corner(canvas):
+    """A keystone is a projective map from FOUR points; a fifth would have no
+    meaning, so the keystone's polygon does not accept insertion."""
+    canvas.set_editable(polygon=[[0, 0], [100, 0], [100, 100], [0, 100]],
+                        origin=(0, 0), frame_wh=(200, 150),
+                        allow_insert=False)
+    mid = canvas._to_view(50, 0).toPoint()
+    canvas.mouseDoubleClickEvent(_mouse(QEvent.Type.MouseButtonDblClick, mid))
+    assert len(canvas.polygon()) == 4

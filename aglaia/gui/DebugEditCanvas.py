@@ -15,7 +15,8 @@ raster (#96), and hands drags back as edited values.
 
 Two shapes are enough for the three tunable stages:
 
-* a **polygon** whose vertices drag — the layout ROI;
+* a **polygon** whose vertices drag — the layout ROI, and the keystone
+  column quad (which refuses insertion: four points, no more);
 * a **rotation handle** — a bar through the image centre whose free end
   drags, for the deskew angle.
 
@@ -70,13 +71,18 @@ class EditCanvas(ZoomCanvas):
         # the picture on screen is not. Miss this and the error grows with the
         # coordinate — the handles walk away down and right.
         self._scale: float = 1.0
+        # A keystone is a projective map from FOUR points; a fifth would have
+        # no meaning, so its polygon refuses insertion (M9 #100).
+        self._allow_insert = True
         self._drag_vertex: Optional[int] = None
         self._drag_rot = False
 
     # ── public API ────────────────────────────────────────────────
     def set_editable(self, *, polygon=None, rotation_deg=None,
-                     origin=(0, 0), frame_wh=None, scale=1.0) -> None:
+                     origin=(0, 0), frame_wh=None, scale=1.0,
+                     allow_insert=True) -> None:
         """Install (or clear, with both ``None``) the editable overlay."""
+        self._allow_insert = bool(allow_insert)
         self._origin = (float(origin[0]), float(origin[1]))
         self._scale = float(scale) or 1.0
         self._frame_wh = (tuple(int(v) for v in frame_wh)
@@ -206,7 +212,7 @@ class EditCanvas(ZoomCanvas):
         the detector's polygon is convex and the page rarely is."""
         pos = ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
         if (ev.button() != Qt.MouseButton.LeftButton or not self._poly
-                or self._pix is None):
+                or self._pix is None or not self._allow_insert):
             super().mouseDoubleClickEvent(ev)
             return
         n = len(self._poly)

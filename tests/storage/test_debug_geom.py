@@ -98,3 +98,25 @@ def test_geom_reports_the_downscale_the_url_applies():
     assert small["scale"] == 1.0
     big = _skew_renderer(_img(4000, 2000), None, {"skew": 0.0})[0]["geom"]
     assert 0.0 < big["scale"] < 1.0
+
+
+def test_trap_geom_is_the_column_quad():
+    from aglaia.storage.debug_renderers import _trap_renderer
+    quad = [[10, 10], [180, 12], [178, 290], [12, 288]]
+    meta = {"column_quad": quad,
+            "replay_params": {"H": np.eye(3).tolist(),
+                              "canvas_wh": [200, 300], "src_wh": [200, 300]}}
+    geom = _trap_renderer(_img(200, 300), _img(200, 300), meta)[0]["geom"]
+    assert geom["quad"] == [[float(x), float(y)] for x, y in quad]
+    assert geom["frame_wh"] == [200, 300]
+
+
+def test_trap_geom_seeds_a_quad_when_the_step_fell_back():
+    """A page with no quad is exactly the page a user wants to draw one on.
+    Handing back nothing would leave nothing to grab."""
+    from aglaia.storage.debug_renderers import _trap_renderer
+    geom = _trap_renderer(_img(200, 300), _img(200, 300),
+                          {"trapezoid_success": False})[0]["geom"]
+    assert len(geom["quad"]) == 4
+    xs = [p[0] for p in geom["quad"]]
+    assert min(xs) > 0 and max(xs) < 200        # inset, grabbable

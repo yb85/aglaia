@@ -34,6 +34,7 @@ from aglaia.processors.geometry import (
     detect_column_quad_from_baselines, baseline_from_ink,
     zhang_he_aspect_and_focal,
 )
+from aglaia.processors.manual import manual_value, stamp_manual
 from aglaia.processors.utils import binarize_fixed, to_gray
 
 
@@ -483,6 +484,38 @@ class TrapezoidalCorrection(AbstractImageProcessor):
             bw = binarize_fixed(small, 127)
         ink_arr = cv2.bitwise_not(bw) if bw.mean() > 127 else bw
 
+        # Manual column quad (M9 #100). A keystone is a projective map from
+        # four points, and those four points are exactly what a user can judge
+        # better than the estimator on a page it reads wrong. Given them, the
+        # whole detection — baselines, vanishing point, edge clustering — is
+        # what is being overridden, so none of it runs, and the line-count
+        # guard below (which exists to protect that detection) does not apply.
+        # The quad arrives in this step's INPUT coordinates, full resolution.
+        manual_quad = manual_value(buf, "quad", frame_wh=(W_src, H_src))
+        if manual_quad is not None:
+            try:
+                quad = np.asarray(manual_quad, dtype=np.float64).reshape(4, 2)
+            except (TypeError, ValueError):
+                quad = None
+            if quad is not None:
+                # Still refuse a non-convex quad: it has no valid homography,
+                # and a warp through one folds the page over itself. The area
+                # floor is skipped — the size is the user's call.
+                if not _is_convex(quad):
+                    return self._fallback(
+                        buf, reason="manual column quad not convex")
+                out = self._rectify(buf, quad, {
+                    "full_width_idxs": [], "vp_inlier_frac": 1.0,
+                    "n_full_width": 0, "n_vblocks": 1, "n_vp_inliers": 0,
+                    "column_edge_source": "manual",
+                }, W_src=W_src, H_src=H_src, bw=bw, ana_scale=ana_scale,
+                    baselines=[])
+                # Stamp the OUTPUT: `_rectify` builds a fresh buffer and
+                # carries only `_CARRIED_META`, so a stamp on the input would
+                # not survive the step it describes.
+                stamp_manual(out, "quad")
+                return out
+
         # 2. Line bboxes + baselines (analysis coords). Bboxes are kept
         # only as the "rectangle that contains the span"; ALL geometric
         # reasoning (full-width selection, column quad) runs on the
@@ -609,6 +642,19 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         if quad_area < self.opt.min_quad_area_ratio * crop_area:
             return self._fallback(buf, reason=f"column quad too small ({quad_area/crop_area:.2f})")
 
+        return self._rectify(buf, quad, quad_info, W_src=W_src,
+                             H_src=H_src, bw=bw, ana_scale=ana_scale,
+                             baselines=baselines)
+
+    def _rectify(self, buf, quad, quad_info, *, W_src, H_src, bw,
+                 ana_scale, baselines):
+        """Quad → axis-aligned rectangle: recover the aspect, build the
+        homography, warp, and stamp the replay params.
+
+        Shared by the estimated and the MANUAL quad (M9 #100) — a
+        hand-drawn quad must land through exactly the same aspect
+        recovery, margin and warp, or a corrected page would differ from
+        an estimated one by more than its four corners."""
         # 4. Recover true aspect. Zhang-He is closed-form but very sensitive
         # to near-axis-aligned quads; sanity-check against bbox aspect and
         # fall back if the gap is implausible.

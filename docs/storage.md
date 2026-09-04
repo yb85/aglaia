@@ -122,7 +122,9 @@ estimated. Same keying, so the worker loads both alike.
 |---|---|---|
 | `skew_deg` | SkewFinder | Rotation angle in degrees; the estimate does not run |
 | `roi` | PageDetector | ROI polygon `[[x, y], …]` in the branch's own coords |
+| `quad` | TrapezoidalCorrection | Column quad, 4 points TL TR BR BL, in the step's input coords; the whole detection is skipped |
 | `curl` | PageDewarper | `{alpha, beta, gamma}` — the sheet is frozen there and only the pose is re-optimised |
+| `force` | PageDewarper | Run the fit past the span-count guard and the OOB gate |
 | `frame_wh` | validation | `[w, h]` of the stage frame the spatial edits were drawn on |
 
 One row per `(scan, branch)`: the payload is edited as a whole.
@@ -133,7 +135,7 @@ payload deletes the row, so "no override" is the absence of a row.
 **`frame_wh` is not decoration.** A polygon means something only against the
 frame it was drawn on; applying it to a frame of another size shifts or
 rescales it silently, and a page that is quietly wrong is worse than one the
-pipeline decided alone. `repo.validate_frame` drops the spatial fields on a
+pipeline decided alone. `repo.validate_frame` drops the spatial fields (`roi`, `quad`) on a
 mismatch and names what it dropped. A payload with no `frame_wh` predates the
 field and is accepted as unvalidatable. Ported from the iOS `roiFrameWH`
 lesson.

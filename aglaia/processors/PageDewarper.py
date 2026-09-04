@@ -1487,9 +1487,18 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         # vertical extent to fit (chapter-end pages, figures, captions).
         coward_skip = False
 
+        # "Force dewarp" (M9 #101): the user has looked at this page and says
+        # to fit it anyway. Both guards below are right by default and both
+        # are sometimes wrong — a sparse page whose few spans are perfectly
+        # good, a wide fit the OOB gate reads as runaway. Forcing is per page
+        # and stamped, never a default.
+        forced = bool(manual_value(img_buf, "force") or False)
+        if forced:
+            stamp_manual(img_buf, "force")
+
         # Span-count guard: under-constrained fits (title pages, figure crops)
         # let the optimiser wander OPT_MAX_ITER iters and balloon memory.
-        if success and len(spans) < self.min_spans:
+        if success and not forced and len(spans) < self.min_spans:
             coward_skip = True
             img_buf.meta["fallback_reason"] = (
                 f"too few spans ({len(spans)} < {self.min_spans})"
@@ -1800,7 +1809,14 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         }
         img_buf.meta["oob"] = oob
 
-        if oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
+        forced = "force" in (img_buf.meta.get("manual") or [])
+        if forced and (oob["x_oob"] > self.max_oob
+                       or oob["y_oob"] > self.max_oob):
+            # Forced: keep the remap and say so, instead of walking the
+            # failure ladder. The page may well be wrong — that is the user's
+            # call, and the meta records that they made it.
+            img_buf.meta["oob_forced"] = True
+        elif oob["x_oob"] > self.max_oob or oob["y_oob"] > self.max_oob:
             success = False
             # Failure ladder, cheapest first. The γ grid selects on objective
             # alone and can prefer a surface whose remap is wild, so back off

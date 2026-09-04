@@ -475,8 +475,30 @@ def _trap_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     sep = np.full((target_h, max(6, sep_w // 200), 3), 60, dtype=np.uint8)
     composite = np.hstack([src_padded, sep, out_padded])
 
+    # The column quad, in the coordinates of the step's INPUT image — the
+    # left half of the composite, under its label bar. Four points, never
+    # more: a keystone is a projective map from four, and a fifth would have
+    # no meaning (M9 #100).
+    quad_pts = None
+    if quad is not None:
+        try:
+            quad_pts = [[float(x), float(y)] for x, y in quad]
+        except (TypeError, ValueError):
+            quad_pts = None
+    edit_frame = parent if parent is not None else img
+    if quad_pts is None or len(quad_pts) != 4:
+        # The step FELL BACK — no quad was found. That is exactly the page a
+        # user wants to draw one on, so seed the corners from the frame
+        # instead of leaving nothing to grab.
+        fh, fw = edit_frame.shape[:2]
+        ix, iy = fw * 0.08, fh * 0.08
+        quad_pts = [[ix, iy], [fw - 1 - ix, iy],
+                    [fw - 1 - ix, fh - 1 - iy], [ix, fh - 1 - iy]]
     return [{"url": _png_data_url(composite),
-             "label": "source <-> output"}]
+             "label": "source <-> output",
+             "geom": _geom(edit_frame,
+                           origin=(0, _bar_h(src_canvas.shape[1])),
+                           composite=composite, quad=quad_pts)}]
 
 
 def dewarp_grid_lattice(rp: dict, n_grid_x: int,

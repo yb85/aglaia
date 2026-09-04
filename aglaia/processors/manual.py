@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 #: Fields whose meaning depends on the frame they were drawn on.
-SPATIAL_FIELDS = ("roi",)
+SPATIAL_FIELDS = ("roi", "quad")
 
 
 def manual_value(img_buf, field: str, *, frame_wh=None) -> Optional[Any]:

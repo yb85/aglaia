@@ -197,3 +197,78 @@ def test_manual_gamma_is_stamped_as_the_spine():
 def test_no_override_leaves_the_fit_alone():
     out = _dewarp(spine_gammas="").process(_page())
     assert "curl" not in (out.meta.get("manual") or [])
+
+
+# ── TrapezoidalCorrection (#100) ──────────────────────────────────────
+
+def _blank(w=400, h=600):
+    """A page the keystone estimator cannot read: no baselines at all. It
+    falls back — which is exactly the page a user wants to draw a quad on."""
+    return ImageBuffer(np.full((h, w, 3), 255, np.uint8), ImageType.COLOR,
+                       dpi=300, filestem="t")
+
+
+def _trap():
+    from aglaia.processors.TrapezoidalCorrection import (
+        TrapezoidalCorrection, TrapezoidalOption)
+    return TrapezoidalCorrection(TrapezoidalOption())
+
+
+def test_a_manual_quad_rectifies_a_page_the_estimator_gave_up_on():
+    """The whole detection is what is being overridden, so the line-count
+    guard — which exists to protect that detection — must not stand in the
+    way of four points the user placed."""
+    assert _trap().process(_blank()).meta["trapezoid_success"] is False
+    b = _blank()
+    b.meta["manual_overrides"] = {
+        "quad": [[40, 60], [360, 55], [365, 545], [35, 540]],
+        "frame_wh": [400, 600]}
+    out = _trap().process(b)
+    assert out.meta["trapezoid_success"] is True
+    assert out.meta["column_edge_source"] == "manual"
+    assert "quad" in out.meta["manual"]
+
+
+def test_a_non_convex_manual_quad_is_refused():
+    """A folded quad has no valid homography; warping through one folds the
+    page over itself."""
+    b = _blank()
+    b.meta["manual_overrides"] = {
+        "quad": [[40, 60], [360, 55], [35, 540], [365, 545]],   # crossed
+        "frame_wh": [400, 600]}
+    out = _trap().process(b)
+    assert out.meta["trapezoid_success"] is False
+    assert "not convex" in out.meta["fallback_reason"]
+
+
+def test_a_manual_quad_from_another_frame_is_ignored():
+    b = _blank()
+    b.meta["manual_overrides"] = {
+        "quad": [[40, 60], [360, 55], [365, 545], [35, 540]],
+        "frame_wh": [800, 1200]}
+    assert _trap().process(b).meta["trapezoid_success"] is False
+
+
+# ── force dewarp (#101) ───────────────────────────────────────────────
+
+@pytest.mark.skipif(not FIX.exists(), reason="dewarp fixture not present")
+def test_force_runs_the_fit_past_the_span_count_guard():
+    """`min_spans` protects the optimiser from an under-constrained fit. It
+    is right by default and sometimes wrong — a sparse page whose few spans
+    are perfectly good."""
+    guarded = _dewarp(spine_gammas="", min_spans=999).process(_page())
+    assert "too few spans" in guarded.meta.get("fallback_reason", "")
+
+    b = _page()
+    b.meta["manual_overrides"] = {"force": True}
+    forced = _dewarp(spine_gammas="", min_spans=999).process(b)
+    assert "too few spans" not in forced.meta.get("fallback_reason", "")
+    assert "force" in forced.meta["manual"]
+    assert forced.meta.get("replay_params") is not None
+
+
+@pytest.mark.skipif(not FIX.exists(), reason="dewarp fixture not present")
+def test_without_force_the_ladder_is_unchanged():
+    out = _dewarp(spine_gammas="").process(_page())
+    assert "force" not in (out.meta.get("manual") or [])
+    assert out.meta.get("oob_forced") is None

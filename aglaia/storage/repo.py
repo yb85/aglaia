@@ -545,7 +545,7 @@ class ManualOverrideRepo:
     """
 
     #: Fields whose meaning depends on the frame they were drawn on.
-    SPATIAL_FIELDS = ("roi",)
+    SPATIAL_FIELDS = ("roi", "quad")
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn

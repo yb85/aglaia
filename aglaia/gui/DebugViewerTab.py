@@ -272,6 +272,7 @@ class DebugViewerWidget(QWidget):
         self._overlay_geom: list[dict] = []
         self._pending_edit: dict = {}
         self._current_geom: dict = {}
+        self._poly_field = "roi"
         self._busy = False
         # Must exist before `_load()`: seeding the strip selects a row, which
         # paints through `_on_row_changed`.
@@ -406,10 +407,34 @@ class DebugViewerWidget(QWidget):
         rv.addWidget(hint)
         self._editor_pages["PageDetector"] = self._editor_stack.addWidget(roi_page)
 
-        curl_page, _ = self._slider_page(
+        quad_page = QWidget()
+        qv = QVBoxLayout(quad_page)
+        qv.setContentsMargins(0, 0, 0, 0)
+        qhint = QLabel(self.tr("Drag a corner of the column quad. Four "
+                               "corners, no more — a keystone is a "
+                               "projective map from exactly four points."))
+        qhint.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+        qhint.setWordWrap(True)
+        qv.addWidget(qhint)
+        self._editor_pages["TrapezoidalCorrection"] = (
+            self._editor_stack.addWidget(quad_page))
+
+        curl_page, curl_layout = self._slider_page(
             [("alpha", self.tr("Curl α")), ("beta", self.tr("Curl β")),
              ("gamma", self.tr("Spine γ"))],
             self.tr("The sheet is frozen at these; the pose is re-fitted."))
+        # "Force dewarp" belongs beside the sliders: a user forcing the fit
+        # usually then sets the curl by hand (M9 #101).
+        self.force_chk = QCheckBox(self.tr("Force dewarp (bypass the "
+                                           "span-count and out-of-bounds "
+                                           "guards)"))
+        self.force_chk.setToolTip(self.tr(
+            "Fit and remap this page whatever the guards say. They are right "
+            "by default and sometimes wrong — a sparse page whose few spans "
+            "are good, a wide fit read as runaway. The result may be worse; "
+            "the node records that you asked for it."))
+        self.force_chk.toggled.connect(self._on_force_toggled)
+        curl_layout.addWidget(self.force_chk)
         self._editor_pages["PageDewarper"] = self._editor_stack.addWidget(curl_page)
         v.addWidget(self._editor_stack)
 
@@ -468,7 +493,7 @@ class DebugViewerWidget(QWidget):
             self._sliders[key] = sl
             self._slider_labels[key] = val
             v.addLayout(row)
-        return page, None
+        return page, v
 
     def _load(self):
         conn = open_db(self.db_path)
@@ -766,15 +791,26 @@ class DebugViewerWidget(QWidget):
 
         origin = geom.get("origin") or (0, 0)
         frame = geom.get("frame_wh")
-        roi = stored.get("roi") or geom.get("roi")
         skew = stored.get("skew_deg")
         if skew is None:
             skew = geom.get("skew_deg")
+        if processor == "PageDetector":
+            poly = stored.get("roi") or geom.get("roi")
+        elif processor == "TrapezoidalCorrection":
+            poly = stored.get("quad") or geom.get("quad")
+        else:
+            poly = None
         self.canvas.set_editable(
-            polygon=roi if processor == "PageDetector" else None,
+            polygon=poly,
             rotation_deg=skew if processor == "SkewFinder" else None,
             origin=origin, frame_wh=frame,
-            scale=float(geom.get("scale", 1.0) or 1.0))
+            scale=float(geom.get("scale", 1.0) or 1.0),
+            allow_insert=(processor != "TrapezoidalCorrection"))
+        self._poly_field = ("quad" if processor == "TrapezoidalCorrection"
+                            else "roi")
+        self.force_chk.blockSignals(True)
+        self.force_chk.setChecked(bool(stored.get("force")))
+        self.force_chk.blockSignals(False)
 
         curl = stored.get("curl") or (geom.get("curl") or {})
         values = {"skew_deg": skew, "alpha": curl.get("alpha"),
@@ -825,7 +861,9 @@ class DebugViewerWidget(QWidget):
                 self._fmt("skew_deg", float(value)))
             self._store({"skew_deg": float(value)})
         elif kind == "roi":
-            self._store({"roi": value})
+            # The canvas knows a polygon, not which field it is: the layout
+            # ROI and the keystone quad are the same shape.
+            self._store({getattr(self, "_poly_field", "roi"): value})
 
     def _store(self, fields: dict) -> None:
         """Persist an edit for the selected row, then rerun if asked to.
@@ -838,7 +876,7 @@ class DebugViewerWidget(QWidget):
         if key is None:
             return
         frame = (self._current_geom or {}).get("frame_wh")
-        if frame and any(f in fields for f in ("roi",)):
+        if frame and any(f in fields for f in ("roi", "quad")):
             fields = dict(fields, frame_wh=list(frame))
         try:
             with db_session(self.db_path) as conn:
@@ -864,7 +902,8 @@ class DebugViewerWidget(QWidget):
     _STAGE_FIELDS = {
         "SkewFinder": ("skew_deg",),
         "PageDetector": ("roi", "frame_wh"),
-        "PageDewarper": ("curl",),
+        "TrapezoidalCorrection": ("quad", "frame_wh"),
+        "PageDewarper": ("curl", "force"),
     }
 
     def _stage_stored(self, row: int) -> dict:
@@ -893,6 +932,9 @@ class DebugViewerWidget(QWidget):
         self._pending_edit = {"scan_id": int(key[0]), "branch_path": key[1]}
         self._configure_editor(row)
         self._reprocess_if_auto()
+
+    def _on_force_toggled(self, on: bool) -> None:
+        self._store({"force": True if on else None})
 
     def _on_auto_toggled(self, on: bool) -> None:
         # Session-wide, so opening another page keeps the mode.
