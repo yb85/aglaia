@@ -53,6 +53,27 @@ construction won't re-render until the widget is reconstructed.
 
 The tables below list both palette values per token.
 
+## SVG artwork
+
+Never hand an SVG straight to `QIcon(path).pixmap(...)`. **QSvgRenderer does
+not resolve `currentColor` — it paints black**, so a bundled icon that relies
+on it disappears into the dark palette. `rgba()` colours are the same trap:
+the renderer blackens those too.
+
+`aglaia/gui/theme.py` routes everything through `_tint_and_render`, which
+substitutes `currentColor` and converts `rgba()` into a hex colour plus a
+painter opacity. Two entry points, both cached per (source, colour, size):
+
+- `lucide(name)` / `lucide_pixmap(name)` — icons addressed by name from
+  `assets/icons/`.
+- `svg_pixmap_path(path)` — an SVG addressed by path, for the pipeline-mode
+  artwork in `assets/modes/`. A non-SVG path (a user's own PNG) is rendered
+  as-is: there is no `currentColor` to substitute, and repainting someone's
+  coloured artwork would be wrong.
+
+Passing `color=None` resolves to the palette's text colour, which is the
+right default for anything that must simply stay legible.
+
 ## Surfaces (background layers)
 
 | Token | Dark | Light | Use |

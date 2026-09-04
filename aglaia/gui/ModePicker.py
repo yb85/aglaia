@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
@@ -84,7 +83,12 @@ class _ModeCard(QFrame):
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_lbl.setStyleSheet("background: transparent; border: none;")
         if icon_path is not None:
-            icon_lbl.setPixmap(QIcon(str(icon_path)).pixmap(26, 26))
+            from aglaia.gui.theme import svg_pixmap_path
+            # Tinted, not drawn straight through QIcon: the mode artwork
+            # paints with `fill="currentColor"`, which QSvgRenderer resolves
+            # to BLACK — near-invisible on the dark palette (#114).
+            icon_lbl.setPixmap(
+                svg_pixmap_path(icon_path, color=icon_color, size=26))
         elif lucide is not None:
             from aglaia.gui.theme import lucide_pixmap
             icon_lbl.setPixmap(lucide_pixmap(lucide, color=icon_color, size=lucide_size))
@@ -291,7 +295,10 @@ class ModePickerPanel(QWidget):
         # big icon
         icon_path = mode.icon_path() if mode else None
         if icon_path is not None:
-            self._big_icon.setPixmap(QIcon(str(icon_path)).pixmap(96, 96))
+            from aglaia.gui.theme import svg_pixmap_path
+            # The hero image: palette text colour, so it reads in both themes.
+            self._big_icon.setPixmap(
+                svg_pixmap_path(icon_path, color=COLOR_FONT_PRIMARY, size=96))
         else:
             from aglaia.gui.theme import lucide_pixmap
             self._big_icon.setPixmap(lucide_pixmap("layers", color=COLOR_FONT_MUTED, size=72))
