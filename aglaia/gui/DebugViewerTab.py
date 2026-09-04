@@ -655,6 +655,77 @@ class DebugViewerWidget(QWidget):
         self._overlay_note.setStyleSheet(
             f"color: {COLOR_ERROR}; font-size: 11px;")
 
+    # ── refresh after a rerun ─────────────────────────────────────
+    def scan_key(self) -> Optional[tuple]:
+        """``(scan_id, branch_path)`` this viewer is showing, from its LEAF
+        row — the deepest node of the chain, whose branch is the page."""
+        for key in reversed(self._row_keys):
+            if key[0] is not None:
+                return (int(key[0]), key[1])
+        return None
+
+    def reload_for(self, scan_id: int, branch_path: str,
+                   node_id: Optional[int] = None) -> bool:
+        """Rebuild the view after that page-branch was reprocessed.
+
+        A rerun WIPES the branch's subtree and writes fresh nodes, so this
+        viewer's `leaf_node_id` is a dead row: without this the tab keeps
+        showing the pre-edit chain and the editor looks broken (M9 #97).
+        Returns whether it applied.
+        """
+        key = self.scan_key()
+        if key is None or key[0] != int(scan_id):
+            return False
+        if key[1] and str(branch_path or "") and key[1] != str(branch_path):
+            return False
+        leaf = node_id or self._resolve_leaf(int(scan_id), key[1])
+        if leaf is None:
+            return False
+        self.leaf_node_id = int(leaf)
+        row = self.strip.currentRow()
+        self._rebuild(keep_row=row)
+        return True
+
+    def _resolve_leaf(self, scan_id: int, branch_path: str) -> Optional[int]:
+        """Deepest node of that branch — the chain's new terminal."""
+        try:
+            with db_session(self.db_path) as conn:
+                sql = ("SELECT id FROM nodes WHERE scan_id = ? "
+                       + ("AND branch_label = ? " if branch_path else "")
+                       + "ORDER BY step_idx DESC, id DESC LIMIT 1")
+                args = ((scan_id, branch_path) if branch_path else (scan_id,))
+                row = conn.execute(sql, args).fetchone()
+                return int(row["id"]) if row else None
+        except Exception:
+            return None
+
+    def _rebuild(self, *, keep_row: int = -1) -> None:
+        """Re-read the chain and restart the overlay render, in place."""
+        job = getattr(self, "_overlay_job", None)
+        if job is not None and job.isRunning():
+            # Its `done` would otherwise land on the NEW strip with the OLD
+            # chain's images and mis-pair every row with its geometry.
+            try:
+                job.done.disconnect()
+                job.failed.disconnect()
+            except Exception:
+                pass
+        self.strip.blockSignals(True)
+        self.strip.clear()
+        self.strip.blockSignals(False)
+        self._row_widgets.clear()
+        self._row_zebra.clear()
+        self._overlay_bytes = []
+        self._overlay_geom = []
+        self._overlay_note.setText(self.tr("Rendering overlays…"))
+        self._load()
+        if 0 <= keep_row < self.strip.count():
+            self.strip.setCurrentRow(keep_row)
+        self._overlay_job = _OverlayJob(self.db_path, self.leaf_node_id, self)
+        self._overlay_job.done.connect(self._on_overlay_ready)
+        self._overlay_job.failed.connect(self._on_overlay_failed)
+        self._overlay_job.start()
+
     # ── manual tuning (M9 #97) ────────────────────────────────────
     def _row_key(self, row: int):
         """``(scan_id, branch_path, processor)`` for a strip row, or None."""
@@ -694,7 +765,8 @@ class DebugViewerWidget(QWidget):
         self.canvas.set_editable(
             polygon=roi if processor == "PageDetector" else None,
             rotation_deg=skew if processor == "SkewFinder" else None,
-            origin=origin, frame_wh=frame)
+            origin=origin, frame_wh=frame,
+            scale=float(geom.get("scale", 1.0) or 1.0))
 
         curl = stored.get("curl") or (geom.get("curl") or {})
         values = {"skew_deg": skew, "alpha": curl.get("alpha"),

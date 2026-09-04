@@ -86,3 +86,15 @@ def test_dewarp_geom_reads_gamma_as_zero_without_a_spine():
 
 def test_a_stage_with_nothing_to_edit_carries_no_geom():
     assert "geom" not in _default_renderer(_img(), None, {})[0]
+
+
+def test_geom_reports_the_downscale_the_url_applies():
+    """The picture a viewer decodes is NOT the composite: `_png_data_url`
+    shrinks it under Qt's allocation cap. `geom` is in full-resolution
+    coordinates, so a consumer that ignored `scale` would see every handle
+    drift further from its pixel the further it sat from the origin — the
+    "everything is shifted down-right" report."""
+    small = _skew_renderer(_img(120, 200), None, {"skew": 0.0})[0]["geom"]
+    assert small["scale"] == 1.0
+    big = _skew_renderer(_img(4000, 2000), None, {"skew": 0.0})[0]["geom"]
+    assert 0.0 < big["scale"] < 1.0

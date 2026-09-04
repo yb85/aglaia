@@ -65,14 +65,20 @@ class EditCanvas(ZoomCanvas):
         # offset of a child drawn on its parent.
         self._origin: tuple[float, float] = (0.0, 0.0)
         self._frame_wh: Optional[tuple[int, int]] = None
+        # What the renderer shrank the composite by on its way to a data URL.
+        # `origin` and the geometry are in FULL-resolution composite pixels;
+        # the picture on screen is not. Miss this and the error grows with the
+        # coordinate — the handles walk away down and right.
+        self._scale: float = 1.0
         self._drag_vertex: Optional[int] = None
         self._drag_rot = False
 
     # ── public API ────────────────────────────────────────────────
     def set_editable(self, *, polygon=None, rotation_deg=None,
-                     origin=(0, 0), frame_wh=None) -> None:
+                     origin=(0, 0), frame_wh=None, scale=1.0) -> None:
         """Install (or clear, with both ``None``) the editable overlay."""
         self._origin = (float(origin[0]), float(origin[1]))
+        self._scale = float(scale) or 1.0
         self._frame_wh = (tuple(int(v) for v in frame_wh)
                           if frame_wh else None)
         self._poly = ([[float(x), float(y)] for x, y in polygon]
@@ -112,8 +118,8 @@ class EditCanvas(ZoomCanvas):
         fit = self._fit_rect()
         if self._pix is None or fit.isEmpty():
             return QPointF(0, 0)
-        cx = x + self._origin[0]
-        cy = y + self._origin[1]
+        cx = (x + self._origin[0]) * self._scale
+        cy = (y + self._origin[1]) * self._scale
         return QPointF(fit.x() + cx * fit.width() / self._pix.width(),
                        fit.y() + cy * fit.height() / self._pix.height())
 
@@ -121,9 +127,10 @@ class EditCanvas(ZoomCanvas):
         fit = self._fit_rect()
         if self._pix is None or fit.isEmpty():
             return None
-        return ((pos.x() - fit.x()) * self._pix.width() / fit.width()
+        sc = self._scale or 1.0
+        return ((pos.x() - fit.x()) * self._pix.width() / fit.width() / sc
                 - self._origin[0],
-                (pos.y() - fit.y()) * self._pix.height() / fit.height()
+                (pos.y() - fit.y()) * self._pix.height() / fit.height() / sc
                 - self._origin[1])
 
     def _rot_end(self) -> Optional[QPointF]:

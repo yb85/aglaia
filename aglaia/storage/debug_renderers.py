@@ -37,6 +37,19 @@ import numpy as np
 from aglaia.storage.repo import ImageRepo
 
 
+def _url_scale(arr: np.ndarray, max_dim: int = 2400) -> float:
+    """The factor `_png_data_url` will shrink `arr` by.
+
+    The overlay a viewer decodes is NOT the composite these renderers build:
+    it is downscaled to fit Qt's allocation cap. Geometry handed out beside it
+    is in full-resolution coordinates, so a consumer that draws on the decoded
+    picture has to apply this — otherwise every handle drifts further from its
+    pixel the further it is from the origin, which reads as "everything is
+    shifted down-right"."""
+    big = max(arr.shape[0], arr.shape[1])
+    return (max_dim / big) if big > max_dim else 1.0
+
+
 def _png_data_url(arr: np.ndarray, max_dim: int = 2400) -> str:
     """Encode a numpy image to ``data:image/png;base64,…``.
 
@@ -106,7 +119,7 @@ def _bar_h(width: int) -> int:
     return max(48, int(width) // 36)
 
 
-def _geom(frame, *, origin=(0, 0), **fields) -> dict:
+def _geom(frame, *, origin=(0, 0), composite=None, **fields) -> dict:
     """Editable geometry to hand the GUI beside the rasterised diagnostics
     (M9 #96).
 
@@ -124,10 +137,16 @@ def _geom(frame, *, origin=(0, 0), **fields) -> dict:
     label bar above it, the crop offset of a child drawn on its parent. A
     handle layer adds it; without it the handles would sit a bar-height too
     high, or a crop away, from the pixels they describe.
+
+    `scale` is what `_png_data_url` shrinks that composite by on its way out.
+    Both `origin` and the geometry are in FULL-resolution composite pixels, so
+    a consumer draws at ``(origin + point) * scale``. Miss it and the error
+    grows with the coordinate — the handles walk away down and right.
     """
     h, w = frame.shape[:2]
     out = {"frame_wh": [int(w), int(h)],
-           "origin": [int(origin[0]), int(origin[1])]}
+           "origin": [int(origin[0]), int(origin[1])],
+           "scale": (_url_scale(composite) if composite is not None else 1.0)}
     out.update({k: v for k, v in fields.items() if v is not None})
     return out
 
@@ -160,6 +179,7 @@ def _skew_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     return [{"url": _png_data_url(composite),
              "label": "deskewed + profile",
              "geom": _geom(img, origin=(0, _bar_h(composite.shape[1])),
+                           composite=composite,
                            skew_deg=(float(angle) if angle is not None
                                      else None))}]
 
@@ -246,7 +266,7 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
         return [{"url": _png_data_url(canvas),
                  "label": "parent + layouts",
                  "geom": _geom(img, origin=(ox, oy + _bar_h(canvas.shape[1])),
-                               roi=_roi_pts)}]
+                               composite=canvas, roi=_roi_pts)}]
 
     canvas = _to_bgr(img).copy()
     if roi:
@@ -258,7 +278,7 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     canvas = _label_bar(canvas, txt)
     return [{"url": _png_data_url(canvas), "label": "child + ROI",
              "geom": _geom(img, origin=(0, _bar_h(canvas.shape[1])),
-                           roi=_roi_pts)}]
+                           composite=canvas, roi=_roi_pts)}]
 
 
 _SPAN_COLORS = [
@@ -695,7 +715,7 @@ def _dewarp_renderer(img: np.ndarray, parent: Optional[np.ndarray],
              "label": "source <-> output",
              "geom": _geom(edit_frame,
                            origin=(0, _bar_h(src_canvas.shape[1])),
-                           curl=curl)}]
+                           composite=side_by_side, curl=curl)}]
 
 
 def _default_renderer(img: np.ndarray, parent: Optional[np.ndarray],

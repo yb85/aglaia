@@ -126,10 +126,26 @@ See [storage.md](storage.md#per-page-manual-overrides-manual_overrides) and
 
 Handles are vector, painted by `DebugEditCanvas.EditCanvas` over the raster.
 The renderers hand them the geometry as numbers (`geom`), in the coordinates
-of the **stage frame**, with `origin` saying where that frame sits inside the
-composite — the label bar above it, the crop offset of a child drawn on its
-parent. Every spatial edit stores the frame it was made on, so a polygon is
-validated rather than silently rescaled.
+of the **stage frame**, with two mappings beside it:
+
+- `origin` — where that frame sits inside the composite: the label bar above
+  it, the crop offset of a child drawn on its parent;
+- `scale` — what `_png_data_url` shrinks the composite by on its way out (Qt's
+  allocation cap). The picture on screen is not the composite.
+
+A handle is drawn at `(point + origin) × scale`. Miss `origin` and every
+handle sits a bar-height, or a crop, from its pixel; miss `scale` and the
+error grows with the coordinate, which reads as everything shifted down and
+right.
+
+Every spatial edit stores the frame it was made on, so a polygon is validated
+rather than silently rescaled.
+
+**After a rerun** the branch's subtree is wiped and rewritten, so the tab's
+leaf node is a dead row. `MainWindow._refresh_debug_tabs`, on `branch_ready`,
+re-targets every open tab of that page-branch and re-keys `_debug_tabs` —
+without it the tab keeps showing the pre-edit chain and the editor reads as
+broken.
 
 **Auto-process** (on by default, remembered for the session) reruns the page
 as soon as a value changes. Turn it off to make several edits and run once —

@@ -1058,6 +1058,27 @@ class MainWindow(QMainWindow):
             return
         self._scans_scroll.verticalScrollBar().setValue(hi)
 
+    def _refresh_debug_tabs(self, scan_id: int, branch_path: str,
+                            node_id=None) -> None:
+        """Point every open debug tab of that page-branch at the new nodes.
+
+        Re-key `_debug_tabs` as we go: it is keyed by the leaf node id, and
+        the rerun replaced it — leaving the old key would spawn a duplicate
+        tab the next time the user clicks the same page."""
+        tabs = getattr(self, "_debug_tabs", None)
+        if not tabs:
+            return
+        for old_id, viewer in list(tabs.items()):
+            try:
+                if not viewer.reload_for(scan_id, branch_path, node_id):
+                    continue
+            except Exception:
+                continue
+            new_id = int(getattr(viewer, "leaf_node_id", old_id))
+            if new_id != old_id:
+                tabs.pop(old_id, None)
+                tabs[new_id] = viewer
+
     def _reprocess_for_editor(self, scan_id: int, branch_path: str) -> None:
         """Rerun one page-branch after a manual-override edit.
 
@@ -3057,6 +3078,12 @@ class MainWindow(QMainWindow):
             w = self.scan_widgets_by_scan.get(int(scan_id))
             if w is not None:
                 w.set_processing(False)   # per-scan spinner clear — immediate
+            # An open debug/editor tab is looking at nodes this rerun just
+            # replaced. Re-target it, or it keeps showing the pre-edit chain
+            # and the manual editor reads as broken (M9 #97).
+            self._refresh_debug_tabs(
+                int(scan_id), str(payload.get("branch_path") or ""),
+                payload.get("chosen_node_id"))
         # The expensive bits — OCR badge fan-out (DB queries) + a full
         # ScansTableView.refresh() (rebuild every block, re-decode every
         # thumb) — are THROTTLED to ~1 per 150 ms. A 100-page × 8-branch

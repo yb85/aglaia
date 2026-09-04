@@ -132,3 +132,28 @@ def test_the_rotation_handle_follows_the_angle(canvas):
     tilted = canvas._rot_end()
     assert tilted.y() > flat.y()          # +45 deg points down-right
     assert tilted.x() < flat.x()
+
+
+def test_the_composite_downscale_is_applied(canvas):
+    """The renderer hands geometry in full-resolution composite pixels while
+    the picture on screen is downscaled. Miss the factor and the error grows
+    with the coordinate."""
+    canvas.set_editable(polygon=[[100, 100]], origin=(0, 0),
+                        frame_wh=(200, 150), scale=1.0)
+    full = canvas._to_view(100, 100)
+    canvas.set_editable(polygon=[[100, 100]], origin=(0, 0),
+                        frame_wh=(200, 150), scale=0.5)
+    half = canvas._to_view(100, 100)
+    fit = canvas._fit_rect()
+    assert (half.x() - fit.x()) == pytest.approx((full.x() - fit.x()) / 2)
+    assert (half.y() - fit.y()) == pytest.approx((full.y() - fit.y()) / 2)
+
+
+def test_view_and_source_are_inverses_under_a_downscale(canvas):
+    """A drag reads the cursor back through `_to_src`; if it did not undo the
+    scale the vertex would creep away from the pointer."""
+    canvas.set_editable(polygon=[[10, 10]], origin=(7, 41),
+                        frame_wh=(400, 300), scale=0.5)
+    for src in ((0.0, 0.0), (60.0, 180.0), (240.0, 24.0)):
+        back = canvas._to_src(canvas._to_view(*src).toPoint())
+        assert back == pytest.approx(src, abs=2.0)
