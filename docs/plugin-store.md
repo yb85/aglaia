@@ -48,16 +48,27 @@ describes what real isolation would take, and why it is a later milestone.
 
 ## 1b. What exists today
 
-Built and shipping (see `docs/destinations.md`):
+Built and shipping:
 
 * `aglaia.plugin_api` — the façade of §5, at `API_VERSION = 1`.
 * `PluginContext` — per-plugin settings, namespaced secrets, scratch dir (§7-8).
 * The `destinations` kind, and three first-party destinations in registry
-  layout under `aglaia/plugins/destinations/`.
+  layout under `aglaia/plugins/destinations/` (see `docs/destinations.md`).
+* The manifest reader and the import scan (§4, §6) —
+  `aglaia/app_data/plugin_manifest.py`.
+* The registry client, both install paths, uninstall/disable
+  (`aglaia/app_data/plugin_registry.py`) and the **Plugins** tab
+  (`aglaia/gui/PluginsTab.py`, *View → Plugins…*).
+* The registry itself: <https://github.com/yb85/aglaia-plugins>, with
+  `scripts/build_plugin_index.py` generating `index.json` and CI checking that
+  the committed copy is current.
 
-Not built: the registry repo, the signed index, the manifest scanner, the
-install flows and the Plugins tab (§3-4, §6, §9-10). The bundled three load
-from disk by path, so they exercise the loader that the registry will reuse.
+**Not built: the index signature.** It needs an offline signing key and a
+release step. Until then the index is fetched over HTTPS and every file is
+verified against the sha256 the index gives for it, and `IndexResult.signed`
+is `False` so the tab can say which guarantee the user is actually getting —
+a smaller promise honestly labelled, rather than a bigger one quietly unmet.
+Also not built: the update flow and the revocation refresh (§10).
 
 ## 2. Trust tiers
 

@@ -809,6 +809,9 @@ class MainWindow(QMainWindow):
             self.tr("Mistral OCR jobs…"), None,
             lambda: self.open_mistral_jobs_tab()))
         view_menu.addAction(_act(
+            self.tr("Plugins…"), None,
+            lambda: self.open_plugins_tab()))
+        view_menu.addAction(_act(
             self.tr("Close Tab"), QKeySequence.StandardKey.Close,
             self._close_current_tab))
         view_menu.addSeparator()
@@ -3711,6 +3714,24 @@ class MainWindow(QMainWindow):
         self._mistral_jobs_tab = tab
         idx = self.tabs.addTab(tab, _lucide_tab("cloud", size=14),
                                self.tr("Mistral jobs"))
+        self.tabs.setCurrentIndex(idx)
+
+    def open_plugins_tab(self) -> None:
+        """Browse the registry, install, configure, remove (#130)."""
+        existing = getattr(self, "_plugins_tab", None)
+        if existing is not None:
+            try:
+                self.tabs.setCurrentWidget(existing)
+                existing.refresh()
+                return
+            except Exception:
+                pass
+        from aglaia.gui.PluginsTab import PluginsTab
+        from aglaia.gui.theme import lucide as _lucide_tab
+        tab = PluginsTab()
+        self._plugins_tab = tab
+        idx = self.tabs.addTab(tab, _lucide_tab("package", size=14),
+                               self.tr("Plugins"))
         self.tabs.setCurrentIndex(idx)
 
     def _on_jobs_open_project(self, path: str) -> None:

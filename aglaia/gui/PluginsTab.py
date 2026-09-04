@@ -1,0 +1,684 @@
+# Aglaïa — book scanner
+# Copyright (c) 2026 Yann Barbotin <aglaia@bibli.cc>
+# https://aglaia.bibli.cc
+# SPDX-License-Identifier: LicenseRef-PolyForm-Shield-1.0.0
+# Source-available under the PolyForm Shield License 1.0.0; any use except
+# building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
+
+"""The Plugins tab — browse the registry, install, configure, remove (#130).
+
+Two lists and two install paths, and the difference between the paths is the
+whole design:
+
+* **From the registry** — reviewed, hash-pinned. One confirm, above a
+  disclaimer naming the person who actually wrote it and linking to the code
+  that was reviewed. Reviewing something does not make it ours, and the button
+  says so: *I trust the code and/or its author*. The "and/or" is load-bearing —
+  a reader who checked the diff and a reader who knows the author are both
+  consenting truthfully, and neither should have to pretend to the other's
+  grounds.
+* **From a local archive** — reviewed by nobody. Red frame, the plugin's
+  declared capabilities next to what it *actually* imports with the undeclared
+  ones called out, and a sentence the user must type. No paste shortcut, no
+  case-insensitive match; Cancel is the default button.
+
+A plugin installed from an archive stays marked **UNREVIEWED** for as long as
+it is installed. A one-time warning that vanishes is a warning the user forgets
+he accepted.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl
+from PySide6.QtWidgets import (
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QSpinBox, QVBoxLayout, QWidget,
+)
+
+from aglaia.gui.colors import (
+    COLOR_BG_OVERLAY_SOFT, COLOR_ERROR, COLOR_FONT_DIM, COLOR_FONT_MUTED,
+    COLOR_FONT_PRIMARY, COLOR_OUTLINE_FAINT, COLOR_PRIMARY, COLOR_SUCCESS,
+    COLOR_WARNING,
+)
+from aglaia.gui.theme import lucide
+
+#: The sentence. Typed exactly, or the button stays dead.
+TRUST_SENTENCE = "I TRUST THE AUTHOR OF THIS PLUGIN"
+
+
+def _hline() -> QFrame:
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setStyleSheet(f"color: {COLOR_OUTLINE_FAINT};")
+    return f
+
+
+def _card(border: str = "") -> QFrame:
+    f = QFrame()
+    f.setStyleSheet(
+        f"QFrame {{ background: {COLOR_BG_OVERLAY_SOFT}; "
+        f"border: 1px solid {border or COLOR_OUTLINE_FAINT}; "
+        f"border-radius: 8px; }}")
+    return f
+
+
+class _IndexJob(QThread):
+    """Fetch the index off the GUI thread — it is a network call, and a tab
+    that freezes while it opens is a tab people stop opening."""
+
+    done = Signal(object)
+
+    def run(self) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        try:
+            self.done.emit(reg.fetch_index())
+        except Exception as e:  # noqa: BLE001
+            from aglaia.app_data.plugin_registry import IndexResult
+            self.done.emit(IndexResult(error=f"{type(e).__name__}: {e}"))
+
+
+class PluginSettingsDialog(QDialog):
+    """A settings form built from a plugin's declared `Field`s.
+
+    The host has never heard of this plugin and does not need to: `kind` says
+    how to render, `required` says what to insist on, and `secret` says which
+    box is masked and which store it goes to. Same idea as the OCR tab reading
+    engine capability flags instead of hard-coding engine names."""
+
+    def __init__(self, dest, parent=None) -> None:
+        super().__init__(parent)
+        self.dest = dest
+        self.setWindowTitle(self.tr("{name} — settings").format(
+            name=dest.display or dest.name))
+        self.setMinimumWidth(520)
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+
+        if getattr(dest, "description", ""):
+            top = QLabel(dest.description)
+            top.setWordWrap(True)
+            top.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+            v.addWidget(top)
+
+        self._widgets: dict[str, tuple] = {}
+        for field in list(dest.CONFIG_FIELDS) + list(dest.SECRET_FIELDS):
+            is_secret = field.kind == "secret"
+            v.addWidget(self._field_row(field, is_secret))
+
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        self._status.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+        v.addWidget(self._status)
+
+        row = QHBoxLayout()
+        self._test_btn = QPushButton(self.tr("Test connection"))
+        self._test_btn.clicked.connect(self._on_test)
+        row.addWidget(self._test_btn)
+        row.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
+                              | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self._on_save)
+        bb.rejected.connect(self.reject)
+        row.addWidget(bb)
+        v.addLayout(row)
+
+    def _field_row(self, field, is_secret: bool) -> QWidget:
+        wrap = QWidget()
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
+        label = field.label + (" *" if field.required else "")
+        lbl = QLabel(label)
+        lbl.setStyleSheet(
+            f"color: {COLOR_FONT_PRIMARY}; font-size: 12px; font-weight: 600;")
+        col.addWidget(lbl)
+
+        if field.kind == "bool":
+            w: QWidget = QCheckBox()
+            w.setChecked(bool(self.dest.conf(field.key, field.default)))
+        elif field.kind == "int":
+            w = QSpinBox()
+            w.setRange(0, 10_000_000)
+            try:
+                w.setValue(int(self.dest.conf(field.key, field.default) or 0))
+            except (TypeError, ValueError):
+                w.setValue(0)
+        elif field.kind == "choice":
+            w = QComboBox()
+            w.addItems(list(field.choices))
+            cur = str(self.dest.conf(field.key, field.default) or "")
+            if cur in field.choices:
+                w.setCurrentText(cur)
+        else:
+            w = QLineEdit()
+            if is_secret:
+                w.setEchoMode(QLineEdit.EchoMode.Password)
+                # Never round-trip the value through the form. Show that one
+                # is stored; a settings dialog that hands a password back to
+                # the screen is a settings dialog that leaks it to a
+                # screenshot.
+                if self.dest.secret(field.key):
+                    w.setPlaceholderText(
+                        self.tr("•••• stored — type to replace"))
+                elif field.placeholder:
+                    w.setPlaceholderText(field.placeholder)
+            else:
+                w.setText(str(self.dest.conf(field.key, field.default) or ""))
+                if field.placeholder:
+                    w.setPlaceholderText(field.placeholder)
+        col.addWidget(w)
+
+        if field.help:
+            h = QLabel(field.help)
+            h.setWordWrap(True)
+            h.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+            col.addWidget(h)
+        self._widgets[field.key] = (field, w, is_secret)
+        return wrap
+
+    def _collect(self) -> None:
+        for key, (field, w, is_secret) in self._widgets.items():
+            if isinstance(w, QCheckBox):
+                value = w.isChecked()
+            elif isinstance(w, QSpinBox):
+                value = w.value()
+            elif isinstance(w, QComboBox):
+                value = w.currentText()
+            else:
+                value = w.text()
+            if is_secret:
+                # An empty secret box means "leave what is stored", not
+                # "delete it" — the box is empty by design on every open.
+                if value:
+                    self.dest.ctx.secrets.set(key, value)
+            else:
+                self.dest.ctx.config.set(key, value)
+
+    def _on_test(self) -> None:
+        self._collect()
+        self._status.setText(self.tr("Testing…"))
+        self._test_btn.setEnabled(False)
+        try:
+            res = self.dest.check()
+        except Exception as e:  # noqa: BLE001
+            res = None
+            self._status.setText(f"{type(e).__name__}: {e}")
+            self._status.setStyleSheet(
+                f"color: {COLOR_ERROR}; font-size: 11px;")
+        if res is not None:
+            self._status.setText(res.message)
+            self._status.setStyleSheet(
+                f"color: {COLOR_SUCCESS if res.ok else COLOR_ERROR}; "
+                f"font-size: 11px;")
+        self._test_btn.setEnabled(True)
+
+    def _on_save(self) -> None:
+        self._collect()
+        self.accept()
+
+
+class RegistryInstallDialog(QDialog):
+    """Consent for a reviewed plugin. One confirm, and a disclaimer that names
+    whose code it is."""
+
+    def __init__(self, entry, parent=None) -> None:
+        super().__init__(parent)
+        self.entry = entry
+        self.setWindowTitle(self.tr("Install {name}").format(name=entry.name))
+        self.setMinimumWidth(560)
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+
+        title = QLabel(f"{entry.name} {entry.version}")
+        title.setStyleSheet(
+            f"color: {COLOR_FONT_PRIMARY}; font-size: 16px; font-weight: 700;")
+        v.addWidget(title)
+        if entry.summary:
+            s = QLabel(entry.summary)
+            s.setWordWrap(True)
+            s.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 12px;")
+            v.addWidget(s)
+
+        caps = entry.declared()
+        if caps:
+            c = QLabel(self.tr("It declares: ") + " · ".join(caps))
+            c.setWordWrap(True)
+            c.setStyleSheet(f"color: {COLOR_WARNING}; font-size: 11px;")
+            v.addWidget(c)
+        if entry.imports:
+            i = QLabel(self.tr("It imports: ") + ", ".join(entry.imports))
+            i.setWordWrap(True)
+            i.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+            v.addWidget(i)
+
+        v.addWidget(_hline())
+        who = entry.author or self.tr("its author")
+        disc = QLabel(self.tr(
+            "Reviewed and merged into the Aglaïa plugin registry. It was "
+            "written and submitted by <b>{who}</b>, not by Aglaïa, and it runs "
+            "with the same access to your files as Aglaïa itself."
+        ).format(who=who))
+        disc.setWordWrap(True)
+        disc.setTextFormat(Qt.TextFormat.RichText)
+        disc.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+        v.addWidget(disc)
+
+        src = QPushButton(self.tr("Read the source on GitHub"))
+        src.setFlat(True)
+        src.setCursor(Qt.CursorShape.PointingHandCursor)
+        src.setStyleSheet(
+            f"QPushButton {{ color: {COLOR_PRIMARY}; border: none; "
+            f"text-align: left; font-size: 11px; padding: 0; }}")
+        src.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(entry.web_url)))
+        v.addWidget(src)
+
+        meta = QLabel(f"{entry.slug} · {entry.license or '—'}")
+        meta.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+        v.addWidget(meta)
+
+        bb = QDialogButtonBox()
+        self._ok = bb.addButton(self.tr("I trust the code and/or its author"),
+                                QDialogButtonBox.ButtonRole.AcceptRole)
+        bb.addButton(QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+
+
+class ArchiveInstallDialog(QDialog):
+    """The red gate. Nobody reviewed this one."""
+
+    def __init__(self, man, scan, sha: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(self.tr("Unreviewed plugin"))
+        self.setMinimumWidth(600)
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+
+        head = QLabel("⚠  " + self.tr("UNREVIEWED PLUGIN"))
+        head.setStyleSheet(
+            f"color: {COLOR_ERROR}; font-size: 16px; font-weight: 800;")
+        v.addWidget(head)
+
+        warn = QLabel(self.tr(
+            "This plugin did not come from the Aglaïa registry. Nobody has "
+            "reviewed it. Once installed it runs with the same access to your "
+            "files as Aglaïa itself."))
+        warn.setWordWrap(True)
+        warn.setStyleSheet(f"color: {COLOR_FONT_PRIMARY}; font-size: 12px;")
+        v.addWidget(warn)
+
+        who = man.author or self.tr("(no author given)")
+        ident = QLabel(f"{man.name} {man.version} — {who}\nsha256 {sha[:16]}…")
+        ident.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+        v.addWidget(ident)
+
+        caps = man.declared()
+        v.addWidget(self._row(self.tr("It declares:"),
+                              " · ".join(caps) or self.tr("nothing"),
+                              COLOR_WARNING if caps else COLOR_FONT_MUTED))
+        allowed = sorted({a for a in (scan.allowed if scan else [])
+                          if not a.startswith(("aglaia", "__future__", "."))})
+        v.addWidget(self._row(self.tr("It imports:"),
+                              ", ".join(allowed) or self.tr("nothing beyond "
+                                                            "the plugin API"),
+                              COLOR_FONT_MUTED))
+        undeclared = sorted(set(scan.undeclared)) if scan else []
+        if undeclared:
+            v.addWidget(self._row(
+                self.tr("Undeclared:"),
+                ", ".join(undeclared) + "   ← " + self.tr("not in its manifest"),
+                COLOR_ERROR))
+        if scan and scan.review:
+            v.addWidget(self._row(
+                self.tr("Worth a look:"), ", ".join(sorted(set(scan.review))),
+                COLOR_WARNING))
+
+        v.addWidget(_hline())
+        ask = QLabel(self.tr("Type the sentence below to install it."))
+        ask.setStyleSheet(f"color: {COLOR_FONT_PRIMARY}; font-size: 12px;")
+        v.addWidget(ask)
+        sentence = QLabel(TRUST_SENTENCE)
+        sentence.setStyleSheet(
+            f"color: {COLOR_FONT_MUTED}; font-size: 12px; "
+            f"font-family: monospace;")
+        v.addWidget(sentence)
+
+        self._entry = QLineEdit()
+        # No paste: the point of typing it is that it cannot be done absently.
+        self._entry.setStyleSheet(
+            f"QLineEdit {{ border: 2px solid {COLOR_ERROR}; border-radius: 6px; "
+            f"padding: 6px; font-family: monospace; }}")
+        self._entry.textChanged.connect(self._sync)
+        v.addWidget(self._entry)
+
+        bb = QDialogButtonBox()
+        self._ok = bb.addButton(self.tr("Install"),
+                                QDialogButtonBox.ButtonRole.AcceptRole)
+        self._ok.setEnabled(False)
+        self._ok.setStyleSheet(
+            f"QPushButton:enabled {{ background: {COLOR_ERROR}; "
+            f"color: white; font-weight: 700; border-radius: 6px; "
+            f"padding: 6px 14px; }}")
+        cancel = bb.addButton(QDialogButtonBox.StandardButton.Cancel)
+        cancel.setDefault(True)          # Return dismisses, never installs
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+        self.setStyleSheet(f"QDialog {{ border: 2px solid {COLOR_ERROR}; }}")
+
+    def _row(self, label: str, value: str, colour: str) -> QWidget:
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        lab = QLabel(label)
+        lab.setFixedWidth(110)
+        lab.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+        val = QLabel(value)
+        val.setWordWrap(True)
+        val.setStyleSheet(f"color: {colour}; font-size: 11px;")
+        h.addWidget(lab)
+        h.addWidget(val, 1)
+        return w
+
+    def _sync(self, text: str) -> None:
+        # Exact match. Not stripped, not case-folded: a ritual that accepts an
+        # approximation is not a ritual.
+        self._ok.setEnabled(text == TRUST_SENTENCE)
+
+
+class PluginsTab(QWidget):
+    """Installed plugins, and what the registry has to offer."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._index = None
+        self._job: Optional[_IndexJob] = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+
+        bar = QHBoxLayout()
+        title = QLabel(self.tr("Plugins"))
+        title.setObjectName("SectionTitle")
+        bar.addWidget(title)
+        bar.addStretch(1)
+        self._status = QLabel("")
+        self._status.setStyleSheet(
+            f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+        bar.addWidget(self._status)
+        self._file_btn = QPushButton(self.tr("Install from file…"))
+        self._file_btn.setIcon(lucide("folder-open", color=COLOR_FONT_MUTED, size=13))
+        self._file_btn.clicked.connect(self._install_from_file)
+        bar.addWidget(self._file_btn)
+        self._refresh_btn = QPushButton(self.tr("Refresh"))
+        self._refresh_btn.setIcon(lucide("refresh-cw", color=COLOR_PRIMARY,
+                                         size=13))
+        self._refresh_btn.clicked.connect(self.refresh)
+        bar.addWidget(self._refresh_btn)
+        root.addLayout(bar)
+
+        note = QLabel(self.tr(
+            "A plugin runs inside Aglaïa, with the same access to your files. "
+            "Registry plugins have been reviewed; anything you install from a "
+            "file has not."))
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+        root.addWidget(note)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._body = QWidget()
+        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(8)
+        scroll.setWidget(self._body)
+        root.addWidget(scroll, 1)
+
+        self.refresh()
+
+    # ── data ──────────────────────────────────────────────────────────
+    def refresh(self) -> None:
+        self._rebuild()
+        if self._job is not None and self._job.isRunning():
+            return
+        self._status.setText(self.tr("Checking the registry…"))
+        self._job = _IndexJob(self)
+        self._job.done.connect(self._on_index)
+        self._job.start()
+
+    def _on_index(self, index) -> None:
+        self._index = index
+        if index.error:
+            self._status.setText(index.error)
+        else:
+            self._status.setText(
+                self.tr("{n} in the registry").format(n=len(index.entries))
+                + ("" if index.signed else
+                   " · " + self.tr("index not signed yet — files are still "
+                                   "hash-checked")))
+        self._rebuild()
+
+    # ── rendering ─────────────────────────────────────────────────────
+    def _clear(self) -> None:
+        while self._body_layout.count():
+            it = self._body_layout.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+
+    def _heading(self, text: str) -> QLabel:
+        h = QLabel(text)
+        h.setStyleSheet(
+            f"color: {COLOR_FONT_MUTED}; font-size: 11px; font-weight: 700; "
+            f"text-transform: uppercase; letter-spacing: .08em;")
+        return h
+
+    def _rebuild(self) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        self._clear()
+
+        installed = reg.list_installed()
+        self._body_layout.addWidget(self._heading(self.tr("Installed")))
+        if not installed:
+            empty = QLabel(self.tr("Nothing installed yet."))
+            empty.setStyleSheet(
+                f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+            self._body_layout.addWidget(empty)
+        for item in installed:
+            self._body_layout.addWidget(self._installed_card(item))
+
+        have = {i["slug"] for i in installed}
+        entries = [e for e in (self._index.entries if self._index else [])
+                   if e.slug not in have]
+        self._body_layout.addWidget(self._heading(self.tr("Available")))
+        if not entries:
+            msg = (self.tr("Everything in the registry is installed.")
+                   if self._index and not self._index.error
+                   else self.tr("The registry is not reachable right now."))
+            lbl = QLabel(msg)
+            lbl.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+            self._body_layout.addWidget(lbl)
+        for e in entries:
+            self._body_layout.addWidget(self._available_card(e))
+        self._body_layout.addStretch(1)
+
+    def _installed_card(self, item: dict) -> QWidget:
+        from aglaia.app_data import plugin_registry as reg
+        man = item.get("manifest")
+        rec = item.get("record") or {}
+        source = str(rec.get("source") or "")
+        unreviewed = source == "zip"
+        card = _card(COLOR_ERROR if unreviewed else "")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(6)
+
+        top = QHBoxLayout()
+        name = f"{man.name} {man.version}" if man else item["slug"]
+        lbl = QLabel(name)
+        lbl.setStyleSheet(
+            f"color: {COLOR_FONT_PRIMARY}; font-weight: 700; font-size: 13px;")
+        top.addWidget(lbl)
+        if unreviewed:
+            tag = QLabel(self.tr("UNREVIEWED"))
+            tag.setStyleSheet(
+                f"color: {COLOR_ERROR}; font-size: 10px; font-weight: 800;")
+            top.addWidget(tag)
+        kind = QLabel(item["kind"])
+        kind.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+        top.addWidget(kind)
+        top.addStretch(1)
+        v.addLayout(top)
+
+        if item.get("error"):
+            err = QLabel(item["error"])
+            err.setWordWrap(True)
+            err.setStyleSheet(f"color: {COLOR_ERROR}; font-size: 11px;")
+            v.addWidget(err)
+        elif man and man.summary:
+            s = QLabel(man.summary)
+            s.setWordWrap(True)
+            s.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+            v.addWidget(s)
+
+        if man:
+            caps = man.declared()
+            if caps:
+                c = QLabel(" · ".join(caps))
+                c.setWordWrap(True)
+                c.setStyleSheet(f"color: {COLOR_WARNING}; font-size: 10px;")
+                v.addWidget(c)
+
+        row = QHBoxLayout()
+        slug = item["slug"]
+        dis = QCheckBox(self.tr("Disabled"))
+        dis.setChecked(reg.is_disabled(slug))
+        dis.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
+        dis.toggled.connect(lambda on, s=slug: self._set_disabled(s, on))
+        row.addWidget(dis)
+        row.addStretch(1)
+        if item["kind"] == "destinations":
+            cfg = QPushButton(self.tr("Settings…"))
+            cfg.clicked.connect(lambda _=False, s=slug: self._configure(s))
+            row.addWidget(cfg)
+        rm = QPushButton(self.tr("Uninstall"))
+        rm.clicked.connect(lambda _=False, s=slug: self._uninstall(s))
+        row.addWidget(rm)
+        v.addLayout(row)
+        return card
+
+    def _available_card(self, entry) -> QWidget:
+        card = _card()
+        v = QVBoxLayout(card)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(6)
+        top = QHBoxLayout()
+        lbl = QLabel(f"{entry.name} {entry.version}")
+        lbl.setStyleSheet(
+            f"color: {COLOR_FONT_PRIMARY}; font-weight: 700; font-size: 13px;")
+        top.addWidget(lbl)
+        kind = QLabel(entry.kind)
+        kind.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+        top.addWidget(kind)
+        top.addStretch(1)
+        btn = QPushButton(self.tr("Install…"))
+        btn.clicked.connect(lambda _=False, e=entry: self._install(e))
+        top.addWidget(btn)
+        v.addLayout(top)
+        if entry.summary:
+            s = QLabel(entry.summary)
+            s.setWordWrap(True)
+            s.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+            v.addWidget(s)
+        byline = QLabel(self.tr("by {who}").format(
+            who=entry.author or self.tr("an unnamed author")))
+        byline.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+        v.addWidget(byline)
+        caps = entry.declared()
+        if caps:
+            c = QLabel(" · ".join(caps))
+            c.setWordWrap(True)
+            c.setStyleSheet(f"color: {COLOR_WARNING}; font-size: 10px;")
+            v.addWidget(c)
+        return card
+
+    # ── actions ───────────────────────────────────────────────────────
+    def _set_disabled(self, slug: str, on: bool) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        from aglaia.workers import destinations as dest
+        reg.set_disabled(slug, on)
+        dest.reset_for_tests()
+
+    def _install(self, entry) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        from aglaia.workers import destinations as dest
+        if RegistryInstallDialog(entry, self).exec() != QDialog.DialogCode.Accepted:
+            return
+        res = reg.install_from_registry(entry)
+        if not res.ok:
+            QMessageBox.warning(self, self.tr("Install failed"), res.message)
+            return
+        dest.reset_for_tests()
+        self._status.setText(res.message)
+        self._rebuild()
+
+    def _install_from_file(self) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        from aglaia.workers import destinations as dest
+        import hashlib
+        path, _ = QFileDialog.getOpenFileName(
+            self, self.tr("Install a plugin archive"), "",
+            self.tr("Aglaïa plugin (*.aglplugin *.zip)"))
+        if not path:
+            return
+        man, files, scan, err = reg.stage_archive(Path(path))
+        if err or man is None:
+            QMessageBox.warning(self, self.tr("Not a usable plugin"),
+                                err or self.tr("unreadable archive"))
+            return
+        sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        if ArchiveInstallDialog(man, scan, sha,
+                                self).exec() != QDialog.DialogCode.Accepted:
+            return
+        res = reg.install_from_archive(Path(path), man.kind or "destinations")
+        if not res.ok:
+            QMessageBox.warning(self, self.tr("Install failed"), res.message)
+            return
+        dest.reset_for_tests()
+        self._status.setText(res.message)
+        self._rebuild()
+
+    def _uninstall(self, slug: str) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        from aglaia.workers import destinations as dest
+        if QMessageBox.question(
+                self, self.tr("Remove {slug}?").format(slug=slug),
+                self.tr("This deletes the plugin, its settings, its files and "
+                        "any password it stored in your keychain.")
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        res = reg.uninstall(slug)
+        dest.reset_for_tests()
+        self._status.setText(res.message)
+        self._rebuild()
+
+    def _configure(self, slug: str) -> None:
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(slug)
+        if d is None:
+            QMessageBox.information(
+                self, self.tr("Not loaded"),
+                self.tr("{slug} did not load — check the Log tab.").format(
+                    slug=slug))
+            return
+        PluginSettingsDialog(d, self).exec()
