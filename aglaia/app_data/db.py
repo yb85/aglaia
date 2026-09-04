@@ -107,6 +107,13 @@ KEY_MISTRAL_BATCH = "mistral_batch"  # bool — Cloud OCR (Mistral) submits a
                                    # batch job (cheaper, async) instead of a
                                    # synchronous OCR run. Remembered across
                                    # sessions; the OCR card's batch toggle.
+KEY_MISTRAL_JOBS_DISMISSED = "mistral_jobs_dismissed"  # list[str] — batch
+                                   # job ids hidden from the Jobs tab. The
+                                   # Mistral Batch API has create/get/list/
+                                   # cancel and NO delete, so a finished job
+                                   # is permanent account history: "delete"
+                                   # can only mean "stop showing me this".
+                                   # Reversible — the tab can show them again.
 KEY_MISTRAL_FOOTNOTES = "mistral_footnotes"  # str — "numeric" | "alphabetic" |
                                    # "off". Markdown-export post-process of the
                                    # stored Mistral output: superscript / (N)

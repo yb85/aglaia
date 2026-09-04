@@ -136,7 +136,20 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
 4. **Jobs tab** — *View → Mistral OCR jobs…* (or the card's **Jobs** pill):
    a zebra table of every Aglaïa job on the account (`batch.jobs.list`,
    newest first); the job's `aglaia_project` metadata is a clickable link
-   that opens that project (close-current confirm).
+   that opens that project (close-current confirm). A **finished** job
+   (`SUCCESS`, `FAILED`, `TIMEOUT_EXCEEDED`, `CANCELLED`) carries a trash
+   button that **dismisses** it: the Mistral Batch API is create / get /
+   list / cancel with **no delete**, so the job itself is permanent account
+   history and the button can only stop showing it. Being a view filter it
+   is reversible — the count says how many are hidden, and *Show dismissed*
+   brings them back with an undo button each. Dismissing also drops the
+   project's own `mistral_batch_jobs` row, which is what makes a job
+   "pending" for **Check result**; leaving it would keep asking about a job
+   the user has just finished with. A live job (`RUNNING` / `QUEUED` /
+   `CANCELLATION_REQUESTED`) gets no button: there is nothing to clear yet,
+   and one beside a running row would read as *cancel*, which it is not.
+   Hidden ids live in the app-data config DB
+   (`KEY_MISTRAL_JOBS_DISMISSED`) — per user, not per project.
 
 The key + SDK are the same `[cloud]` extra as the synchronous path; only
 the submit/poll/fetch calls differ.

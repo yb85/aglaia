@@ -5,15 +5,15 @@ description: The text-recognition backends Aglaïa can drive, and when to pick e
 
 Aglaïa runs OCR through a pluggable **engine** abstraction: every backend
 implements the same `recognize(image, languages)` contract, so you can
-switch engines per document without changing anything else. Five ship in
+switch engines per document without changing anything else. Six ship in
 the box, and you can [drop in your own](/docs/reference/processors).
 
 ## Background
 
 No single OCR engine wins everywhere. Apple Vision is fast and on-device
-but weaker on non-Latin scripts; vision-language models (Surya,
-PaddleOCR-VL) are far more accurate on hard pages but slower and
-heavier; a cloud service reads anything but sends your page over the
+but weaker on non-Latin scripts; vision-language models (Surya 2,
+GLM-OCR, Unlimited-OCR) are far more accurate on hard pages but slower
+and heavier; a cloud service reads anything but sends your page over the
 wire. Aglaïa exposes all of them behind one interface and lets you
 choose, even mixing a fast primary with a slow *complement* that only
 re-reads the low-confidence lines.
@@ -31,8 +31,9 @@ re-reads the low-confidence lines.
 |---|---|---|---|---|
 | **Apple Document** | on-device | fast | gold (mixed script) | recovers page (headings, blocks, reading order) — the choice for **Markdown** |
 | **Apple Vision** | on-device | fast | good | line-based, Latin-first, **no page** — for the searchable-**PDF** text layer, not Markdown; **default** |
-| **Surya** | on-device (llama.cpp) | slow | gold | VLM via bundled `llama-server` |
-| **PaddleOCR-VL** | on-device | slow | high | VLM alternative |
+| **Surya 2** | on-device (local VLM) | slow | gold | Qwen3.5-VL via the shared VLM backend — MLX on Apple Silicon, vLLM on CUDA |
+| **GLM-OCR** | on-device (local VLM) | slow | high | same backend; a second opinion on hard pages |
+| **Unlimited-OCR** | on-device (local VLM) | slow | high | same backend |
 | **Mistral Document AI** | cloud | network-bound | gold | reads any script; key in the OS keychain |
 
 A unified **OCR DPI** knob downsamples the page to a sweet spot

@@ -13,8 +13,8 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QHBoxLayout, QHeaderView, QLabel,
+    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from aglaia.gui.colors import (
@@ -23,7 +23,12 @@ from aglaia.gui.colors import (
 from aglaia.gui.theme import lucide
 from aglaia.gui.timeago import time_ago
 
-COL_SUBMITTED, COL_STATUS, COL_PROJECT, COL_CHUNK, COL_REQ = range(5)
+COL_SUBMITTED, COL_STATUS, COL_PROJECT, COL_CHUNK, COL_REQ, COL_DISMISS = range(6)
+
+#: A job in one of these is over — nothing more will happen to it, so it can
+#: be cleared from the view. RUNNING / QUEUED / CANCELLATION_REQUESTED are
+#: still live and keep no dismiss button: cancel them first.
+TERMINAL = frozenset({"SUCCESS", "FAILED", "TIMEOUT_EXCEEDED", "CANCELLED"})
 
 _STATUS_COLOR = {
     "SUCCESS": "#2e7d32", "RUNNING": COLOR_PRIMARY, "QUEUED": COLOR_PRIMARY,
@@ -31,6 +36,26 @@ _STATUS_COLOR = {
     "CANCELLED": COLOR_FONT_PLACEHOLDER,
     "CANCELLATION_REQUESTED": COLOR_FONT_PLACEHOLDER,
 }
+
+
+def _load_dismissed() -> set:
+    try:
+        from aglaia.app_data import db as cfg
+        with cfg.session() as conn:
+            value = cfg.get(conn, cfg.KEY_MISTRAL_JOBS_DISMISSED, []) or []
+    except Exception:
+        return set()
+    return {str(v) for v in value} if isinstance(value, list) else set()
+
+
+def _save_dismissed(ids) -> None:
+    try:
+        from aglaia.app_data import db as cfg
+        with cfg.session() as conn:
+            cfg.set(conn, cfg.KEY_MISTRAL_JOBS_DISMISSED, sorted(ids))
+            conn.commit()
+    except Exception:
+        pass
 
 
 class MistralJobsTab(QWidget):
@@ -43,6 +68,9 @@ class MistralJobsTab(QWidget):
         super().__init__(parent)
         self._db_path = str(db_path)
         self._worker = None
+        self._rows: list = []
+        self._dismissed: set[str] = _load_dismissed()
+        self._show_dismissed = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -57,6 +85,14 @@ class MistralJobsTab(QWidget):
         self._status_lbl.setStyleSheet(
             f"color: {COLOR_FONT_DIM}; font-size: 11px;")
         bar.addWidget(self._status_lbl)
+        self._show_chk = QCheckBox(self.tr("Show dismissed"))
+        self._show_chk.setStyleSheet(
+            f"color: {COLOR_FONT_DIM}; font-size: 11px;")
+        self._show_chk.setToolTip(self.tr(
+            "Dismissed jobs are hidden here only — the Mistral Batch API has "
+            "no delete, so the job itself stays in your account history."))
+        self._show_chk.toggled.connect(self._on_show_dismissed)
+        bar.addWidget(self._show_chk)
         self._refresh_btn = QPushButton(self.tr("Refresh"))
         self._refresh_btn.setIcon(lucide("refresh-cw", color=COLOR_PRIMARY, size=13))
         self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -64,10 +100,10 @@ class MistralJobsTab(QWidget):
         bar.addWidget(self._refresh_btn)
         root.addLayout(bar)
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels([
             self.tr("Submitted"), self.tr("Status"), self.tr("Project"),
-            self.tr("Chunk"), self.tr("Requests"),
+            self.tr("Chunk"), self.tr("Requests"), "",
         ])
         self.table.setAlternatingRowColors(True)
         self.table.setStyleSheet(
@@ -101,8 +137,18 @@ class MistralJobsTab(QWidget):
         if error:
             self._status_lbl.setText(error)
             return
+        self._rows = list(rows)
+        self._render()
+
+    def _render(self) -> None:
+        rows = [j for j in self._rows
+                if self._show_dismissed
+                or str(j.get("id") or "") not in self._dismissed]
+        hidden = len(self._rows) - len(rows)
         self._status_lbl.setText(
-            self.tr("{n} job(s)").format(n=len(rows)))
+            self.tr("{n} job(s)").format(n=len(rows)) if not hidden else
+            self.tr("{n} job(s) · {h} dismissed").format(n=len(rows), h=hidden))
+        self._show_chk.setVisible(bool(hidden) or self._show_dismissed)
         self.table.setRowCount(len(rows))
         for r, j in enumerate(rows):
             sub = QTableWidgetItem(time_ago(j.get("created_at")))
@@ -132,9 +178,70 @@ class MistralJobsTab(QWidget):
             done, total = j.get("succeeded"), j.get("total")
             rtxt = (f"{done}/{total}" if total is not None else "—")
             self.table.setItem(r, COL_REQ, QTableWidgetItem(rtxt))
+
+            jid = str(j.get("id") or "")
+            self.table.setCellWidget(r, COL_DISMISS,
+                                     self._dismiss_cell(jid, status))
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(
             COL_PROJECT, QHeaderView.ResizeMode.Stretch)
+
+    def _dismiss_cell(self, job_id: str, status: str):
+        """Trash (or restore) button for a finished job.
+
+        A live job keeps none: there is nothing to clear away yet, and the
+        button beside a RUNNING row would read as "cancel", which it is not."""
+        if not job_id or status not in TERMINAL:
+            return None
+        wrap = QWidget()
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        btn = QPushButton()
+        btn.setFlat(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(24, 22)
+        if job_id in self._dismissed:
+            btn.setIcon(lucide("undo", color=COLOR_FONT_DIM, size=13))
+            btn.setToolTip(self.tr("Show this job again"))
+            btn.clicked.connect(lambda _=False, j=job_id: self._restore(j))
+        else:
+            btn.setIcon(lucide("trash-2", color=COLOR_FONT_DIM, size=13))
+            btn.setToolTip(self.tr(
+                "Dismiss this finished job from the list. Mistral keeps no "
+                "delete endpoint, so the job stays in your account history."))
+            btn.clicked.connect(lambda _=False, j=job_id: self._dismiss(j))
+        row.addWidget(btn)
+        row.addStretch(1)
+        return wrap
+
+    def _dismiss(self, job_id: str) -> None:
+        """Hide a finished job, and drop the project's record of it.
+
+        The local row is what makes a job "pending" for the OCR card's *Check
+        result*; leaving it behind would keep asking about a job the user has
+        just said they are done with."""
+        self._dismissed.add(str(job_id))
+        _save_dismissed(self._dismissed)
+        try:
+            from aglaia.storage.db import db_session
+            from aglaia.storage.repo import MistralBatchRepo
+            if self._db_path:
+                with db_session(self._db_path) as conn:
+                    MistralBatchRepo(conn).delete(str(job_id))
+                    conn.commit()
+        except Exception:
+            pass
+        self._render()
+
+    def _restore(self, job_id: str) -> None:
+        self._dismissed.discard(str(job_id))
+        _save_dismissed(self._dismissed)
+        self._render()
+
+    def _on_show_dismissed(self, on: bool) -> None:
+        self._show_dismissed = bool(on)
+        self._render()
 
     def _on_cell_clicked(self, row: int, col: int) -> None:
         if col != COL_PROJECT:
