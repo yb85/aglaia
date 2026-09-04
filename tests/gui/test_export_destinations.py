@@ -41,7 +41,13 @@ def tab(app, tmp_path, monkeypatch):
         importlib.reload(m)
     from aglaia.workers import destinations as d
     d.reset_for_tests()
-    return ExportTab()
+    tab = ExportTab()
+    yield tab
+    # This test file registers a destination in a process-global registry.
+    # Leaving it there made the bundled-destination tests see four where they
+    # expect three — which is how `forget()` came to exist.
+    d.forget("ready-dest")
+    d.reset_for_tests()
 
 
 def _cards(tab):
@@ -151,3 +157,40 @@ def test_changing_the_format_rebuilds_the_section(tab):
     tab.format_group.set_current_key("pdf")
     tab.refresh_destinations()
     assert _cards(tab)
+
+
+def test_forget_removes_a_destination_from_this_process(tab, tmp_path):
+    """Uninstalling deletes the files; the class stays in the registry and the
+    module in sys.modules unless something undoes the import. Without that, a
+    removed destination went on being listed and offered until restart."""
+    import sys
+    from aglaia.plugin_api import DESTINATION_REGISTRY
+    from aglaia.workers import destinations as d
+    _install_ready_destination(tmp_path)
+    d.load_all()
+    assert "ready-dest" in DESTINATION_REGISTRY
+    assert "aglaia_plugin_ready_dest" in sys.modules
+    # The real pairing: uninstall removes the files, forget removes the
+    # registration. Either alone leaves the destination half-present — files
+    # gone but still offered, or unregistered and re-imported on the next
+    # discovery.
+    from aglaia.app_data import plugin_registry as reg
+    reg.uninstall("ready-dest")
+    d.forget("ready-dest")
+    assert "ready-dest" not in DESTINATION_REGISTRY
+    assert "aglaia_plugin_ready_dest" not in sys.modules
+    d.reset_for_tests()
+    tab.format_group.set_current_key("pdf")
+    tab.refresh_destinations()
+    assert "Ready dest" not in [_texts(c)[0] for c in _cards(tab)]
+
+
+def test_forget_alone_does_not_survive_the_next_discovery(tab, tmp_path):
+    """Because the files are still there. This is why uninstall does both,
+    and why `forget` is not offered as an "unload" button."""
+    from aglaia.workers import destinations as d
+    _install_ready_destination(tmp_path)
+    d.load_all()
+    d.forget("ready-dest")
+    d.reset_for_tests()
+    assert "ready-dest" in d.load_all()

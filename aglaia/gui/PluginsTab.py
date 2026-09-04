@@ -834,6 +834,10 @@ class PluginsTab(QWidget):
         ) != QMessageBox.StandardButton.Yes:
             return
         res = reg.uninstall(slug)
+        # Files gone is not enough: the class is still in the registry and
+        # the module still in sys.modules, so the destination would go on
+        # being listed and offered until the app restarted.
+        dest.forget(slug)
         dest.reset_for_tests()
         self._status.setText(res.message)
         self._rebuild()

@@ -216,6 +216,22 @@ def for_format(ext: str) -> list[Destination]:
     return sorted(out, key=lambda d: (d.display or d.name).lower())
 
 
+def forget(slug: str) -> None:
+    """Drop every trace of one plugin from this process.
+
+    Uninstalling removes the files, but the class stays in
+    `DESTINATION_REGISTRY` and the module in `sys.modules` — so a removed
+    destination went on being listed and offered until the app restarted.
+    Registration happens at import, so undoing it means undoing the import
+    too, or the next `load_all` would not re-run the module even if the
+    plugin came back."""
+    slug = str(slug)
+    _loaded.pop(slug, None)
+    _errors.pop(slug, None)
+    DESTINATION_REGISTRY.pop(slug, None)
+    sys.modules.pop(f"aglaia_plugin_{slug.replace('-', '_')}", None)
+
+
 def reset_for_tests() -> None:
     _loaded.clear()
     _errors.clear()
