@@ -3800,6 +3800,31 @@ class MainWindow(QMainWindow):
         # `page_order`. Cheap full rebuild = guaranteed in sync.
         self._broadcast_scan_set_changed()
 
+    def _scans_in_display_order(self) -> dict:
+        """`{scan_id: ScanItemWidget}` in the order the user sees.
+
+        The grid's FlowLayout IS that order: it is seeded from
+        `ScanRepo.list_scans` (``ORDER BY page_order``) and a drag-reorder
+        moves the widget inside it. The alt views used to enumerate
+        `scan_widgets_by_scan` sorted by **scan_id**, which matches only
+        until the first reorder — after one, the list and the gallery showed
+        an order the grid disagreed with, and the drop index the list handed
+        `_on_card_dropped` indexed a different sequence than the layout that
+        handler walks. Anything not in the layout (transient, mid-teardown)
+        is appended by id so nothing is ever dropped."""
+        out: dict = {}
+        try:
+            for i in range(self.scroll_layout.count()):
+                w = self.scroll_layout.itemAt(i).widget()
+                sid = getattr(w, "scan_id", None)
+                if sid is not None and int(sid) in self.scan_widgets_by_scan:
+                    out[int(sid)] = w
+        except Exception:
+            out = {}
+        for sid in sorted(self.scan_widgets_by_scan):
+            out.setdefault(int(sid), self.scan_widgets_by_scan[sid])
+        return out
+
     def _ocr_branch_state_map(self) -> dict:
         """Per-branch OCR state for `ScansTableView` row badges. Single
         DB query; format matches `OcrRepo.branch_status_map`."""
@@ -3812,11 +3837,8 @@ class MainWindow(QMainWindow):
     # ── ScansGalleryView providers ────────────────────────────────
     def _gallery_snaps(self) -> list[tuple[int, str]]:
         """Ordered (scan_id, raw_filestem) — vertical axis of the gallery."""
-        out: list[tuple[int, str]] = []
-        for sid in sorted(self.scan_widgets_by_scan.keys()):
-            w = self.scan_widgets_by_scan[sid]
-            out.append((int(sid), str(getattr(w, "raw_filestem", f"scan-{sid}"))))
-        return out
+        return [(int(sid), str(getattr(w, "raw_filestem", f"scan-{sid}")))
+                for sid, w in self._scans_in_display_order().items()]
 
     def _gallery_stages(self) -> list[str]:
         """Pipeline stage names — horizontal axis of the gallery.
@@ -4515,7 +4537,7 @@ class MainWindow(QMainWindow):
         if self._scans_table is None:
             from aglaia.gui.ScansTableView import ScansTableView
             t = ScansTableView(
-                get_snap_widgets=lambda: self.scan_widgets_by_scan,
+                get_snap_widgets=self._scans_in_display_order,
                 thumb_loader=self.thumb_loader,
                 ocr_state_provider=self._ocr_branch_state_map,
                 cell_states_provider=self.cell_disable_states,

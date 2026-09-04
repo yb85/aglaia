@@ -48,7 +48,7 @@ PageDewarper	spine_weight_zone	bounded_float	LM only: width of the up-weighted s
 PageDewarper	spine_gammas	string	LM only: comma-separated γ grid for the spine-localized curl term z += γ·exp(−|x−x_bind|/s). Each value is fitted and the best objective wins (γ = 0, the plain cubic, is always a candidate). Needs principal_point to be identifiable. Empty disables the search.	false	0.02, 0.05, 0.10
 PageDewarper	spine_gamma_scale	bounded_float	LM only: decay length s of the spine curl term, as a fraction of the model page width.	true	0.15
 PageDewarper	max_oob	bounded_float	Reject the dewarp if remap goes more than this many pixels out of bounds.	true	500.0
-PageDewarper	min_spans	bounded_int	Minimum span count to run the cubic fit. Below this, the optimizer is under-constrained and passthrough is safer.	true	4
+PageDewarper	min_spans	bounded_int	Minimum span count to run the cubic fit. Below this, the fit is under-constrained and passthrough is safer. 3 since the LM solver replaced Powell — it recovers a sheet from far fewer baselines.	true	3
 PageDewarper	min_span_width_ratio	bounded_float	Drop spans whose width is less than this fraction of the widest span in the scan. 0 = disabled.	true	0.2
 PageDewarper	baseline_source	enum	Which fitted text-line curve(s) constrain the sheet: bottom = baselines, top = x-height toplines, average = midlines, both = baseline + topline as separate spans (doubles vertical constraints).	false	bottom
 PageDewarper	use_huber	bool	Robust pseudo-Huber reprojection loss — caps the pull of stray spans (footers, captions). Off = plain L2.	false	true

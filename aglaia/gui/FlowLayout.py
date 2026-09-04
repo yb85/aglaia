@@ -184,6 +184,12 @@ class FlowLayout(QLayout):
 
     def insertWidget(self, index: int, widget):
         self.addChildWidget(widget)
+        # `removeWidget` hides on the way out, and `hide()` sets the EXPLICIT
+        # hide flag — `addChildWidget` reparents but never shows, so a widget
+        # coming back in stays invisible forever. That is a reorder: a dragged
+        # card was removed and re-inserted, and vanished. Undo the hide here,
+        # which is also what `QBoxLayout::insertWidget` does.
+        widget.show()
         item = QWidgetItem(widget)
         if index < 0 or index > len(self._items):
             index = len(self._items)

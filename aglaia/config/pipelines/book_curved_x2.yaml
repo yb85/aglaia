@@ -82,7 +82,7 @@ pipeline:
     # its own output width. Scales with z'² — inert on a flat page.
     slope_emphasis: 1.0
     max_oob: 400
-    min_spans: 4
+    min_spans: 3
     min_span_width_ratio: 0.2
     kernel_char_mult: 1.5
     thickness_char_mult: 3.0

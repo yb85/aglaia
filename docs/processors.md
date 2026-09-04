@@ -429,7 +429,7 @@ options:
   cubic_cost: 0.0               # shape regularizer (α/β or spline bending); 0 = off
   focal_length: 1.3             # Overridden by camera calibration if loaded
   processing_dpi: 150.0         # Span analysis downscale
-  min_spans: 4
+  min_spans: 3
   min_span_width_ratio: 0.5     # drop partial-width spans (footers, page numbers)
   kernel_char_mult: 2.0
   thickness_char_mult: 3.0

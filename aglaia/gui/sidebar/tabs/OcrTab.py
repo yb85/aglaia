@@ -885,9 +885,17 @@ class OcrTab(QWidget):
         dlg.setWindowTitle(self.tr("Mistral API key"))
         v = QVBoxLayout(dlg)
         v.setSpacing(8)
-        main = QLabel(self.tr(
-            "Paste your Mistral API key. It is stored in your OS keychain. "
-            "Leave empty to remove."))
+        from aglaia.app_data.secrets import keychain_backend
+        _kc_ok, _kc_reason = keychain_backend()
+        main = QLabel(
+            self.tr("Paste your Mistral API key. It is stored in your OS "
+                    "keychain. Leave empty to remove.")
+            if _kc_ok else
+            # Promising the keychain and then writing plain text is the part
+            # that surprises. Say it before the key is typed, not after.
+            self.tr("Paste your Mistral API key. No OS keychain is reachable "
+                    "here, so it will be stored as PLAIN TEXT. Leave empty "
+                    "to remove."))
         main.setWordWrap(True)
         v.addWidget(main)
         edit = QLineEdit()
@@ -921,10 +929,23 @@ class OcrTab(QWidget):
         self._refresh_cloud_key_status(probe_keychain=True)
         if where == "env_file":
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(
-                self, self.tr("API key saved"),
-                self.tr("No OS keychain was available — the key was saved "
-                        "to {env_path} instead.").format(env_path=env_path))
+            from aglaia.app_data.secrets import keychain_backend
+            # Say WHICH thing was missing. "No OS keychain was available" was
+            # printed for a missing `keyring` PACKAGE too, which reads as a
+            # broken Keychain on a Mac whose Keychain is fine (#107).
+            _ok, reason = keychain_backend()
+            if reason == "not_installed":
+                msg = self.tr(
+                    "Keychain storage needs the 'cloud' extra "
+                    "(uv sync --extra cloud); it is not installed, so the key "
+                    "was saved as plain text in {env_path} instead."
+                ).format(env_path=env_path)
+            else:
+                msg = self.tr(
+                    "No OS keychain answered on this system — the key was "
+                    "saved as plain text in {env_path} instead."
+                ).format(env_path=env_path)
+            QMessageBox.information(self, self.tr("API key saved"), msg)
 
     def _build_install_button(self, engine_display: str) -> QWidget:
         """Compact amber 'Install' pill placed inside an engine card

@@ -686,6 +686,28 @@ class DebugViewerWidget(QWidget):
             return None
         return QPixmap.fromImage(img)
 
+    def _adopt_stale_overlays(self, stale_bytes: list, stale_geom: list,
+                              stale_procs: list) -> None:
+        """Re-hang the previous render's composites on the new rows.
+
+        Only where the row still belongs to the SAME processor: a rerun that
+        changed the chain's shape (a step disabled, a branch split differently)
+        would otherwise pair a row with another step's picture, which is worse
+        than the bare image. Those rows keep the old fallback until the fresh
+        render lands and replaces the lot."""
+        n = self.strip.count()
+        if not stale_bytes or n == 0:
+            return
+        procs = [k[2] for k in self._row_keys]
+        keep = [(i < len(stale_procs) and i < len(procs)
+                 and stale_procs[i] == procs[i]) for i in range(n)]
+        self._overlay_bytes = [
+            stale_bytes[i] if (keep[i] and i < len(stale_bytes)) else None
+            for i in range(n)]
+        self._overlay_geom = [
+            stale_geom[i] if (keep[i] and i < len(stale_geom)) else {}
+            for i in range(n)]
+
     def _on_overlay_ready(self, images: list) -> None:
         """Background renderer finished. Keep only the COMPRESSED bytes
         per row (decode happens lazily on selection) and enable the
@@ -776,6 +798,16 @@ class DebugViewerWidget(QWidget):
                 job.failed.disconnect()
             except Exception:
                 pass
+        # Carry the last composites over the rebuild. The re-render is a
+        # background job, and with no overlay `_on_row_changed` falls back to
+        # the bare stage image + the light Qt overlay — so a slider commit
+        # replaced the dewarp's source | output picture with a single frame
+        # and a red sheet contour, for the whole rerun, exactly while the
+        # user was comparing the live grid preview against it (#106). The
+        # previous composite is still a truthful picture of the same page.
+        stale_bytes = list(self._overlay_bytes)
+        stale_geom = list(self._overlay_geom)
+        stale_procs = [k[2] for k in self._row_keys]
         # One repaint, not three. `_load` seeds the selection on the LAST row
         # and the restore moves it back; unblocked, the user sees the view
         # jump to the end of the chain and back on every rerun.
@@ -787,6 +819,7 @@ class DebugViewerWidget(QWidget):
             self._overlay_bytes = []
             self._overlay_geom = []
             self._load()
+            self._adopt_stale_overlays(stale_bytes, stale_geom, stale_procs)
             if 0 <= keep_row < self.strip.count():
                 self.strip.setCurrentRow(keep_row)
         finally:

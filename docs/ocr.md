@@ -88,9 +88,18 @@ Both live in `engine.py` (one place for picker, env, and DB key):
 
 `mistral_cloud` needs an API key. Stored in the OS keychain via `keyring`
 (macOS Keychain / Windows Credential Locker / Linux Secret Service), with
-a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain backend is
-available (`aglaia/app_data/secrets.py`). The key never touches the project
-DB or the config DB. Install with `uv sync --extra cloud`.
+a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain is reachable
+(`aglaia/app_data/secrets.py`). The key never touches the project DB or the
+config DB. Install with `uv sync --extra cloud`.
+
+**`keyring` ships in that same `cloud` extra**, and the usual dev syncs
+(`--extra dev --extra gui --extra macos`) leave it out — so a source checkout
+can have `mistralai` and no keychain at all, and the key lands in the
+plaintext `.env`. `secrets.keychain_backend()` returns `(False,
+"not_installed")` for that and `(False, "no_backend")` for a real absence of
+any store, and the GUI names which one rather than blaming the OS keychain
+(#107). The shipped macOS app always includes `cloud`, so this only bites
+from source.
 
 ## Mistral batch OCR (async, cheaper)
 

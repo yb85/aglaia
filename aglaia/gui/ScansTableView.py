@@ -807,7 +807,10 @@ class ScansTableView(QScrollArea):
         # Pull row backgrounds from the active palette so the alt color
         # tracks dark/light mode instead of being hardcoded.
         bg_even, bg_odd = _palette_row_colors()
-        for i, (sid, w) in enumerate(sorted(widgets.items())):
+        # The provider hands them in DISPLAY order (`page_order`, the grid's
+        # own sequence). Sorting here by scan_id is what made a reorder
+        # invisible in this view — see `_scans_in_display_order`.
+        for i, (sid, w) in enumerate(widgets.items()):
             bg = bg_even if (i % 2 == 0) else bg_odd
             self._v.addWidget(self._make_block(sid, w, full_ocr, bg))
         self._v.addStretch(1)
@@ -829,17 +832,23 @@ class ScansTableView(QScrollArea):
         scan_id = int(scan_id)
         if any(b.scan_id == scan_id for b in self._snap_blocks()):
             return
-        w = (self._get_snap_widgets() or {}).get(scan_id)
+        widgets = self._get_snap_widgets() or {}
+        w = widgets.get(scan_id)
         if w is None:
             return
         block = self._make_block(scan_id, w, self._full_ocr(),
                                  _palette_row_colors()[0])
-        # Insert before the first block with a higher scan_id (sorted order),
-        # else just before the trailing stretch.
-        insert_at = self._v.count() - 1
+        # Place it where the provider's DISPLAY order puts it: the first
+        # existing row that comes after it there. Comparing scan_ids instead
+        # put a re-imported or reordered page in the wrong row.
+        order = list(widgets.keys())
+        rank = {sid: i for i, sid in enumerate(order)}
+        mine = rank.get(scan_id, len(order))
+        insert_at = self._v.count() - 1          # before the trailing stretch
         for i in range(self._v.count()):
             wdg = self._v.itemAt(i).widget()
-            if isinstance(wdg, _SnapBlock) and wdg.scan_id > scan_id:
+            if (isinstance(wdg, _SnapBlock)
+                    and rank.get(wdg.scan_id, len(order)) > mine):
                 insert_at = i
                 break
         self._v.insertWidget(insert_at, block)
