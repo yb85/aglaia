@@ -111,6 +111,20 @@ options:
 
 The default `auto` backend resolves **dbnet → apple_vision (macOS) → east**. The projection-profile `heuristic` is no longer an `auto` fallback — `auto` raises `LayoutModelUnavailable` if no ML model is installed (download one with `aglaia setup` or the in-app downloader); pick `heuristic` explicitly to use it.
 
+**Hand-drawn layout set (#118).** When `manual_overrides` carries `layouts`
+on the scan's TRUNK (`branch_path == ""`) — a list of polygons in
+PageDetector's own input coordinates, with `layouts_frame_wh` for provenance —
+it REPLACES detection for that page. The bboxes become the pages in the order
+given, each polygon becomes its child's ROI verbatim (no text-tightening, no
+hull: the user has already said where the page is), and the crop is derived
+from the polygon rather than the polygon clamped into the crop. `smart_merge`
+and the `max_pages` cap are skipped. It is read *before* the empty-page guard,
+so a layout can be added to a page the detector found nothing on, and a layout
+deleted by hand is not found again on the next run. A set drawn on a
+differently-sized frame is refused and detection resumes, like every other
+spatial override. It outranks a per-branch `roi`, which was drawn on a crop
+that may no longer be the same shape.
+
 ## Binarizer (`aglaia/processors/Binarizer.py`)
 
 ![Local adaptive binarization: an unevenly-lit page (left) becomes clean black-on-white text (right), the shadow gradient removed.](figures/binarize_example.jpg)
