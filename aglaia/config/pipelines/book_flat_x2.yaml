@@ -63,4 +63,4 @@ pipeline:
 - name: output_margin
   processor: MarginSetter
   options:
-    margin_mm: 15
+    margin_mm: 2

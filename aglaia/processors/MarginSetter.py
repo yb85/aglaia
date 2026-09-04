@@ -9,6 +9,11 @@
 MarginSetter — pads the image with a white border of a configurable
 width, CSS-style.
 
+The image is first cropped to its ink content, then padded — so the margin
+is measured from the text, not from whatever canvas the previous step left.
+`width_floor` (off) is the one thing that can override that: see
+`_enforce_width_floor`.
+
 Accepts the margin as either `margin_mm` (millimetres) or `margin_px`
 (pixels). The value is parsed CSS-shorthand-style:
 
@@ -34,8 +39,14 @@ from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProces
 
 @dataclass
 class MarginSetterOption(AbstractProcessorOption):
-    margin_mm: Optional[Union[float, int, str]] = None
+    margin_mm: Optional[Union[float, int, str]] = "2"
     margin_px: Optional[Union[float, int, str]] = None
+    # Pad back out to the step's INPUT width when the crop came out narrower.
+    # OFF by default: it overrides the horizontal margin with "whatever
+    # whitespace the dewarp canvas happened to carry", so a page asking for
+    # 5 mm measured 10.2-16.8 mm left/right while top/bottom were exactly 5.0
+    # (#112). See `_enforce_width_floor` for what it is for.
+    width_floor: bool = False
 
 
 def _parse_margin(value: Union[float, int, str]) -> tuple[float, float, float, float]:
@@ -69,7 +80,7 @@ def _resolve_pixels(opt: MarginSetterOption, dpi: float) -> tuple[int, int, int,
     return int(round(l)), int(round(r)), int(round(t)), int(round(b))
 
 
-from aglaia.processors.option_specs import _s
+from aglaia.processors.option_specs import _b, _s
 
 
 class MarginSetter(AbstractImageProcessor):
@@ -82,12 +93,19 @@ class MarginSetter(AbstractImageProcessor):
     }
     _ESSENTIAL_PARAMS = ("margin_mm", "margin_px")
     OPTIONS = {
-        "margin_mm": _s("5",
+        "margin_mm": _s("2",
                         "CSS-style margin in mm. \"10\" all sides; "
                         "\"10 20\" V H; \"10 20 30 40\" L R T B."),
         "margin_px": _s("",
                         "Same as margin_mm but in pixels (overrides margin_mm when set).",
                         advanced=True),
+        "width_floor": _b(False,
+                          "Pad back out to the step's input width when the "
+                          "cropped page is narrower. Overrides the horizontal "
+                          "margin with the dewarp canvas's leftover "
+                          "whitespace — leave off unless you need every page "
+                          "at least as wide as the dewarp made it.",
+                          advanced=True),
     }
 
     @classmethod
@@ -107,10 +125,12 @@ class MarginSetter(AbstractImageProcessor):
                                      cv2.BORDER_CONSTANT, value=border_val)
             out_mask = cv2.copyMakeBorder(cropped_mask, t, b, l, r,
                                           cv2.BORDER_CONSTANT, value=0)
-        # Width floor: dewarping a curved page can only widen it; cropping
-        # whitespace + a tight pad must not shrink below the dewarp output.
-        min_w = int(params.get("min_width_px", in_w))
-        if out.shape[1] < min_w:
+        # Width floor, only when the forward pass stamped one. It defaults
+        # off (#112) — but a chain stamped before this option existed carries
+        # the old unconditional value, and replaying it must still reproduce
+        # what that run produced.
+        min_w = int(params.get("min_width_px", in_w) or 0)
+        if min_w and out.shape[1] < min_w:
             out = _enforce_width_floor(out, min_w, fill=255)
             out_mask = _enforce_width_floor(out_mask, min_w, fill=0)
         return out, out_mask
@@ -118,6 +138,7 @@ class MarginSetter(AbstractImageProcessor):
     def __init__(self, options: MarginSetterOption):
         super().__init__(options)
         self.opt = options
+        self.width_floor = bool(getattr(options, "width_floor", False))
         self.uses_gpu = False
 
     def process(self, buf: ImageBuffer) -> ImageBuffer:
@@ -134,14 +155,21 @@ class MarginSetter(AbstractImageProcessor):
                 cropped, top, bottom, left, right,
                 cv2.BORDER_CONSTANT, value=border_val,
             )
-        out = _enforce_width_floor(out, in_w)
+        # 3. Optional width floor. Off by default: it pads the page back out
+        # to the dewarp canvas, which silently replaces the horizontal margin
+        # the user asked for (#112).
+        floor_px = int(in_w) if self.width_floor else 0
+        if floor_px:
+            out = _enforce_width_floor(out, floor_px)
         buf.buffer = out
         buf.meta["status"] = int(Status.SUCCESS)
         buf.meta["replay_kind"] = "margin"
         buf.meta["replay_params"] = {
             "ltrb_px": [int(left), int(right), int(top), int(bottom)],
             "content_bbox_xywh": [int(b) for b in bbox],
-            "min_width_px": int(in_w),
+            # Stamped for the replay pass, which must reproduce the forward
+            # result exactly — 0 means "no floor", not "floor at 0".
+            "min_width_px": floor_px,
         }
         return buf
 
@@ -160,6 +188,14 @@ def _enforce_width_floor(arr: np.ndarray, min_w: int,
     glyphs (scans 95, 108, ...). Replacing the up-scale with symmetric
     padding restores the width promise without distorting content.
     `fill` is 255 for image (white), 0 for mask (outside ROI).
+
+    OFF by default since #112. The promise it keeps is about *page* width,
+    while this step's contract is content-crop plus a stated margin — so
+    horizontally it just re-adds the whitespace the crop removed, and the
+    margin the user set stops being the margin they get. Measured over 40
+    pages asking for 5 mm: top and bottom exactly 5.0, left and right
+    10.2-16.8 and varying page to page. Turn `width_floor` on only when every
+    page must stay at least as wide as the dewarp made it.
     """
     h, w = arr.shape[:2]
     if w >= min_w or w <= 0:

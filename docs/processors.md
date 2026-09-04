@@ -445,6 +445,34 @@ When `debug: true` or `--debug`, writes intermediate visualizations to `<workspa
 
 JAX cache lives at `./.jax_cache/` (auto-created). Persisting compilation across runs saves ~5s startup.
 
+## MarginSetter (`aglaia/processors/MarginSetter.py`)
+
+The last step of every shipped pipeline (`output_margin`). It **crops to the
+ink content**, then pads a white border — so the margin is measured from the
+text, not from whatever canvas the previous step left behind. `margin_mm`
+takes a CSS-style shorthand (`"2"` all round, `"2 6"` V H, `"2 6 3 4"` L R T B);
+`margin_px` overrides it in pixels. All four shipped pipelines ask for **2 mm**,
+which is also the bare default.
+
+`width_floor` (advanced, **off**) pads the page back out to the step's input
+width when the crop came out narrower. Physically the floor is defensible —
+flattening a curved page can only grow its width, and an earlier fix for that
+up-scaled the image and squished glyphs — but the promise is about *page*
+width, while this step's contract is content-crop plus a stated margin.
+Horizontally it therefore re-adds exactly the whitespace the crop removed, and
+the margin stops being the one you set: over 40 real pages asking for 5 mm,
+top and bottom came out exactly 5.0 mm while left and right ranged 10.2-16.8 mm
+and varied page to page (#112). Turn it on only when every page must stay at
+least as wide as the dewarp made it.
+
+The forward pass stamps `min_width_px` (0 = no floor) so `apply_replay`
+reproduces it exactly; a chain stamped before the option existed carries the
+old unconditional value and still replays as it ran.
+
+Note the ROI margins never reach the output: because this step crops to ink,
+`PageDetector.roi_margin_mm` and the hull ROI govern what the Binarizer keeps,
+not what the final page measures.
+
 ## Apple Vision detection (`aglaia/processors/layout_backends/apple_vision.py`)
 
 `AppleVisionBackend` is the `apple_vision` `LayoutBackend` used by
