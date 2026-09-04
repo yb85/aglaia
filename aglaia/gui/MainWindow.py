@@ -1576,13 +1576,10 @@ class MainWindow(QMainWindow):
         self._voice_engine = _engines[0][0] if _engines else "vosk"
         ct.set_voice_engines(_engines, self._voice_engine)
         ct.voice_engine_changed.connect(self._on_voice_engine_changed)
+        self._capture_tab = ct
+        ct.edit_shortcuts_requested.connect(self._edit_shortcuts)
         try:
-            keys = (self.args.config.get("keycontrols") or {})
-            ct.set_shortcut_legend({
-                "scan": keys.get("scan", []),
-                "trash": keys.get("trash", []),
-                "rotate": keys.get("rotate", []),
-            })
+            self._refresh_shortcut_legend()
             ct.set_voice_command_legend(self.args.config.get("voicecontrols") or {})
         except Exception:
             pass
@@ -2184,33 +2181,52 @@ class MainWindow(QMainWindow):
                           thickness=thick, lineType=cv2.LINE_AA)
         return bgr
 
-    def _match_key(self, event, action_name):
-        keys = self.args.config["keycontrols"].get(action_name, [])
-        for k in keys:
-            if len(k) == 1: # Single char check
-                if event.text().upper() == k.upper(): return True
-                # Also check Key_X enum for single chars if needed, but text() usually works
-            
-            # Map common key names to Qt Enums
-            key_map = {
-                "Space": Qt.Key.Key_Space,
-                "Backspace": Qt.Key.Key_Backspace,
-                "Return": Qt.Key.Key_Return,
-                "Enter": Qt.Key.Key_Enter,
-                "Escape": Qt.Key.Key_Escape,
-                "Tab": Qt.Key.Key_Tab,
-                "Delete": Qt.Key.Key_Delete,
-            }
-            
-            if k in key_map and event.key() == key_map[k]:
-                return True
-                
-            # If specified as "S" or "Q" but passed as Qt.Key.Key_S
-            if hasattr(Qt.Key, f"Key_{k.upper()}"):
-                if event.key() == getattr(Qt.Key, f"Key_{k.upper()}"):
-                    return True
-                    
-        return False
+    def _match_key(self, event, action_name) -> bool:
+        """Does this key press fire `action_name`?
+
+        Delegates to `gui.keybindings`, which compares `QKeySequence`s. The
+        hand-rolled matcher this replaced looked at `event.text()` and a table
+        of seven key names and NEVER at the modifiers, so a combination was
+        not expressible — and a presentation remote sends combinations."""
+        from aglaia.gui import keybindings as _kb
+        return _kb.matches(event, self.key_bindings(), action_name)
+
+    def key_bindings(self) -> dict:
+        """The bindings in force: the user's, falling back to the YAML
+        `keycontrols`. Cached — `keyPressEvent` runs on every key."""
+        cached = self.__dict__.get("_key_bindings")
+        if cached is None:
+            from aglaia.gui import keybindings as _kb
+            cached = _kb.resolve(getattr(self.args, "config", None))
+            self._key_bindings = cached
+        return cached
+
+    def _edit_shortcuts(self) -> None:
+        """Open the keybinding editor and apply what comes back (#103)."""
+        from aglaia.gui import keybindings as _kb
+        from aglaia.gui.KeybindingDialog import KeybindingDialog
+        defaults = _kb.defaults_from_config(getattr(self.args, "config", None))
+        dlg = KeybindingDialog(self.key_bindings(), defaults, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            _kb.save(dlg.bindings())
+        except Exception as e:
+            QMessageBox.warning(self, self.tr("Capture shortcuts"),
+                                self.tr("Could not save: {err}").format(err=e))
+            return
+        self._key_bindings = None       # re-resolved on the next key press
+        self._refresh_shortcut_legend()
+
+    def _refresh_shortcut_legend(self) -> None:
+        from aglaia.gui import keybindings as _kb
+        ct = getattr(self, "_capture_tab", None)
+        if ct is None:
+            return
+        try:
+            ct.set_shortcut_legend(_kb.legend(self.key_bindings()))
+        except Exception:
+            pass
 
     def keyPressEvent(self, event):
         # Quit is bound to the platform-standard ⌘Q / Ctrl+Q via
