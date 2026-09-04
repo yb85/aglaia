@@ -183,9 +183,9 @@ class PluginSettingsDialog(QDialog):
         if dest.SECRET_FIELDS:
             # Where a secret goes is the HOST's fact and it is the same for
             # every plugin, so it is said once here rather than repeated in
-            # each plugin's field help. It also has to be true: without the
-            # `cloud` extra there is no keyring and the value is written as
-            # plain text, which the user is entitled to know before typing a
+            # each plugin's field help. It also has to be TRUE: on a headless
+            # Linux box with no Secret Service the value is written as plain
+            # text, and the user is entitled to know that before typing a
             # password into the box.
             secrets = getattr(getattr(dest, "ctx", None), "secrets", None)
             in_keychain = bool(getattr(secrets, "available", False))

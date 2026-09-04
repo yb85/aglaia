@@ -45,6 +45,7 @@ dependencies = [
     { name = "httpx" },
     { name = "jax" },
     { name = "jaxlib" },
+    { name = "keyring" },
     { name = "langcodes", extra = ["data"] },
     { name = "ml-dtypes" },
     { name = "numpy" },
@@ -66,7 +67,6 @@ dependencies = [
 
 [package.optional-dependencies]
 cloud = [
-    { name = "keyring" },
     { name = "mistralai" },
 ]
 cuda = [
@@ -133,7 +133,7 @@ requires-dist = [
     { name = "jax", specifier = ">=0.9.0" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.9.0" },
     { name = "jaxlib", specifier = ">=0.9.0" },
-    { name = "keyring", marker = "extra == 'cloud'", specifier = ">=24.0.0" },
+    { name = "keyring", specifier = ">=24.0.0" },
     { name = "langcodes", extras = ["data"], specifier = ">=3.5.1" },
     { name = "mistralai", marker = "extra == 'cloud'", specifier = ">=1.0.0,<2" },
     { name = "ml-dtypes", specifier = ">=0.5.4" },

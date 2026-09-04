@@ -940,9 +940,9 @@ class OcrTab(QWidget):
             _ok, reason = keychain_backend()
             if reason == "not_installed":
                 msg = self.tr(
-                    "Keychain storage needs the 'cloud' extra "
-                    "(uv sync --extra cloud); it is not installed, so the key "
-                    "was saved as plain text in {env_path} instead."
+                    "Aglaïa could not load the component that talks to the "
+                    "keychain, so the key was saved as plain text in "
+                    "{env_path} instead. Reinstalling Aglaïa should fix it."
                 ).format(env_path=env_path)
             else:
                 msg = self.tr(

@@ -33,6 +33,13 @@ dependencies = [
     # `pip install aglaia` whose bundled plugins raise ImportError the first
     # time you click Send is worse than not shipping them.
     "httpx>=0.27",
+    # Secret storage — the OS keychain (macOS Keychain, Windows Credential
+    # Locker, Linux Secret Service). Base, not an extra: EVERY export plugin
+    # that reaches a server needs somewhere to put a password, and an install
+    # without keyring silently falls back to writing those passwords as plain
+    # text. A packaging decision must not be what decides whether a user's
+    # SMTP password is encrypted.
+    "keyring>=24.0.0",
     "platformdirs>=4.3.0",
     "psutil>=7.2.2",
     "pypdfium2>=4.30.0",
@@ -151,11 +158,9 @@ jbig2 = [
     "aglaia_jbig2",
 ]
 cloud = [
-    # Cloud OCR card — Mistral Document AI (OCR) over HTTPS. `keyring`
-    # stores the API key in the OS keychain (macOS Keychain / Windows
-    # Credential Locker / Linux Secret Service), with a plaintext
-    # APP_DATA/.env fallback when no keychain backend is available
-    # (headless Linux/Windows).
+    # Cloud OCR card — Mistral Document AI (OCR) over HTTPS. The API key
+    # goes to the OS keychain like every other secret; `keyring` is a base
+    # dependency, so this extra is only the SDK.
     # PINNED <2: the 2.x SDK is a restructure, not an API bump — the top-level
     # `mistralai` became a NAMESPACE package (no __init__), so
     # `from mistralai import Mistral` fails with the tell-tale
@@ -165,12 +170,11 @@ cloud = [
     # batch.jobs.create|get|cancel|list) needs re-verifying against a PAID API
     # before we can move. Lift the ceiling only with that done.
     "mistralai>=1.0.0,<2",
-    "keyring>=24.0.0",
 ]
-# Optional `keyring` backends — install one to keep the Mistral key in a
-# password manager instead of the OS keychain. keyring auto-discovers any
+# Optional `keyring` backends — install one to keep secrets in a password
+# manager instead of the OS keychain. keyring auto-discovers any
 # installed backend (highest-priority wins); no code change needed.
-#   uv sync --extra cloud --extra keyring-bitwarden
+#   uv sync --extra keyring-bitwarden
 keyring-bitwarden = [
     "bitwarden-keyring>=0.3.1",   # secrets in BitWarden (needs `bw` CLI)
 ]
