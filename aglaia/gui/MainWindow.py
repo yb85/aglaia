@@ -3720,6 +3720,70 @@ class MainWindow(QMainWindow):
                                self.tr("Mistral jobs"))
         self.tabs.setCurrentIndex(idx)
 
+    def _build_plugin_menu(self, mb, _act) -> None:
+        """A *Plugins* menu, if any plugin contributes a window.
+
+        Built once at startup from whatever is loaded then; a plugin installed
+        afterwards appears at the next launch. Rebuilding a native menu bar
+        live is possible and is not worth the failure modes for something that
+        happens once."""
+        try:
+            from aglaia.plugin_api import WINDOW_REGISTRY
+            from aglaia.workers import plugin_windows
+            plugin_windows.load_all()
+        except Exception as e:  # noqa: BLE001 — a plugin must not cost the menu
+            print(f"[plugin-windows] not loaded: {type(e).__name__}: {e}")
+            return
+        if not WINDOW_REGISTRY:
+            return
+        menu = mb.addMenu(self.tr("Plugins"))
+        for slug, windows in sorted(WINDOW_REGISTRY.items()):
+            sub = menu.addMenu(slug)
+            for win in windows:
+                sub.addAction(_act(
+                    win.title, None,
+                    lambda _=False, s=slug, w=win:
+                        self._open_plugin_window(s, w)))
+        menu.addSeparator()
+        menu.addAction(_act(self.tr("Manage plugins…"), None,
+                            lambda: self.open_plugins_tab()))
+
+    def _open_plugin_window(self, slug: str, win) -> None:
+        """Build and show one plugin window, keeping a reference.
+
+        A plugin's factory is someone else's code, so a failure here reports
+        itself rather than taking the menu — or the app — with it."""
+        held = getattr(self, "_plugin_windows", None)
+        if held is None:
+            held = self._plugin_windows = {}
+        key = f"{slug}:{win.key}"
+        existing = held.get(key)
+        if existing is not None:
+            try:
+                existing.show()
+                existing.raise_()
+                return
+            except RuntimeError:
+                held.pop(key, None)
+        from aglaia.app_data.plugin_ctx import build_context
+        try:
+            ctx = build_context(
+                slug,
+                log=lambda m, s=slug: self._on_log_line("INFO",
+                                                        f"[plugin:{s}] {m}"))
+            widget = win.factory(ctx)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(
+                self, self.tr("Plugin window"),
+                self.tr("{slug} could not open {title}: {err}").format(
+                    slug=slug, title=win.title,
+                    err=f"{type(e).__name__}: {e}"))
+            return
+        held[key] = widget
+        widget.setWindowTitle(f"{win.title} — {slug}")
+        widget.resize(1000, 640)
+        widget.show()
+
     def open_plugins_tab(self) -> None:
         """Browse the registry, install, configure, remove (#130)."""
         existing = getattr(self, "_plugins_tab", None)
