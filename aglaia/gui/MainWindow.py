@@ -3502,11 +3502,21 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _track_worker(self, w) -> None:
+    def _track_worker(self, w, *, attr: Optional[str] = None) -> None:
         """Keep a QThread worker referenced until it actually finishes, then let
         Qt delete it. Without this, dropping the last Python reference (e.g. a
         re-press reassigning the owning attribute) can GC the QThread mid-run →
-        the fatal 'QThread: Destroyed while thread is still running' abort."""
+        the fatal 'QThread: Destroyed while thread is still running' abort.
+
+        Pass `attr` when an attribute owns the worker: it is cleared once the
+        thread finishes. `deleteLater` frees the C++ object while the Python
+        attribute keeps pointing at the husk, and `isRunning()` on that husk
+        does NOT return False — it raises `RuntimeError: Internal C++ object
+        already deleted`, straight out of whatever slot re-checked it. One
+        'Check result' click therefore disabled that button for the rest of
+        the session (#111). `_stop_voice` avoids it by nulling
+        `self.voice_thread` before handing the thread over; `attr` is the
+        general form of that."""
         workers = getattr(self, "_live_workers", None)
         if workers is None:
             workers = self._live_workers = []
@@ -3517,18 +3527,33 @@ class MainWindow(QMainWindow):
                 workers.remove(w)
             except ValueError:
                 pass
+            if attr is not None and getattr(self, attr, None) is w:
+                setattr(self, attr, None)
             w.deleteLater()
 
         w.finished.connect(_done)
 
+    @staticmethod
+    def _worker_alive(w) -> bool:
+        """True only while `w` is a still-valid, still-running QThread.
+
+        A freed wrapper raises on `isRunning()` instead of answering, so every
+        `if worker is not None and worker.isRunning()` guard is a latent
+        one-shot failure. Treat "already deleted" as "not running" — it is."""
+        if w is None:
+            return False
+        try:
+            return bool(w.isRunning())
+        except RuntimeError:
+            return False
+
     def _on_batch_check_requested(self) -> None:
         from aglaia.workers.MistralBatchWorker import MistralBatchWorker
-        if getattr(self, "_batch_worker", None) is not None \
-                and self._batch_worker.isRunning():
+        if self._worker_alive(getattr(self, "_batch_worker", None)):
             return
         self._batch_worker = MistralBatchWorker(
             action="check", db_path=str(self.db_path))
-        self._track_worker(self._batch_worker)
+        self._track_worker(self._batch_worker, attr="_batch_worker")
         self._batch_worker.log_line.connect(self._on_log_line)
         self._batch_worker.check_done.connect(self._on_batch_check_done)
         self.toast(self.tr("Checking Mistral batch job(s)…"))

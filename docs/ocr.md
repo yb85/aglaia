@@ -125,7 +125,14 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
 3. **Check result** — polls each pending job; for `SUCCESS`, downloads the
    output JSONL and writes each page's markdown back to its OCR run via
    `ocr_repo.finish` (dims from `ocr_runs → nodes → images`), then marks the
-   job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs.
+   job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs. It is
+   re-clickable: the poll runs in a `MistralBatchWorker` QThread handed to
+   `MainWindow._track_worker(…, attr="_batch_worker")`, which clears the
+   owning attribute when the thread ends. Leaving it set left a
+   `deleteLater`-freed husk there, and `isRunning()` on a husk raises rather
+   than returning False — so one click on a not-yet-ready job disabled the
+   button for the whole session (#111). `_worker_alive` is the guard that
+   treats "already deleted" as "not running".
 4. **Jobs tab** — *View → Mistral OCR jobs…* (or the card's **Jobs** pill):
    a zebra table of every Aglaïa job on the account (`batch.jobs.list`,
    newest first); the job's `aglaia_project` metadata is a clickable link
