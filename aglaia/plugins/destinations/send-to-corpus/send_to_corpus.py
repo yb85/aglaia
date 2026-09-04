@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: MIT
+"""Upload a finished export to a YLIB corpus.
+
+YLIB is a private library: a catalogue harvested from elsewhere, plus whatever
+its owner puts in by hand. `POST /book/upload` is the second door — the one a
+PDF of a course, an EPUB bought elsewhere, or a Markdown file out of OCR comes
+through.
+
+    POST {base}/book/upload
+    X-API-Key: …
+    multipart: file=@… [title] [author] [publisher] [language] [year]
+                       [pages] [categories]
+
+Everything but `file` is optional; without a title the filename is used. Since
+Aglaïa already knows the document's metadata, it sends it — retyping a title
+into a web form is exactly the tedium this destination exists to remove.
+
+The API answers with four outcomes that mean four different things, and this
+plugin keeps them four rather than flattening them into ok/failed:
+
+    201 added     the reply carries id, path, bytes
+    200 exists    same title and author already in base; nothing written
+    400 refuse    extension not admitted, or an empty file
+    413 refuse    over 2 GiB
+
+`200 exists` is not an error — the book is in the library, which is what the
+user wanted. Reporting it as a failure would teach him to ignore failures.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from aglaia.plugin_api import (
+    BookMeta, CheckResult, Destination, Field, SendResult, register_destination,
+)
+
+#: What the fiching chain can read, per the API docs. Sending anything else
+#: gets a 400, so it is refused locally with a message that names the list —
+#: a round trip to be told "no" is a round trip wasted.
+ADMITTED = ("pdf", "epub", "djvu", "md", "txt", "docx", "doc", "odt", "rtf",
+            "mobi", "azw3", "fb2", "html")
+
+
+@register_destination
+class CorpusDestination(Destination):
+    name = "send-to-corpus"
+    display = "YLIB corpus"
+    description = "Upload the export to a YLIB library instance."
+    # Both the PDF and the Markdown export are admitted, so both are offered.
+    accepts = ("pdf", "md", "txt", "epub", "html")
+
+    CONFIG_FIELDS = (
+        Field("base_url", "Corpus URL", "str", "https://corpus.example.org",
+              required=True, placeholder="https://corpus.example.org",
+              help="The instance to upload to."),
+        Field("default_language", "Default language", "str", "",
+              placeholder="French",
+              help="Used when the project does not say. Left empty, the "
+                   "field is simply not sent."),
+        Field("default_categories", "Default categories", "str", "",
+              placeholder="Ecclésiologie",
+              help="Used when the project does not say."),
+        Field("timeout_s", "Timeout (seconds)", "int", 300,
+              help="Uploads can be large; the ceiling is 2 GiB."),
+    )
+    SECRET_FIELDS = (
+        Field("api_key", "API key", "secret", "", required=True,
+              help="CORPUS_APP_KEY — sent as the X-API-Key header. It is in "
+                   "the instance's .env, never in a versioned file."),
+    )
+
+    # ── plumbing ──────────────────────────────────────────────────────
+    def _root(self) -> str:
+        return str(self.conf("base_url") or "").strip().rstrip("/")
+
+    def _headers(self) -> dict:
+        return {"X-API-Key": self.secret("api_key")}
+
+    def _client(self):
+        import httpx
+        return httpx.Client(timeout=float(self.conf("timeout_s") or 300),
+                            follow_redirects=True)
+
+    # ── check ─────────────────────────────────────────────────────────
+    def check(self) -> CheckResult:
+        """`/healthz` is the one open route, so it separates "the instance is
+        down" from "the key is wrong" — and those have nothing to do with each
+        other. Then an authenticated call proves the key."""
+        import httpx
+        root = self._root()
+        if not root:
+            return CheckResult(False, "No corpus URL set.")
+        try:
+            with self._client() as c:
+                health = c.get(f"{root}/healthz")
+        except httpx.HTTPError as e:
+            return CheckResult(
+                False, f"Cannot reach {root} — {type(e).__name__}.")
+        if health.status_code >= 400:
+            return CheckResult(
+                False, f"{root} answered {health.status_code} on /healthz — "
+                       f"the instance is up but unwell.")
+        if not self.secret("api_key"):
+            return CheckResult(False, "Reachable, but no API key set.")
+        try:
+            with self._client() as c:
+                r = c.get(f"{root}/openapi.json", headers=self._headers())
+        except httpx.HTTPError as e:
+            return CheckResult(False, f"{type(e).__name__} while "
+                                      f"authenticating: {e}")
+        if r.status_code in (401, 403):
+            return CheckResult(False, "The instance is up, but it rejected "
+                                      "the API key.")
+        if r.status_code >= 400:
+            return CheckResult(False, f"Authenticated call answered "
+                                      f"{r.status_code}.")
+        return CheckResult(True, f"Connected to {root}; key accepted.")
+
+    # ── send ──────────────────────────────────────────────────────────
+    def send(self, path: Path, meta: BookMeta) -> SendResult:
+        import httpx
+        path = Path(path)
+        if not path.is_file():
+            return SendResult(False, f"No such file: {path}")
+        ext = path.suffix.lower().lstrip(".")
+        if ext not in ADMITTED:
+            return SendResult(
+                False, f".{ext} is not admitted by the corpus. It takes: "
+                       f"{', '.join(ADMITTED)}.")
+        if path.stat().st_size == 0:
+            return SendResult(False, f"{path.name} is empty.")
+        root = self._root()
+        if not root:
+            return SendResult(False, "No corpus URL set.")
+        if not self.secret("api_key"):
+            return SendResult(False, "No API key set.")
+
+        # Only fields that have a value: an empty field means "erase this" to
+        # the metadata route, and the same habit here would send blanks that
+        # overwrite a harvested record with nothing.
+        fields = meta.filled()
+        fields.setdefault("language",
+                          str(self.conf("default_language") or "").strip())
+        fields.setdefault("categories",
+                          str(self.conf("default_categories") or "").strip())
+        data = {k: v for k, v in fields.items() if v}
+
+        try:
+            with self._client() as c, path.open("rb") as fh:
+                r = c.post(f"{root}/book/upload",
+                           headers=self._headers(),
+                           files={"file": (path.name, fh,
+                                           "application/octet-stream")},
+                           data=data)
+        except httpx.HTTPError as e:
+            return SendResult(False, f"Upload failed — {type(e).__name__}: {e}")
+
+        if r.status_code == 413:
+            return SendResult(False, f"{path.name} is over the corpus's 2 GiB "
+                                     f"ceiling.")
+        if r.status_code in (401, 403):
+            return SendResult(False, "The corpus rejected the API key.")
+
+        body = {}
+        try:
+            body = r.json()
+        except Exception:
+            pass
+
+        if r.status_code == 200:
+            return SendResult(
+                True, f"Already in the corpus: "
+                      f"{meta.title or path.name} — nothing written.",
+                already_there=True, detail=body)
+        if r.status_code == 201:
+            book_id = body.get("id")
+            where = f"{root}/book/{book_id}" if book_id else ""
+            return SendResult(
+                True, f"Uploaded to the corpus"
+                      + (f" as #{book_id}." if book_id else "."),
+                url=where, detail=body)
+        if r.status_code == 400:
+            why = body.get("detail") or body.get("reason") or r.text[:200]
+            return SendResult(False, f"The corpus refused it: {why}")
+        return SendResult(False, f"The corpus answered {r.status_code}: "
+                                 f"{r.text[:200]}")

@@ -1,0 +1,21 @@
+[plugin]
+slug     = "send-to-corpus"
+name     = "YLIB corpus"
+version  = "1.0.0"
+summary  = "Upload a finished export to a YLIB library instance."
+author   = "Aglaïa <aglaia@bibli.cc>"
+homepage = "https://aglaia.bibli.cc"
+license  = "MIT"
+entry    = "send_to_corpus.py"
+
+[requires]
+aglaia  = ">=0.1.0rc5,<0.2"
+python  = ">=3.12"
+api     = 1
+imports = ["httpx"]
+
+[capabilities]
+config  = true
+secrets = true
+network = true
+files   = false

@@ -1,0 +1,21 @@
+[plugin]
+slug     = "send-to-kindle"
+name     = "Kindle (email)"
+version  = "1.0.0"
+summary  = "Mail a finished export to a Kindle address."
+author   = "Aglaïa <aglaia@bibli.cc>"
+homepage = "https://aglaia.bibli.cc"
+license  = "MIT"
+entry    = "send_to_kindle.py"
+
+[requires]
+aglaia  = ">=0.1.0rc5,<0.2"
+python  = ">=3.12"
+api     = 1
+imports = []
+
+[capabilities]
+config  = true
+secrets = true
+network = true
+files   = false

@@ -111,6 +111,7 @@ class CliConfig:
     list_pipelines: bool = False
     list_ocr: bool = False
     list_exports: bool = False
+    list_destinations: bool = False
 
     # Interactive first-run setup (CLI-only installs).
     setup: bool = False
@@ -142,7 +143,8 @@ def build_ocr_fields(ocr: Optional[str], ocr_lang: str) -> dict[str, object]:
 def run_list_commands(cfg: "CliConfig") -> bool:
     """Handle the `--*-list` flags: print to stdout and return True (the
     caller should exit). Returns False when no list flag was set."""
-    if not (cfg.list_pipelines or cfg.list_ocr or cfg.list_exports):
+    if not (cfg.list_pipelines or cfg.list_ocr or cfg.list_exports
+            or cfg.list_destinations):
         return False
     if cfg.list_pipelines:
         from aglaia.app_data import pipelines_dir
@@ -171,6 +173,21 @@ def run_list_commands(cfg: "CliConfig") -> bool:
         print(f"  pdf            PDF profiles: {'|'.join(EXPORT_PDF_PROFILES)} "
               "(e.g. pdf:g4)")
         print("  md             Markdown; md:refine=<backend> for on-device LLM cleanup")
+    if cfg.list_destinations:
+        print("Destinations (where an export can be sent):")
+        try:
+            from aglaia.workers import destinations as _dest
+            loaded = _dest.load_all()
+            if not loaded:
+                print("  (none installed)")
+            for name, d in sorted(loaded.items()):
+                missing = d.missing_settings()
+                state = ("ready" if not missing
+                         else "needs: " + ", ".join(missing))
+                print(f"  {name:18} {d.description}")
+                print(f"  {'':18} accepts {', '.join(d.accepts)} — {state}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  (could not load destinations: {e})")
     return True
 
 

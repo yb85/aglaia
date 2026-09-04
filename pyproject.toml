@@ -27,6 +27,12 @@ dependencies = [
     "page-dewarp>=0.2.7",
     "pikepdf>=10.0.0",
     "pillow>=10.0.0",
+    # The bundled `destinations` plugins (#133) speak HTTP — calibre wants
+    # digest auth, the corpus wants multipart with a header. Base, not an
+    # extra: the destinations ship inside the app, and a plain
+    # `pip install aglaia` whose bundled plugins raise ImportError the first
+    # time you click Send is worse than not shipping them.
+    "httpx>=0.27",
     "platformdirs>=4.3.0",
     "psutil>=7.2.2",
     "pypdfium2>=4.30.0",
@@ -118,8 +124,6 @@ dev = [
     # Generates the printable camera-calibration chessboard PDFs
     # (scripts/gen_calibration_board.py) at exact mm dimensions.
     "reportlab>=4.0.0",
-    # FastAPI's TestClient (starlette) needs httpx — server API tests.
-    "httpx>=0.27",
 ]
 package = [
     # macOS .app bundle builder. Used via `uv run pyinstaller Aglaia.spec`.
@@ -199,8 +203,11 @@ include = ["aglaia*"]
 # without the source tree: icons/logos/previews/calibration boards,
 # default.yml + pipeline YAMLs (resolved via aglaia.assets), the SQLite
 # schema migrations (db.py globs schema/*.sql at runtime — omitting these
-# means "no such table: project" on first open), the model catalogue, and
-# the compiled Qt translations.
+# means "no such table: project" on first open), the model catalogue, the
+# compiled Qt translations, and the bundled destination plugins' manifests
+# (the .py files ship as package modules; the .toml beside each one does not
+# unless it is named here, and a destination without its manifest is skipped
+# by discovery — it would simply vanish from an installed build).
 aglaia = [
     "assets/**/*",
     "config/**/*",
@@ -208,6 +215,8 @@ aglaia = [
     "app_data/*.json",
     "i18n/*.ts",
     "i18n/qm/*.qm",
+    "plugins/**/*.toml",
+    "plugins/**/*.md",
 ]
 
 [dependency-groups]

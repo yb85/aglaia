@@ -18,6 +18,7 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | [storage.md](./storage.md) | M0 SQLite schema: tables, branches, query cookbook |
 | [ocr.md](./ocr.md) | OCR engine interface + registry, bundled engines (Apple Vision/Document, Surya, PaddleOCR-VL, Mistral cloud), shared DPI / confidence knobs, cloud key storage |
 | [export.md](./export.md) | PDF export (JBIG2 / G4 bitonal, JPEG colour, invisible OCR text layer) + Markdown pointer; visibility filtering |
+| [destinations.md](./destinations.md) | Sending an export somewhere — the `destinations` plugin kind, the `Destination` contract, and the three bundled ones (calibre, Kindle, corpus) |
 | [plugin-store.md](./plugin-store.md) | **Design** — curated plugin registry, versioned `plugin_api`, namespaced secrets, install flows, review checklist, threat model (M10, not built) |
 | [app_data.md](./app_data.md) | Per-user dirs via platformdirs (data/cache/log/models/pipelines/plugins), env overrides, config DB schema |
 | [markdown_export.md](./markdown_export.md) | `write_markdown` — OCR text → free-flowing Markdown; Apple Vision line-geometry heuristics (headings, paragraphs, dehyphenation, running-head removal, footnotes, lists, cross-page merge) |

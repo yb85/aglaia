@@ -160,6 +160,12 @@ datas = [
     # the aglaia/app_data subdir (where filetype_register reads it). Drop a
     # copy at the root for the Finder file icon.
     (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "."),
+    # Bundled destination plugins (#133). These load by PATH, not by import,
+    # so PyInstaller's static analysis never sees them: without this entry the
+    # frozen app simply has no destinations. The whole directory ships — the
+    # entry module AND the manifest beside it, since discovery skips a plugin
+    # dir whose manifest is missing.
+    (str(REPO / "aglaia" / "plugins"), "aglaia/plugins"),
 ]
 
 # Surya/transformers/huggingface_hub ship YAML configs + tokenizer

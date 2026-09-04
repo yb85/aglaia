@@ -1,0 +1,21 @@
+[plugin]
+slug     = "send-to-calibre"
+name     = "calibre library"
+version  = "1.0.0"
+summary  = "Add a finished export to a calibre content server's library."
+author   = "Aglaïa <aglaia@bibli.cc>"
+homepage = "https://aglaia.bibli.cc"
+license  = "MIT"
+entry    = "send_to_calibre.py"
+
+[requires]
+aglaia  = ">=0.1.0rc5,<0.2"
+python  = ">=3.12"
+api     = 1
+imports = ["httpx"]
+
+[capabilities]
+config  = true
+secrets = true
+network = true
+files   = false

@@ -46,6 +46,19 @@ describes what real isolation would take, and why it is a later milestone.
 
 ---
 
+## 1b. What exists today
+
+Built and shipping (see `docs/destinations.md`):
+
+* `aglaia.plugin_api` — the façade of §5, at `API_VERSION = 1`.
+* `PluginContext` — per-plugin settings, namespaced secrets, scratch dir (§7-8).
+* The `destinations` kind, and three first-party destinations in registry
+  layout under `aglaia/plugins/destinations/`.
+
+Not built: the registry repo, the signed index, the manifest scanner, the
+install flows and the Plugins tab (§3-4, §6, §9-10). The bundled three load
+from disk by path, so they exercise the loader that the registry will reuse.
+
 ## 2. Trust tiers
 
 Three ways a plugin arrives, three levels of ceremony.
