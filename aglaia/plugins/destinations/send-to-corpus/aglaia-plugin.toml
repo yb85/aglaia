@@ -1,8 +1,8 @@
 [plugin]
 slug     = "send-to-corpus"
-name     = "YLIB corpus"
+name     = "Corpus library"
 version  = "1.0.0"
-summary  = "Upload a finished export to a YLIB library instance."
+summary  = "Upload a finished export to a Corpus library instance."
 author   = "Aglaïa <aglaia@bibli.cc>"
 homepage = "https://aglaia.bibli.cc"
 license  = "MIT"

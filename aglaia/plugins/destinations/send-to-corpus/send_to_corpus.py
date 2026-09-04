@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""Upload a finished export to a YLIB corpus.
+"""Upload a finished export to a Corpus library.
 
-YLIB is a private library: a catalogue harvested from elsewhere, plus whatever
+Corpus is a private library: a catalogue harvested from elsewhere, plus whatever
 its owner puts in by hand. `POST /book/upload` is the second door — the one a
 PDF of a course, an EPUB bought elsewhere, or a Markdown file out of OCR comes
 through.
@@ -45,8 +45,8 @@ ADMITTED = ("pdf", "epub", "djvu", "md", "txt", "docx", "doc", "odt", "rtf",
 @register_destination
 class CorpusDestination(Destination):
     name = "send-to-corpus"
-    display = "YLIB corpus"
-    description = "Upload the export to a YLIB library instance."
+    display = "Corpus library"
+    description = "Upload the export to a Corpus library instance."
     # Both the PDF and the Markdown export are admitted, so both are offered.
     accepts = ("pdf", "md", "txt", "epub", "html")
 

@@ -71,6 +71,20 @@ Built and shipping:
   install dialog and tells a reviewer to look harder: a plugin that can draw
   can draw something that looks like Aglaïa asking for a password.
 
+### A note on speed
+
+`raw.githubusercontent.com` resolves to four IPv6 addresses before four IPv4
+ones. On a network that advertises IPv6 without routing it — a common
+home-router state — Python tries them **strictly in order** and spends the full
+connect timeout on each dead one. Measured: four IPv6 timeouts, then IPv4
+connecting in 0.05 s, for a 15 KB file. `curl` is fast on the same machine
+because it does Happy Eyeballs; httpx does not.
+
+`plugin_registry._client` binds the local address to IPv4 so the resolver hands
+back A records only, and falls back to a plain client if that fails — a
+genuinely IPv6-only machine must still work, and it is not this code's place to
+decide otherwise. Index fetch went 24.7 s → 0.7 s, a full install to 1.6 s.
+
 **Not built: the index signature.** It needs an offline signing key and a
 release step. Until then the index is fetched over HTTPS and every file is
 verified against the sha256 the index gives for it, and `IndexResult.signed`

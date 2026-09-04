@@ -32,7 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
@@ -81,6 +81,34 @@ class _IndexJob(QThread):
         except Exception as e:  # noqa: BLE001
             from aglaia.app_data.plugin_registry import IndexResult
             self.done.emit(IndexResult(error=f"{type(e).__name__}: {e}"))
+
+
+class _InstallJob(QThread):
+    """Download and install off the GUI thread.
+
+    The index fetch was already threaded; the install was not, and it is the
+    slower of the two — one request per file in the plugin, each of which can
+    take as long as the index did. On a slow link that was a minute of frozen
+    window with no way to tell a slow install from a hung one."""
+
+    done = Signal(object)
+    progress = Signal(str)
+
+    def __init__(self, entry, parent=None) -> None:
+        super().__init__(parent)
+        self.entry = entry
+
+    def run(self) -> None:
+        from aglaia.app_data import plugin_registry as reg
+        try:
+            self.done.emit(reg.install_from_registry(
+                self.entry,
+                on_progress=lambda i, n, rel: self.progress.emit(
+                    f"{self.entry.name}: {rel} ({i}/{n})")))
+        except Exception as e:  # noqa: BLE001
+            from aglaia.app_data.plugin_registry import InstallResult
+            self.done.emit(InstallResult(
+                False, f"{type(e).__name__}: {e}"))
 
 
 class PluginSettingsDialog(QDialog):
@@ -258,12 +286,23 @@ class RegistryInstallDialog(QDialog):
             v.addWidget(i)
 
         v.addWidget(_hline())
-        who = entry.author or self.tr("its author")
-        disc = QLabel(self.tr(
-            "Reviewed and merged into the Aglaïa plugin registry. It was "
-            "written and submitted by <b>{who}</b>, not by Aglaïa, and it runs "
-            "with the same access to your files as Aglaïa itself."
-        ).format(who=who))
+        if entry.first_party:
+            # "Submitted by Aglaïa, not by Aglaïa" is not a disclaimer; it is
+            # a sentence that makes a reader distrust the rest of the dialog.
+            # The part worth keeping is the part that is still true of our own
+            # code: it runs with your access, and being ours does not change
+            # that.
+            text = self.tr(
+                "Written and maintained by Aglaïa, and installed through the "
+                "same reviewed registry as everything else. Like any plugin, "
+                "it runs with the same access to your files as Aglaïa itself.")
+        else:
+            text = self.tr(
+                "Reviewed and merged into the Aglaïa plugin registry. It was "
+                "written and submitted by <b>{who}</b>, not by Aglaïa, and it "
+                "runs with the same access to your files as Aglaïa itself."
+            ).format(who=entry.author or self.tr("its author"))
+        disc = QLabel(text)
         disc.setWordWrap(True)
         disc.setTextFormat(Qt.TextFormat.RichText)
         disc.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
@@ -401,6 +440,12 @@ class PluginsTab(QWidget):
         super().__init__(parent)
         self._index = None
         self._job: Optional[_IndexJob] = None
+        self._elapsed = 0
+        self._installing = ""
+        self._install_job: Optional[_InstallJob] = None
+        self._tick = QTimer(self)
+        self._tick.setInterval(1000)
+        self._tick.timeout.connect(self._on_tick)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -448,15 +493,33 @@ class PluginsTab(QWidget):
 
     # ── data ──────────────────────────────────────────────────────────
     def refresh(self) -> None:
+        self._index = None
         self._rebuild()
         if self._job is not None and self._job.isRunning():
             return
+        self._elapsed = 0
         self._status.setText(self.tr("Checking the registry…"))
+        self._refresh_btn.setEnabled(False)
+        # A static label on a fetch that can take half a minute reads as a
+        # hang. Count up so it is visibly alive, and say what it is waiting on.
+        self._tick.start()
         self._job = _IndexJob(self)
         self._job.done.connect(self._on_index)
         self._job.start()
 
+    def _on_tick(self) -> None:
+        self._elapsed += 1
+        self._status.setText(
+            self.tr("Checking the registry… {n}s").format(n=self._elapsed))
+        if self._elapsed == 10:
+            self._status.setToolTip(self.tr(
+                "Fetching index.json from GitHub. Slow here is usually the "
+                "network, not the registry — it will fall back to the last "
+                "copy it saw."))
+
     def _on_index(self, index) -> None:
+        self._tick.stop()
+        self._refresh_btn.setEnabled(True)
         self._index = index
         if index.error:
             self._status.setText(index.error)
@@ -502,9 +565,15 @@ class PluginsTab(QWidget):
                    if e.slug not in have]
         self._body_layout.addWidget(self._heading(self.tr("Available")))
         if not entries:
-            msg = (self.tr("Everything in the registry is installed.")
-                   if self._index and not self._index.error
-                   else self.tr("The registry is not reachable right now."))
+            if self._index is None:
+                # Still in flight. Saying "not reachable" here was a lie the
+                # user had no way to tell from the truth — and a slow fetch
+                # then read as a broken one.
+                msg = self.tr("Checking the registry…")
+            elif self._index.error:
+                msg = self._index.error
+            else:
+                msg = self.tr("Everything in the registry is installed.")
             lbl = QLabel(msg)
             lbl.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
             self._body_layout.addWidget(lbl)
@@ -591,7 +660,13 @@ class PluginsTab(QWidget):
         kind.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
         top.addWidget(kind)
         top.addStretch(1)
-        btn = QPushButton(self.tr("Install…"))
+        busy = (self._installing == entry.slug)
+        btn = QPushButton(self.tr("Installing…") if busy
+                          else self.tr("Install…"))
+        # While one install is in flight every other Install is dead too:
+        # two concurrent installs would race on the same registry client and
+        # the same status line for no benefit.
+        btn.setEnabled(not self._installing)
         btn.clicked.connect(lambda _=False, e=entry: self._install(e))
         top.addWidget(btn)
         v.addLayout(top)
@@ -600,8 +675,10 @@ class PluginsTab(QWidget):
             s.setWordWrap(True)
             s.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
             v.addWidget(s)
-        byline = QLabel(self.tr("by {who}").format(
-            who=entry.author or self.tr("an unnamed author")))
+        byline = QLabel(
+            self.tr("by Aglaïa") if entry.first_party
+            else self.tr("by {who}").format(
+                who=entry.author or self.tr("an unnamed author")))
         byline.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
         v.addWidget(byline)
         caps = entry.declared()
@@ -620,13 +697,31 @@ class PluginsTab(QWidget):
         dest.reset_for_tests()
 
     def _install(self, entry) -> None:
-        from aglaia.app_data import plugin_registry as reg
-        from aglaia.workers import destinations as dest
-        if RegistryInstallDialog(entry, self).exec() != QDialog.DialogCode.Accepted:
+        if RegistryInstallDialog(entry,
+                                 self).exec() != QDialog.DialogCode.Accepted:
             return
-        res = reg.install_from_registry(entry)
+        if self._install_job is not None and self._install_job.isRunning():
+            return
+        # Off the GUI thread: one request per file, and on a slow link that is
+        # a minute of beach ball if it runs here.
+        self._installing = entry.slug
+        self._status.setText(
+            self.tr("Installing {name}…").format(name=entry.name))
+        self._rebuild()
+        job = _InstallJob(entry, self)
+        job.progress.connect(self._status.setText)
+        job.done.connect(lambda res, e=entry: self._on_installed(e, res))
+        self._install_job = job
+        job.start()
+
+    def _on_installed(self, entry, res) -> None:
+        from aglaia.workers import destinations as dest
+        self._installing = ""
+        self._install_job = None
         if not res.ok:
+            self._status.setText(res.message)
             QMessageBox.warning(self, self.tr("Install failed"), res.message)
+            self._rebuild()
             return
         dest.reset_for_tests()
         self._status.setText(res.message)

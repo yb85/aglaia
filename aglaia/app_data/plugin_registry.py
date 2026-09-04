@@ -94,11 +94,24 @@ class RegistryEntry:
         without that, the directory on the default branch."""
         return self.source_url or f"{REGISTRY_WEB}/tree/{REGISTRY_BRANCH}/{self.kind}/{self.slug}"
 
+    @property
+    def first_party(self) -> bool:
+        """Written by Aglaïa itself, rather than submitted by someone else.
+
+        It changes what the install dialog can honestly say: "submitted by
+        Aglaïa, not by Aglaïa" is not a disclaimer, it is a sentence that
+        makes the reader distrust the rest of the dialog.
+
+        Keyed off the maintainer address rather than a flag in the index,
+        because a flag is something a submitted manifest could set."""
+        return "aglaia@bibli.cc" in (self.author or "").lower()
+
     def declared(self) -> list[str]:
         labels = {"config": "its own settings",
                   "secrets": "stores secrets in your keychain",
                   "network": "network access",
-                  "files": "reads/writes files outside its own folder"}
+                  "files": "reads/writes files outside its own folder",
+                  "ui": "adds a window to the Plugins menu"}
         return [labels[k] for k, v in (self.capabilities or {}).items()
                 if v and k in labels]
 
@@ -125,6 +138,36 @@ class IndexResult:
         return None
 
 
+def _client(timeout: float, *, ipv4_first: bool = True):
+    """An httpx client that does not stall on a dead IPv6 route.
+
+    `raw.githubusercontent.com` resolves to four IPv6 addresses before four
+    IPv4 ones. On a network that advertises IPv6 but does not route it — a
+    common home-router state — Python tries them **strictly in order** and
+    burns the full connect timeout on each. Measured here: four IPv6
+    timeouts, then IPv4 connecting in 0.05 s. That is 24 seconds to fetch
+    15 KB, and it is why an install felt like a hang.
+
+    curl is fast on the same machine because it does Happy Eyeballs: it
+    starts an IPv4 attempt about 200 ms in and takes whichever answers.
+    httpx has no such thing, so this binds the local address to IPv4, which
+    makes the resolver hand back A records only.
+
+    Not hard-forced: `ipv4_first=False` gives a plain client, and the callers
+    fall back to it. A genuinely IPv6-only network must still work, and it is
+    not this code's place to decide the machine has IPv4."""
+    import httpx
+    limits = httpx.Timeout(timeout, connect=6.0)
+    transport = None
+    if ipv4_first:
+        try:
+            transport = httpx.HTTPTransport(local_address="0.0.0.0")
+        except Exception:
+            transport = None
+    return httpx.Client(timeout=limits, follow_redirects=True,
+                        transport=transport)
+
+
 def _cache_path() -> Path:
     return app_data_dir() / "plugins" / "index-cache.json"
 
@@ -139,15 +182,25 @@ def fetch_index(*, timeout: float = 20.0,
     import httpx
     raw = None
     err = ""
-    try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as c:
-            r = c.get(f"{REGISTRY_RAW}/index.json")
-        if r.status_code >= 400:
-            err = f"the registry answered {r.status_code}"
-        else:
-            raw = r.text
-    except Exception as e:  # noqa: BLE001
-        err = f"cannot reach the registry — {type(e).__name__}"
+    # A SHORT connect timeout, separate from the read timeout. A host that
+    # resolves to several addresses is tried one at a time, and a route that
+    # black-holes costs the full connect timeout before the next is tried —
+    # so a generous single timeout turns "one dead address" into half a minute
+    # of apparent hang. Six seconds is far more than a reachable host needs
+    # and far less than a dead one takes to admit it.
+    for ipv4_first in (True, False):
+        try:
+            with _client(timeout, ipv4_first=ipv4_first) as c:
+                r = c.get(f"{REGISTRY_RAW}/index.json")
+            if r.status_code >= 400:
+                err = f"the registry answered {r.status_code}"
+            else:
+                raw = r.text
+            break
+        except Exception as e:  # noqa: BLE001
+            err = f"cannot reach the registry — {type(e).__name__}"
+            # IPv4-only failed; the machine may genuinely be IPv6-only.
+            continue
 
     if raw is not None:
         try:
@@ -216,7 +269,8 @@ def _safe_member(name: str) -> bool:
 
 
 def install_from_registry(entry: RegistryEntry, *,
-                          timeout: float = 60.0) -> InstallResult:
+                          timeout: float = 60.0,
+                          on_progress=None) -> InstallResult:
     """Download one registry plugin, verify every file against the index, and
     install it. Nothing is written outside a temp dir until every hash
     matches — a half-installed plugin is a plugin that loads and misbehaves."""
@@ -226,8 +280,11 @@ def install_from_registry(entry: RegistryEntry, *,
 
     staged: dict[str, bytes] = {}
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as c:
-            for rel, want in entry.files.items():
+        with _client(timeout) as c:
+            total = len(entry.files)
+            for i, (rel, want) in enumerate(entry.files.items(), 1):
+                if on_progress is not None:
+                    on_progress(i, total, rel)
                 if not _safe_member(rel):
                     return InstallResult(
                         False, f"the index lists an unsafe path: {rel}")
@@ -247,8 +304,12 @@ def install_from_registry(entry: RegistryEntry, *,
                 if got != want_hex:
                     return InstallResult(
                         False, f"{rel} does not match the hash the index "
-                               f"gives for it. Refusing — this is what the "
-                               f"hashes are for.")
+                               f"gives for it, so it was refused.\n\n"
+                               f"Usually this means the cached index is out "
+                               f"of date and the plugin was updated since — "
+                               f"hit Refresh and install again. If it "
+                               f"persists, the file really is not what the "
+                               f"registry says it should be.")
                 staged[rel] = data
     except Exception as e:  # noqa: BLE001
         return InstallResult(False, f"download failed — {type(e).__name__}: {e}")

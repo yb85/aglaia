@@ -14,7 +14,7 @@ every submitted plugin is measured against.
 |---|---|---|
 | `send-to-calibre` | calibre content server, `POST /cdb/add-book/…` | pdf, md, txt |
 | `send-to-kindle` | SMTP, as a MIME attachment | pdf, epub, txt, md, docx |
-| `send-to-corpus` | YLIB `POST /book/upload` | pdf, md, txt, epub, html |
+| `send-to-corpus` | Corpus `POST /book/upload` | pdf, md, txt, epub, html |
 
 ## Why one kind and not two
 
