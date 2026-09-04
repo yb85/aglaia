@@ -342,6 +342,9 @@ class ScanItemWidget(QWidget):
         # Host-supplied: scan_id → {node_id: (toggleable, disabled)} for the
         # per-page disable round-toggle + the disabled-state band.
         self.step_states_provider = None
+        # Host-supplied: (scan_id, branch_path) → [field, …] for the
+        # hand-edited mark (M9 #102).
+        self.manual_fields_provider = None
 
         # filestem -> {
         #   "history":   [step_name, ...],
@@ -850,6 +853,7 @@ class ScanItemWidget(QWidget):
             self._add_disable_toggle(container, new_w, node_info,
                                      actual_step, step_states)
             self._add_disabled_band(container, new_w, data, step_states)
+            self._add_manual_pip(container, new_w, stem)
 
             from aglaia.gui.widgets import make_icon_button, place_overlay
             # Layout-level hide/show: eye-off when hidden, eye when
@@ -1123,6 +1127,25 @@ class ScanItemWidget(QWidget):
             btn.setToolTip(self.tr("This step can't be disabled per page"))
         place_overlay(btn, container, width // 2 - 11, 4)
 
+    def _add_manual_pip(self, container, width, stem: str) -> None:
+        """A quiet dot on a layout the user tuned by hand (M9 #102).
+
+        Top-RIGHT, so it never collides with the disabled band's mini-map
+        (top edge, full width, 3 px) or the nav buttons. Absent when the page
+        carries no override, which is the common case."""
+        provider = self.manual_fields_provider
+        if provider is None:
+            return
+        try:
+            fields = provider(int(self.scan_id), self._branch_of(stem)) or []
+        except Exception:
+            return
+        if not fields:
+            return
+        from aglaia.gui.widgets import ManualPip, place_overlay
+        pip = ManualPip(fields, parent=container)
+        place_overlay(pip, container, int(width) - ManualPip.SIZE - 5, 6)
+
     def _add_disabled_band(self, container, width, data, states) -> None:
         """Top-edge mini-map of the layout's disabled steps. Hidden when
         nothing is disabled."""
@@ -1197,14 +1220,19 @@ class ScanItemWidget(QWidget):
         self.refresh_composite()
         # Notify host so `branches.trashed_at` follows the UI state and
         # the gallery / table see the same visibility.
-        if stem == self.raw_filestem:
-            branch_label = ""
-        else:
-            suffix = (stem[len(self.raw_filestem) + 1:]
-                      if stem.startswith(self.raw_filestem + "_") else stem)
-            branch_label = suffix.split("_")[-1] if "_" in suffix else suffix
+        branch_label = self._branch_of(stem)
         self.visibility_changed.emit(int(self.scan_id),
                                       str(branch_label), bool(new_state))
+
+    def _branch_of(self, stem: str) -> str:
+        """The branch label a layout's filestem belongs to (``""`` for the
+        pre-split trunk) — the key both `step_overrides` and
+        `manual_overrides` are stored under."""
+        if stem == self.raw_filestem:
+            return ""
+        suffix = (stem[len(self.raw_filestem) + 1:]
+                  if stem.startswith(self.raw_filestem + "_") else stem)
+        return suffix.split("_")[-1] if "_" in suffix else suffix
 
     def set_stem_trashed(self, stem: str, trashed: bool) -> None:
         """Apply a page's persisted hidden state on load. Unlike

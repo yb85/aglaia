@@ -181,6 +181,36 @@ def ink_contrast(gray, pages, boxes):
     return [(r / top) if top > 0.0 else 1.0 for r in ranges]
 
 
+def _manual_roi_for(input_buf, branch_label: str, *, frame_wh):
+    """The user's ROI polygon for one about-to-be-created layout, or None.
+
+    PageDetector emits the branches, so its per-layout overrides are not on
+    its own buffer — the chain hands it the whole scan's map under
+    ``manual_overrides_all`` and it picks by the label it is assigning. The
+    polygon is validated against the frame it was drawn on (`frame_wh`): a
+    polygon applied to a crop of another size would be silently shifted.
+    """
+    payload = ((getattr(input_buf, "meta", None) or {})
+               .get("manual_overrides_all") or {}).get(str(branch_label))
+    if not isinstance(payload, dict):
+        return None
+    pts = payload.get("roi")
+    if not pts:
+        return None
+    stored = payload.get("frame_wh")
+    if stored:
+        try:
+            if (int(stored[0]) != int(frame_wh[0])
+                    or int(stored[1]) != int(frame_wh[1])):
+                return None
+        except Exception:
+            pass
+    try:
+        return [[float(x), float(y)] for x, y in pts]
+    except Exception:
+        return None
+
+
 def tighten_x(inner, *, rect_x, gap_frac=0.10,
               spine_side=None, gutter_x=None):
     """Horizontal bounds of one page: `(tight_x1, tight_x2)`.
@@ -747,6 +777,7 @@ class PageDetector(AbstractImageProcessor):
         suffixes = suffix_generator()
 
         # Create children buffers
+        manual_branches: list[str] = []
         for idx, (lx1, ly1, lx2, ly2) in enumerate(pages):
             suffix = next(suffixes)
             filestem = f"{base}_{suffix}"
@@ -813,6 +844,17 @@ class PageDetector(AbstractImageProcessor):
                 )
                 if hull is not None:
                     child_roi = hull
+            # Manual ROI (M9 #94): the user's polygon replaces the detected
+            # one for this layout. It is keyed by branch label, which only
+            # exists once this step has split the spread — so it lands on the
+            # SECOND run, exactly as iOS's `ManualOverrides.roi` does. Still
+            # clamped into the crop below and intersected with the parent ROI,
+            # so a hand-drawn polygon cannot reach outside the child image.
+            manual_roi = _manual_roi_for(
+                input_buf, suffix, frame_wh=(fx2 - fx1, fy2 - fy1))
+            if manual_roi is not None:
+                child_roi = manual_roi
+                manual_branches.append(suffix)
             if parent_roi := input_buf.meta.get("roi"):
                 # Intersect text-tight child_roi (in child coords) with
                 # parent_roi (translated to child coords). The previous code
@@ -847,6 +889,8 @@ class PageDetector(AbstractImageProcessor):
             
             if child_roi:
                 l_buf.meta["roi"] = child_roi
+            if suffix in manual_branches:
+                l_buf.meta.setdefault("manual", []).append("roi")
 
             if spread_sides is not None:
                 l_buf.meta["page_side"] = spread_sides[idx]

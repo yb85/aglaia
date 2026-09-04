@@ -119,6 +119,7 @@ class ScansGalleryView(QWidget):
                  step_toggle_writer: Optional[Callable[[int, int], None]] = None,
                  branch_trashed_provider: Optional[BranchTrashedProvider] = None,
                  branch_trashed_writer: Optional[BranchTrashedWriter] = None,
+                 manual_fields_provider=None,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._scans_provider = scans_provider
@@ -131,6 +132,8 @@ class ScansGalleryView(QWidget):
         self._cell_states_provider = cell_states_provider
         self._step_toggle_writer = step_toggle_writer
         self._branch_trashed_provider = branch_trashed_provider
+        # (scan_id, branch_path) → [field, …] for the hand-edited mark.
+        self._manual_fields_provider = manual_fields_provider
         self._branch_trashed_writer = branch_trashed_writer
         # Vestigial: the old "show selected stage per page" mode is gone
         # (chosen == terminal now). Kept False so dead guards stay valid.
@@ -548,11 +551,19 @@ class ScansGalleryView(QWidget):
                         )
                     except Exception:
                         is_trashed = False
+                manual_fields = None
+                if self._manual_fields_provider is not None:
+                    try:
+                        manual_fields = self._manual_fields_provider(
+                            scan_id, label)
+                    except Exception:
+                        manual_fields = None
                 cell = self._build_cell(label, pix, per_w, avail_h,
                                           node_id=node_id,
                                           is_disabled=bool(is_disabled),
                                           toggleable=bool(toggleable),
-                                          is_trashed=is_trashed)
+                                          is_trashed=is_trashed,
+                                          manual_fields=manual_fields)
                 self._strip_l.addWidget(cell)
         n_scans = len(self._scans)
         n_stages = len(self._stages)
@@ -584,7 +595,8 @@ class ScansGalleryView(QWidget):
                     node_id: Optional[int] = None,
                     is_disabled: bool = False,
                     toggleable: bool = False,
-                    is_trashed: bool = False) -> QWidget:
+                    is_trashed: bool = False,
+                    manual_fields: Optional[list] = None) -> QWidget:
         from aglaia.gui.theme import lucide_pixmap as _lp
         host = QWidget()
         v = QVBoxLayout(host)
@@ -742,6 +754,14 @@ class ScansGalleryView(QWidget):
             )
             ban_lbl.move((cell_w - ban_size) // 2, (cell_h - ban_size) // 2)
             ban_lbl.raise_()
+
+        if manual_fields:
+            # Hand-edited mark (M9 #102): top-RIGHT, clear of the star
+            # (top-left) and the disabled glyph (centre).
+            from aglaia.gui.widgets import ManualPip
+            pip = ManualPip(manual_fields, img_host)
+            pip.move(cell_w - ManualPip.SIZE - 6, 6)
+            pip.raise_()
 
         v.addWidget(img_host, 1, Qt.AlignmentFlag.AlignCenter)
         if label:

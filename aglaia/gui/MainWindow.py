@@ -29,7 +29,8 @@ from aglaia.workers.Initializer import load_pipeline_def, pipeline_step_descript
 from aglaia.storage.db import db_session
 from aglaia.storage.persister import Persister, make_thumb
 from aglaia.storage.repo import (
-    ScanRepo, NodeRepo, ImageRepo, ThumbRepo, OcrRepo, StepOverrideRepo,
+    ImageRepo, ManualOverrideRepo, NodeRepo, OcrRepo, ScanRepo,
+    StepOverrideRepo, ThumbRepo,
 )
 from aglaia.gui.PipelineEditorWidget import PipelineEditorDialog
 from aglaia.workers.OcrWorker import OcrWorker
@@ -1011,6 +1012,7 @@ class MainWindow(QMainWindow):
         # Per-page disable: round stage-toggle → flip override + rerun.
         # State for the toggle + band comes from a per-scan provider.
         widget.step_states_provider = self.cell_disable_states
+        widget.manual_fields_provider = self.manual_fields_for_layout
         widget.step_toggle_requested.connect(self.toggle_step_disabled)
         # Visibility (eye) still writes branches.trashed_at so gallery +
         # table see the same hide state. (selection_changed is vestigial.)
@@ -1058,6 +1060,48 @@ class MainWindow(QMainWindow):
             return
         self._scans_scroll.verticalScrollBar().setValue(hi)
 
+    def _refresh_debug_tabs(self, scan_id: int, branch_path: str,
+                            node_id=None) -> None:
+        """Point every open debug tab of that page-branch at the new nodes.
+
+        Re-key `_debug_tabs` as we go: it is keyed by the leaf node id, and
+        the rerun replaced it — leaving the old key would spawn a duplicate
+        tab the next time the user clicks the same page."""
+        tabs = getattr(self, "_debug_tabs", None)
+        if not tabs:
+            return
+        for old_id, viewer in list(tabs.items()):
+            try:
+                if not viewer.reload_for(scan_id, branch_path, node_id):
+                    continue
+            except Exception:
+                continue
+            new_id = int(getattr(viewer, "leaf_node_id", old_id))
+            if new_id != old_id:
+                tabs.pop(old_id, None)
+                tabs[new_id] = viewer
+
+    def _reprocess_for_editor(self, scan_id: int, branch_path: str) -> None:
+        # The editor just wrote an override; the views' memoised marks are now
+        # a step behind.
+        self.invalidate_manual_fields(int(scan_id))
+        """Rerun one page-branch after a manual-override edit.
+
+        Same fallback ladder as `set_step_disabled`: the branch rerun resumes
+        from the split point, and a scan that isn't split (or a missing branch
+        callback) falls back to the whole-scan rerun rather than silently
+        doing nothing."""
+        cb = self._reprocess_branch_callback
+        if cb is not None:
+            try:
+                cb(int(scan_id), str(branch_path or ""))
+                return
+            except Exception:
+                pass
+        snaps = self._reprocess_snaps_callback
+        if snaps is not None:
+            snaps({int(scan_id)})
+
     def _open_debug_viewer(self, node_id: int, label: str):
         """Open a debug viewer for `node_id` as a new closable tab.
 
@@ -1072,7 +1116,10 @@ class MainWindow(QMainWindow):
 
         from aglaia.gui.DebugViewerTab import DebugViewerWidget
         from aglaia.gui.theme import lucide as _lucide_tab
-        viewer = DebugViewerWidget(self.db_path, node_id, title_hint=label)
+        # The viewer is also the per-page editor (M9 #97): a manual override
+        # it stores has to rerun that page-branch to be visible.
+        viewer = DebugViewerWidget(self.db_path, node_id, title_hint=label,
+                                   reprocess_cb=self._reprocess_for_editor)
         tab_label = (self.tr("Inspect · {label}").format(label=label) if label
                      else self.tr("Inspect · node {nid}").format(nid=node_id))
         idx = self.tabs.addTab(viewer, _lucide_tab("image", size=14), tab_label)
@@ -3033,9 +3080,18 @@ class MainWindow(QMainWindow):
             # locked button can't fire set_step_disabled the cache never clears:
             # the per-page disable stays dead after any processing/reprocess.
             self.__dict__.get("_cell_disable_cache", {}).pop(int(scan_id), None)
+            # Same reason for the manual-override marks: a rerun rewrites the
+            # nodes the views key their cues by.
+            self.invalidate_manual_fields(int(scan_id))
             w = self.scan_widgets_by_scan.get(int(scan_id))
             if w is not None:
                 w.set_processing(False)   # per-scan spinner clear — immediate
+            # An open debug/editor tab is looking at nodes this rerun just
+            # replaced. Re-target it, or it keeps showing the pre-edit chain
+            # and the manual editor reads as broken (M9 #97).
+            self._refresh_debug_tabs(
+                int(scan_id), str(payload.get("branch_path") or ""),
+                payload.get("chosen_node_id"))
         # The expensive bits — OCR badge fan-out (DB queries) + a full
         # ScansTableView.refresh() (rebuild every block, re-decode every
         # thumb) — are THROTTLED to ~1 per 150 ms. A 100-page × 8-branch
@@ -3290,12 +3346,39 @@ class MainWindow(QMainWindow):
             "scans (including any page selection) and re-enqueues "
             "the raw inputs."
         ).format(n=n)
-        reply = QMessageBox.question(
-            self, self.tr("Force rerun"), msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(self.tr("Force rerun"))
+        box.setText(msg)
+        box.setInformativeText(self.tr(
+            "Manual per-page tuning (deskew angle, page ROI, dewarp curl) "
+            "survives a rerun — the pages come back as you corrected them. "
+            "Clear it only if you want the pipeline's own estimate back.\n\n"
+            "Per-page step disables are a different thing and are NOT "
+            "cleared: keep using their toggles in the scans views."))
+        run_btn = box.addButton(self.tr("Reprocess all"),
+                                QMessageBox.ButtonRole.AcceptRole)
+        # DestructiveRole so the platform places it as such; the colour says
+        # the rest. This one throws away work the user did BY HAND, which no
+        # rerun can recover.
+        wipe_btn = box.addButton(self.tr("Reprocess all and clear manual "
+                                         "overrides"),
+                                 QMessageBox.ButtonRole.DestructiveRole)
+        wipe_btn.setStyleSheet(
+            f"QPushButton {{ color: {COLOR_ERROR}; "
+            f"border: 1px solid {COLOR_ERROR}; }}")
+        cancel_btn = box.addButton(self.tr("Cancel"),
+                                   QMessageBox.ButtonRole.RejectRole)
+        # macOS sizes message-box buttons to a default width and clips these
+        # labels; widen each to its own text.
+        for _b in (run_btn, wipe_btn, cancel_btn):
+            _b.setMinimumWidth(_b.sizeHint().width() + 28)
+        box.setDefaultButton(cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is cancel_btn or clicked is None:
+            return
+        if clicked is wipe_btn and not self._clear_manual_overrides():
             return
         try:
             self._force_reprocess_callback()
@@ -3313,6 +3396,26 @@ class MainWindow(QMainWindow):
         # Broadcast now so badges + the OCR frame's pending count refresh
         # immediately, not only after the first branch_ready.
         self.ocr_state_changed.emit()
+
+    def _clear_manual_overrides(self) -> bool:
+        """Drop every per-page manual override in the project. Returns
+        whether the rerun should go ahead.
+
+        Only `manual_overrides` (M9): the per-page step DISABLES live in
+        `step_overrides` and have their own toggles in the three scan views,
+        so wiping them from a button labelled "manual overrides" would be a
+        surprise the user cannot undo either."""
+        try:
+            with db_session(str(self.db_path)) as conn:
+                conn.execute("DELETE FROM manual_overrides")
+                conn.commit()
+        except Exception as e:
+            QMessageBox.critical(
+                self, self.tr("Force rerun"),
+                self.tr("Could not clear the manual overrides: {err}")
+                .format(err=e))
+            return False
+        return True
 
     def _on_stop_pipeline_clicked(self) -> None:
         if self._stop_pipeline_callback is None:
@@ -4041,6 +4144,52 @@ class MainWindow(QMainWindow):
         except Exception:
             return set()
 
+    def manual_fields_for_scan(self, scan_id: int) -> dict:
+        """``{branch_path: [field, …]}`` for one scan — which pages the user
+        tuned by hand, and what they touched (M9 #102).
+
+        Memoised per scan like `cell_disable_states`: the three scan views ask
+        for it on every repaint, and it is one SQLite round-trip each. The
+        cache is dropped on `branch_ready` (fresh nodes) and on every edit.
+        """
+        cache = self.__dict__.setdefault("_manual_fields_cache", {})
+        key = int(scan_id)
+        if key in cache:
+            return cache[key]
+        out: dict = {}
+        try:
+            with db_session(str(self.db_path)) as conn:
+                for bp, payload in ManualOverrideRepo(
+                        conn).map_for_scan(key).items():
+                    fields = [f for f in payload if f != "frame_wh"]
+                    if fields:
+                        out[bp] = fields
+        except Exception:
+            out = {}
+        cache[key] = out
+        return out
+
+    def manual_fields_for_layout(self, scan_id: int, branch_path: str) -> list:
+        """The fields visible on one layout: its own branch plus the pre-split
+        trunk, which applies to every page of the scan."""
+        m = self.manual_fields_for_scan(scan_id)
+        bp = str(branch_path or "")
+        seen: list = []
+        for key in ("", bp):
+            for f in m.get(key, ()):
+                if f not in seen:
+                    seen.append(f)
+        return seen
+
+    def invalidate_manual_fields(self, scan_id=None) -> None:
+        cache = self.__dict__.get("_manual_fields_cache")
+        if not cache:
+            return
+        if scan_id is None:
+            cache.clear()
+        else:
+            cache.pop(int(scan_id), None)
+
     def set_step_disabled(self, scan_id: int, node_id: int, disabled: bool) -> None:
         """Authoritative writer for `step_overrides`. Persists the toggle,
         broadcasts for instant cell feedback, then reruns the scan from raw
@@ -4370,6 +4519,7 @@ class MainWindow(QMainWindow):
                 thumb_loader=self.thumb_loader,
                 ocr_state_provider=self._ocr_branch_state_map,
                 cell_states_provider=self.cell_disable_states,
+                manual_fields_provider=self.manual_fields_for_layout,
             )
             t.delete_requested.connect(self.delete_scan)
             t.debug_requested.connect(self._open_debug_viewer)
@@ -4401,6 +4551,7 @@ class MainWindow(QMainWindow):
                 cell_states_provider=self.cell_disable_states,
                 step_toggle_writer=self.toggle_step_disabled,
                 branch_trashed_provider=self._gallery_branch_trashed,
+                manual_fields_provider=self.manual_fields_for_layout,
                 branch_trashed_writer=self._gallery_set_branch_trashed,
             )
             g.debug_requested.connect(self._open_debug_viewer)

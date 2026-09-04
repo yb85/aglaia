@@ -10,10 +10,11 @@ Single SQLite file per project: `<workspace>/<slug>.agl`.
 aglaia/storage/
   __init__.py          re-exports
   db.py                open_db / ensure_schema / PRAGMAs
-  schema/0001_initial.sql … 0010_step_overrides.sql   (applied in order)
+  schema/0001_initial.sql … 0013_manual_overrides.sql  (applied in order)
   repo.py              ProjectRepo / PipelineRepo / CalibrationRepo /
                        ImageRepo / ThumbRepo / ScanRepo / NodeRepo /
-                       BranchRepo / OcrRepo / DebugRepo
+                       BranchRepo / StepOverrideRepo /
+                       ManualOverrideRepo / OcrRepo / DebugRepo
   persister.py         encode_image / make_thumb / Persister
 ```
 
@@ -30,6 +31,7 @@ aglaia/storage/
 | `nodes` | One row per pipeline-step output. Self-FK forms a tree. |
 | `branches` | One row per terminal branch. `chosen_node_id` (the export node) now always tracks `terminal_node_id` — per-page output is shaped by `step_overrides`, not by moving the chosen node. Soft-delete via `trashed_at`. |
 | `step_overrides` | Per-page-layout processor disable. A row `(scan_id, branch_path, step_idx, disabled)` makes the chain bypass that step for that layout. |
+| `manual_overrides` | Per-page-layout parameter override. One JSON payload per `(scan_id, branch_path)`: the value the user set where the pipeline would have estimated. |
 | `ocr_runs` | One row per OCR pass over a branch: engine, languages, status, `result_json`, timestamps. `is_stale` flags a result that no longer matches the branch's current node. |
 | `debug_artifacts` | Optional debug images attached to a node (e.g. PageDewarper span overlays). |
 
@@ -103,6 +105,40 @@ image, and `Replay` naturally excludes the passthrough (nothing stamped).
 Toggling a step writes the override then reruns the scan from raw
 (`reprocess_active_scans(scan_ids={id})`); the worker re-applies the override
 set per branch.
+
+## Per-page manual overrides (`manual_overrides`)
+
+`step_overrides` says *skip this step for this layout*. This table says *run
+it, but with **this** value* — the user correcting what the pipeline
+estimated. Same keying, so the worker loads both alike.
+
+| Column | Meaning |
+|---|---|
+| `scan_id` | Owning capture |
+| `branch_path` | `""` = pre-split trunk; `"A"`/`"B"` = one PageDetector layout |
+| `payload_json` | One JSON object, every field optional (below) |
+
+| Payload field | Consumed by | Meaning |
+|---|---|---|
+| `skew_deg` | SkewFinder | Rotation angle in degrees; the estimate does not run |
+| `roi` | PageDetector | ROI polygon `[[x, y], …]` in the branch's own coords |
+| `quad` | TrapezoidalCorrection | Column quad, 4 points TL TR BR BL, in the step's input coords; the whole detection is skipped |
+| `curl` | PageDewarper | `{alpha, beta, gamma}` — the sheet is frozen there and only the pose is re-optimised |
+| `force` | PageDewarper | Run the fit past the span-count guard and the OOB gate |
+| `frame_wh` | validation | `[w, h]` of the stage frame the spatial edits were drawn on |
+
+One row per `(scan, branch)`: the payload is edited as a whole.
+`ManualOverrideRepo.set` merges, and a field passed as `None` is removed —
+that is how the UI clears one editor without touching the others. An empty
+payload deletes the row, so "no override" is the absence of a row.
+
+**`frame_wh` is not decoration.** A polygon means something only against the
+frame it was drawn on; applying it to a frame of another size shifts or
+rescales it silently, and a page that is quietly wrong is worse than one the
+pipeline decided alone. `repo.validate_frame` drops the spatial fields (`roi`, `quad`) on a
+mismatch and names what it dropped. A payload with no `frame_wh` predates the
+field and is accepted as unvalidatable. Ported from the iOS `roiFrameWH`
+lesson.
 
 ## Image + thumb dedup
 

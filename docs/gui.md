@@ -92,6 +92,137 @@ The three views surface it differently, all via `MainWindow.cell_disable_states`
 - **Gallery** (`ScansGalleryView`) — a toggle (replacing the star) on the
   current stage; left/right still walks stages.
 
+## Debug view / per-page editor (`DebugViewerTab`)
+
+Click a stage thumb and a closable tab walks that page's chain, root → leaf.
+Two panes: the stage strip on the left, the selected stage on the right.
+
+**The strip** lists one row per pipeline step: a small thumbnail, the step
+name, and a background that identifies the **processor**. It used to zebra on
+the row INDEX, which carries no information — two adjacent look-alike stages
+got two different shades and two unrelated stages got the same one, so
+scrolling had no visible effect. Keyed by processor it reads as bands, and the
+two DPIfixers and two SkewFinders of the default pipeline get a light/dark
+variant so a repeat is still a seam. Thumbnails are small on purpose: at the
+old 200-px portrait thumb a ten-step chain needed ~3700 px of strip, so the
+whole thing was a scroll with no landmarks; a default `book_curved_x2` chain
+now fits a normal window without scrolling.
+
+**The stage pane** shows the per-processor overlay composite — spans,
+baselines, the fitted quad and grid — rendered in the background by
+`storage/debug_renderers.py`. There is no "show overlays" toggle: this view
+exists to show the debug data.
+
+**Manual tuning** (M9). Three stages can be corrected by hand; the edit is
+stored per page-layout in `manual_overrides` and the page-branch is rerun.
+See [storage.md](storage.md#per-page-manual-overrides-manual_overrides) and
+[processors.md](processors.md).
+
+| Stage | Control |
+|---|---|
+| SkewFinder | a rotation handle on the image and a slider, both on the same angle |
+| PageDetector | the ROI polygon — drag a vertex, double-click an edge to add one |
+| TrapezoidalCorrection | the column quad — drag a corner. **Four corners, no more**: a keystone is a projective map from exactly four points, so this polygon refuses insertion. When the step fell back and found no quad, the corners are seeded from the frame — that is precisely the page a user wants to draw one on |
+| PageDewarper | sliders for **arch**, **tilt** and the spine γ, plus **Force dewarp**. The grid previews the sheet live |
+
+**Arch and tilt are not the fitted parameters.** The solver fits α and β,
+which are the sheet's slopes at the LEFT and RIGHT page edges (`z'(0) = α`,
+`z'(1) = β`, and `z` is pinned to 0 at both). Neither moves one visible thing
+on its own — every drag of either reshapes the whole surface — which is what
+made them unusable by hand. The editor rotates the pair:
+
+```
+arch = (α − β)/2        tilt = (α + β)/2
+α    = arch + tilt      β    = tilt − arch
+```
+
+`z(0.5) = (α − β)/8 = arch/4`, so **arch alone sets the mid-page rise** — the
+arch of a bound page, the thing the eye reads — and **tilt alone slides its
+crest** left or right. The arch slider shows that rise as a percentage of the
+page width beside its raw value. Ranges cover the whole `delbrel-oc9` corpus
+(276 fitted pages: |arch| ≤ 0.325, |tilt| ≤ 0.250, |γ| ≤ 0.100) at a 0.001
+step, about one step per slider pixel.
+
+**The grid previews live.** Dragging a curl slider redraws the sheet in
+magenta over the fitted grid, from the same builder the remap uses
+(`dewarp_grid_lattice`) with the row's stamp and the edited curl substituted —
+so it is the surface, not an approximation of it. The pose is the last fit's:
+a rerun re-optimises it around the frozen shape, so the final page shifts a
+little. Magenta deliberately, not the renderer's green: green is what was
+fitted, magenta is what the sliders are asking for.
+
+**Force dewarp** runs the fit past the `min_spans` guard and the `max_oob`
+gate. Both are right by default and both are sometimes wrong — a sparse page
+whose few spans are perfectly good, a wide fit the gate reads as runaway. The
+result may be worse; the node records `manual: force` (and `oob_forced` when
+the gate was the thing overridden), so a bad page stays explainable.
+
+Handles are vector, painted by `DebugEditCanvas.EditCanvas` over the raster.
+The renderers hand them the geometry as numbers (`geom`), in the coordinates
+of the **stage frame**, with two mappings beside it:
+
+- `origin` — where that frame sits inside the composite: the label bar above
+  it, the crop offset of a child drawn on its parent;
+- `scale` — what `_png_data_url` shrinks the composite by on its way out (Qt's
+  allocation cap). The picture on screen is not the composite.
+
+A handle is drawn at `(point + origin) × scale`. Miss `origin` and every
+handle sits a bar-height, or a crop, from its pixel; miss `scale` and the
+error grows with the coordinate, which reads as everything shifted down and
+right.
+
+Every spatial edit stores the frame it was made on, so a polygon is validated
+rather than silently rescaled.
+
+**After a rerun** the branch's subtree is wiped and rewritten, so the tab's
+leaf node is a dead row. `MainWindow._refresh_debug_tabs`, on `branch_ready`,
+re-targets every open tab of that page-branch and re-keys `_debug_tabs` —
+without it the tab keeps showing the pre-edit chain and the editor reads as
+broken.
+
+**Auto-process** (on by default, remembered for the session) reruns the page
+as soon as a value changes. Turn it off to make several edits and run once —
+the **Reprocess** button lights up, and is dimmed while auto-process is on
+because there would be nothing for it to do. **Clear override** drops this
+layout's stored values and restores the automatic result.
+
+Manual tuning **survives a force rerun**: the pages come back as they were
+corrected. The Force-rerun dialog therefore offers three ways out — *Cancel*,
+*Reprocess all*, and *Reprocess all and clear manual overrides* (in the danger
+colour: it throws away work done by hand, which no rerun can recover). The
+third clears `manual_overrides` only; the per-page step **disables** live in
+`step_overrides` and keep their own toggles in the scan views.
+
+The slider ranges are chosen for manual tuning, not for the solver's freedom:
+curl is clamped at ±0.5 internally but a page past ±0.35 is already extreme,
+and a full-width slider over the solver's range would make every useful value
+a two-pixel move.
+
+## Hand-edited pages in the scan views
+
+A page carrying manual overrides looked exactly like one the pipeline decided
+alone, everywhere outside the debug editor. All three views now mark it with
+one quiet dot — `widgets.ManualPip`, the primary accent, no glyph, no text —
+whose tooltip names what was touched ("Hand-tuned: deskew angle, dewarp
+curl").
+
+| View | Where |
+|---|---|
+| Table | beside the branch label, where the eye reads the row's identity |
+| Card grid | top-right of the layout thumbnail, clear of the disabled band (top edge) and the nav buttons |
+| Gallery | top-right of the stage image, clear of the star (top-left) and the disabled glyph (centre) |
+
+Quiet is the requirement: a hand-edited page is not a warning, so the mark
+must not compete with the disable strike (red) or the trashed state, and it is
+absent entirely on a page with no override — which is the common case, and the
+reason the mark says anything at all.
+
+All three read `MainWindow.manual_fields_for_layout(scan_id, branch_path)`,
+which merges the layout's own payload with the pre-split trunk's. It is
+memoised per scan like `cell_disable_states` — the views ask on every repaint
+and it is one SQLite round-trip each — and the cache is dropped on
+`branch_ready` and on every edit the editor writes.
+
 ## Calibration buttons
 
 - **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `config/camera_params.json`. Restart capture to pick up the new calibration.
