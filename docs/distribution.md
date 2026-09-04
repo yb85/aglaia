@@ -129,21 +129,23 @@ so no FUSE mount is needed on the runner):
 | Job | Extras | Asset | Dewarp |
 |---|---|---|---|
 | `build-linux` | `gui voice dev package cloud surya` | `Aglaia-x86_64.AppImage` | CPU |
-| `build-linux-gpu` | + `cuda` | `Aglaia-x86_64-cuda.AppImage` | NVIDIA GPU |
 
-The GPU asset bundles a **slim CUDA runtime**. The dewarp is L-BFGS-B over
-the reprojection cost (matmul / reductions — no conv, FFT, sparse, or
-multi-GPU), so `Aglaia.spec` ships only the CUDA libs it actually loads
-(cuBLAS, nvrtc, nvjitlink, ptxas, cupti, cudart) and drops ~2.6 GB of dead
-weight (cuDNN, NCCL, nvshmem, cuFFT, cuSPARSE, cuSOLVER) — landing ~1.3 GiB,
-well under GitHub's 2 GiB release-asset cap (the `build-linux-gpu` job fails
-the release if it ever exceeds it). JAX version-probes every CUDA lib at
-init and silently drops to CPU when one is missing, so `PageDewarper` sets
-`JAX_SKIP_CUDA_CONSTRAINTS_CHECK=1` to bypass that probe; the bundled libs
-are the exact pinned wheels JAX was built against, so the skipped check
-would always have passed. Verified on an RTX 3090. No GPU → clean CPU
-fallback. CI can only prove it builds/imports (runners have no GPU); GPU
-dewarp must be smoke-tested on real NVIDIA hardware before trusting a release.
+**There is no CUDA build target** (removed 2026-09). It existed to batch the
+JAX page-dewarp on a GPU, back when the alternative was Powell. `backend:
+auto` now resolves to the **LM solver** (#59), which fits the same sheet on
+CPU in ~0.25 s/page — about 100× faster than the path the GPU was racing — so
+the CUDA AppImage carried a slim CUDA payload for no gain. Its job had also
+been failing since 2026-07 (`xgrammar` publishes no wheel for the runner), so
+every release from rc3 on published without it regardless.
+
+The `cuda` extra and `Aglaia.spec`'s slim-CUDA block are kept for a **local**
+build: `uv sync --extra cuda`, then `uv run pyinstaller Aglaia.spec`. The spec
+ships only the CUDA libs the dewarp actually loads (cuBLAS, nvrtc, nvjitlink,
+ptxas, cupti, cudart) and drops ~2.6 GB of dead weight (cuDNN, NCCL, nvshmem,
+cuFFT, cuSPARSE, cuSOLVER). JAX version-probes every CUDA lib at init and
+silently drops to CPU when one is missing, so `PageDewarper` sets
+`JAX_SKIP_CUDA_CONSTRAINTS_CHECK=1`; the bundled libs are the exact pinned
+wheels JAX was built against, so the skipped check would always have passed.
 
 ## Local build (no CI)
 

@@ -4,7 +4,7 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0rc6] — 2026-09-04
+## [0.1.0rc5] — 2026-09-04
 
 Per-page manual tuning (milestone M9), and four output defects that had been
 degrading pages silently — three of them with no failing test, all three found
@@ -55,6 +55,17 @@ by measuring a real book rather than by reading the code.
   child ROI is the region the Binarizer keeps; the axis-aligned bbox of a
   slanted text block swallows its corners, which is exactly where the fingers
   holding the book sit.
+
+### Removed
+
+- **The CUDA build target.** It existed to batch the JAX page-dewarp on a GPU,
+  back when the alternative was Powell. `backend: auto` now resolves to the LM
+  solver, which fits the same sheet on CPU in ~0.25 s/page — about 100× faster
+  than the path the GPU was racing — so `Aglaia-x86_64-cuda.AppImage` carried
+  a slim CUDA payload for no gain. Its build job had also been failing since
+  2026-07 (`xgrammar` publishes no wheel for the runner), so every release
+  from rc3 on published without it regardless. The `cuda` extra and
+  `Aglaia.spec`'s slim-CUDA block are kept for a local build.
 
 ### Fixed
 
@@ -523,7 +534,7 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
-[0.1.0rc6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc6
+[0.1.0rc5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc5
 [0.1.0rc4]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc4
 [0.1.0rc3]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc3
 [0.1.0rc2]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc2
