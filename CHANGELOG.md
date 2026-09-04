@@ -4,6 +4,100 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc6] — 2026-09-04
+
+Per-page manual tuning (milestone M9), and four output defects that had been
+degrading pages silently — three of them with no failing test, all three found
+by measuring a real book rather than by reading the code.
+
+### Added
+
+- **Tune a page by hand, in the debug view.** The view a user already opens to
+  see what the pipeline decided is now where they correct it. Four stages take
+  a manual value, stored per page-layout in a new `manual_overrides` table and
+  honoured on the next run:
+
+  | Stage | Control |
+  |---|---|
+  | SkewFinder | a rotation handle on the image and a slider |
+  | PageDetector | the ROI polygon — drag a vertex, double-click an edge to add one |
+  | TrapezoidalCorrection | the column quad — drag a corner (four corners, no more) |
+  | PageDewarper | arch / tilt / spine-γ sliders, and **Force dewarp** |
+
+  Ported from the iOS `ManualOverrides` model. An overridden estimator does not
+  run at all: run-then-discard would be cheaper to write and wrong to live
+  with, because the next rerun would re-derive its own answer and the
+  correction would drift. The dewarp freezes the sheet at the user's curl and
+  re-optimises only the pose — freeze the pose too and the sliders look inert,
+  leave the shape free and every slider move snaps back.
+
+  **Arch and tilt are not the fitted parameters.** The solver fits α and β,
+  the sheet's slopes at the two page edges, and neither moves one visible
+  thing on its own — which is what made them unusable by hand. Rotating the
+  pair (`arch = (α−β)/2`, `tilt = (α+β)/2`) gives `z(0.5) = arch/4`, so arch
+  alone sets the mid-page rise and tilt alone slides its crest. The grid
+  previews the sheet live, in magenta over the fitted green, from the same
+  builder the remap uses.
+
+  Every spatial edit stores the frame it was drawn on: a polygon applied to a
+  frame of another size is silently shifted, and a page that is quietly wrong
+  is worse than one the pipeline decided alone.
+
+- **Force dewarp.** Runs the fit past the `min_spans` guard and the `max_oob`
+  gate. Both are right by default and both are sometimes wrong — a sparse page
+  whose few spans are perfectly good, a wide fit read as runaway. Per page,
+  never a default, and stamped so a bad page stays explainable.
+
+- **A hand-edited page is marked** in the table, the card grid and the gallery
+  by one quiet dot, whose tooltip names what was touched.
+
+- **Convex-hull page ROI** (`roi_hull`, default on), backported from iOS. The
+  child ROI is the region the Binarizer keeps; the axis-aligned bbox of a
+  slanted text block swallows its corners, which is exactly where the fingers
+  holding the book sit.
+
+### Fixed
+
+- **Landscape page crops came out downscaled, still stamped 300 dpi.** The
+  remap sized its output height against `ref_h`, but `page_dims` lives in
+  norm2pix units whose scale is `0.5 · max(h, w)` — right only on a portrait
+  crop. On a landscape one (a chapter opening, a part-title, anything wider
+  than tall) the whole remap was scaled by `ref_h / ref_w`. Measured on one
+  book: 26 of 272 dewarp nodes are landscape and **every one** was shrunk —
+  a 1289×533 page landed at 520×224. Portrait crops are unaffected, so
+  stamped projects replay to the size they have today. Inherited from upstream
+  `page-dewarp`.
+
+- **`min_contrast` deleted sparse real pages.** The filter exists to delete a
+  bleed-through ghost — pale wherever its ink is — but measured `p95 − p5`
+  over the layout's whole bbox, which makes it a density proxy: a sparse
+  layout is mostly paper, so `p5` lands on paper too and the range collapses
+  however black the ink. Over 141 spreads it deleted a **title page**, two
+  chapter openings and two chronology date columns at 0.12–0.35, and did
+  nothing else — on that book the filter never once did the job it exists for.
+  Measured under the detection boxes instead, those five score 0.78–0.98 and
+  the worst page of the whole book scores 0.68, with no threshold change.
+
+- **The horizontal gap trim ate text.** It drops a box sitting a large gap
+  past the dense cluster — a cable, a hand, a cup edge — and cannot tell that
+  from a legitimate element that simply stands alone. It removed a lone `1996`
+  from a chronology column, and cut the two longest lines of a short ragged
+  block **mid-word**. The discriminator is the side: an intruder comes from
+  outside the book, never from the gutter, so on a two-page spread the spine
+  side is bounded by the crease instead. 139 of 141 spreads unchanged; the two
+  that move are the two failures.
+
+- **The dewarp debug grid drew the wrong surface.** It projected without the
+  10-param camera's principal point or the fitted spine curl, and ignored the
+  composite downscale — so the overlay sat up to 895 px from a correct output,
+  reading as a broken dewarp. Debug-only; no output image was affected.
+
+- **On Linux the Cloud OCR card never showed a key stored in the keychain.**
+  The probe was deferred for the macOS Keychain, which prompts on read; the
+  Linux Secret Service does not. And its only trigger needed a real engine
+  switch, so a session that STARTS on Cloud OCR never probed at all. OCR
+  itself was unaffected — only the status line lied.
+
 ## [0.1.0rc4] — 2026-08-31
 
 Point release: cloud OCR was broken in every rc3 artifact.
@@ -429,6 +523,9 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0rc6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc6
+[0.1.0rc4]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc4
+[0.1.0rc3]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc3
 [0.1.0rc2]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc2
 [0.1.0rc1]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc1
 [0.1.0a6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0a6
