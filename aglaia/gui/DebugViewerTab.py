@@ -768,11 +768,29 @@ class DebugViewerWidget(QWidget):
         key = self.scan_key()
         if key is None or key[0] != int(scan_id):
             return False
-        if key[1] and str(branch_path or "") and key[1] != str(branch_path):
-            return False
-        leaf = node_id or self._resolve_leaf(int(scan_id), key[1])
+        mine, theirs = str(key[1] or ""), str(branch_path or "")
+        if mine and theirs and mine != theirs:
+            # Another branch of the same scan — normally not ours. Unless our
+            # own branch is GONE, in which case this rerun is what removed it
+            # and the events for it will never come (#121). Re-target instead
+            # of sitting on `_set_busy(True)` forever.
+            if self._resolve_leaf(int(scan_id), mine) is not None:
+                return False
+            node_id = None          # the caller's leaf belongs to `theirs`
+        leaf = node_id or self._resolve_leaf(int(scan_id), mine)
         if leaf is None:
-            return False
+            # The branch this tab was showing no longer exists — the layout
+            # set was edited and its layout deleted, or the page count
+            # changed under it (#118). Re-target the scan's first surviving
+            # branch rather than returning: bailing here left `_set_busy(True)`
+            # standing, so the editor sat disabled on "Reprocessing…" for the
+            # rest of the session over a page that had finished (#121).
+            leaf = self._resolve_leaf(int(scan_id), "")
+            if leaf is None:
+                self._set_busy(False)
+                self._overlay_note.setText(
+                    self.tr("That page no longer exists — close this tab."))
+                return False
         self.leaf_node_id = int(leaf)
         row = self.strip.currentRow()
         self._rebuild(keep_row=row)
