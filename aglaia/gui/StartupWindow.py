@@ -1066,8 +1066,8 @@ class StartupWindow(QDialog):
             return
 
         src = self._src_group.current_key() or "capture"
-        from slugify import slugify
-        slug = slugify(name) or "project"
+        from aglaia.storage import safe_project_name
+        slug = safe_project_name(name)
         choice = StartupChoice(
             mode=self.MODE_CAPTURE if src == "capture" else "",
             project_name=name,

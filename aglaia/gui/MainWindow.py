@@ -311,6 +311,8 @@ class MainWindow(QMainWindow):
         self.processing_queue = processing_queue
         self.log_queue = log_queue
         self.slug_name = slug_name
+        #: Directories holding an export made only to hand to a plugin.
+        self._send_staging: set[str] = set()
         self.current_idx = start_idx
 
         # M0 DB context
@@ -1489,7 +1491,6 @@ class MainWindow(QMainWindow):
 
         # ── Export-tab wiring ──────────────────────────────────────
         self._export_tab.btn_export.clicked.connect(self._on_export_clicked)
-        self._export_tab.send_to_requested.connect(self._on_send_to_requested)
         self._export_tab.destination_settings_requested.connect(
             self._on_destination_settings)
         self._export_tab.chk_norm_widths.stateChanged.connect(
@@ -1837,7 +1838,7 @@ class MainWindow(QMainWindow):
         )
         images = [p for p, k in items if k == "image"]
         pdfs = [p for p, k in items if k == "pdf"]
-        slug = slugify(_P(self.db_path).stem) or "scan"
+        slug = _P(self.db_path).stem or "scan"
         try:
             if images:
                 enqueue_image_files(
@@ -1870,7 +1871,7 @@ class MainWindow(QMainWindow):
         def ingest(zip_path: str) -> int:
             tmp = _P(zip_path)
             bundle = read_bundle(tmp, extract_dir=tmp.parent / "extract")
-            slug = slugify(_P(self.db_path).stem) or "scan"
+            slug = _P(self.db_path).stem or "scan"
             enqueue_image_files(
                 db_path=self.db_path,
                 pipeline_version_id=self.pipeline_version_id,
@@ -1887,13 +1888,41 @@ class MainWindow(QMainWindow):
     def _on_export_clicked(self):
         """Single Export button — dispatch by currently selected format
         card."""
-        fmt = self._export_tab.current_format()
-        if fmt == "pdf":
+        fmt = self._export_tab.current_format() or ""
+        prefix = self._export_tab.SEND_PREFIX
+        if fmt.startswith(prefix):
+            self._export_to_destination(fmt[len(prefix):])
+        elif fmt == "pdf":
             self.make_pdf("output")
         elif fmt == "markdown":
             self._export_markdown()
         elif fmt == "slim":
             self._export_slim_project()
+
+    def _export_to_destination(self, name: str) -> None:
+        """Export in the format the destination card asks for, then hand the
+        file over.
+
+        Sending is not a different kind of export — it is an export whose
+        destination happens to be a plugin rather than a folder. So this runs
+        the ordinary export routine; the only difference is that
+        `_pending_send` is armed, which sends the file to a private staging
+        directory instead of asking the user to name it."""
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            QMessageBox.warning(
+                self, self.tr("{name} did not load").format(name=name),
+                dest.load_error(name) or self.tr("it is not loaded"))
+            return
+        if d.missing_settings():
+            self._on_destination_settings(name)
+            return
+        self._pending_send = name
+        if self._export_tab.destination_format(name) == "md":
+            self._export_markdown()
+        else:
+            self.make_pdf("output")
 
     def _on_destination_settings(self, name: str) -> None:
         """Open one export plugin's settings from the Export tab."""
@@ -1909,26 +1938,46 @@ class MainWindow(QMainWindow):
         # Its "Needs: …" line is now stale.
         self._export_tab.refresh_destinations()
 
-    def _on_send_to_requested(self, name: str) -> None:
-        """Export, then hand the file to the chosen plugin.
+    def _export_destination(self, default_name: str, title: str,
+                            filt: str):
+        """Where this export should be written.
 
-        The export runs first and normally — the user still picks where it
-        lands, and still has the file afterwards. Sending is an extra step on
-        top, not a different export: a destination that fails must not cost
-        the export."""
-        from aglaia.workers import destinations as dest
-        d = dest.load_all().get(name)
-        if d is None:
-            QMessageBox.warning(
-                self, self.tr("{name} did not load").format(name=name),
-                dest.load_error(name) or self.tr("it is not loaded"))
-            return
-        missing = d.missing_settings()
-        if missing:
-            self._on_destination_settings(name)
-            return
-        self._pending_send = name
-        self._on_export_clicked()
+        Normally: ask, because the user wants the file. But when the export
+        exists only to be handed to a plugin — "Send to Calibre" — the file is
+        a courier, not a deliverable. Asking for a name and a folder to put a
+        file the user will never open is a dialog for nothing, and it invites
+        the one failure a courier must not have: overwriting last week's
+        export because both were called `Book.pdf`.
+
+        So a send goes to a fresh private directory. The FILENAME is kept
+        exactly as the save dialog would have proposed it, because it is not
+        incidental — Kindle attaches it under that name and calibre reads a
+        book title out of it.
+
+        Returns None if the user cancelled the dialog.
+        """
+        from pathlib import Path as _P
+        if not getattr(self, "_pending_send", ""):
+            from PySide6.QtWidgets import QFileDialog
+            default = self.args.workspace_dir / default_name
+            dest, _ = QFileDialog.getSaveFileName(
+                self, title, str(default), filt)
+            return _P(dest) if dest else None
+        import tempfile
+        staged = _P(tempfile.mkdtemp(prefix="aglaia-send-")) / default_name
+        self._send_staging.add(str(staged.parent))
+        return staged
+
+    def _discard_if_staged(self, path) -> bool:
+        """Remove a courier file and its directory. True if it was one."""
+        from pathlib import Path as _P
+        import shutil
+        parent = str(_P(path).parent)
+        if parent not in getattr(self, "_send_staging", ()):
+            return False
+        self._send_staging.discard(parent)
+        shutil.rmtree(parent, ignore_errors=True)
+        return True
 
     def send_export_to_pending(self, path) -> None:
         """Called by an export path once it has written a file.
@@ -1955,6 +2004,11 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001 — someone else's code
             self.toast(f"{d.display or name}: {type(e).__name__}: {e}")
             return
+        finally:
+            # The courier copy goes whether the send worked or not: keeping
+            # it helps nobody, since the user cannot find it and would not
+            # know it was there.
+            self._discard_if_staged(path)
         self.toast(res.message)
 
     def _project_title(self) -> str:
@@ -1962,7 +2016,7 @@ class MainWindow(QMainWindow):
         piece of metadata Aglaïa always has."""
         try:
             from pathlib import Path as _P
-            return _P(str(self.db_path)).stem.replace("_", " ").strip()
+            return _P(str(self.db_path)).stem.strip()
         except Exception:
             return ""
 
@@ -2648,13 +2702,11 @@ class MainWindow(QMainWindow):
             except Exception:
                 ocr_suffix = ""
         output_filename = f"{self.slug_name}{suffix}{ocr_suffix}.pdf"
-        from PySide6.QtWidgets import QFileDialog
-        default = self.args.workspace_dir / output_filename
-        dest, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Export PDF"), str(default), self.tr("PDF (*.pdf)"))
-        if not dest:
+        output_path = self._export_destination(
+            output_filename, self.tr("Export PDF"), self.tr("PDF (*.pdf)"))
+        if output_path is None:
+            self._pending_send = ""
             return
-        output_path = Path(dest)
         self.status_label.setText(
             self.tr("Generating PDF ({src}, {comp})…").format(src=source_type, comp=compression)
         )
@@ -2671,11 +2723,14 @@ class MainWindow(QMainWindow):
             )
         if success:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
-            self.toast(self.tr("PDF saved — {name}").format(name=output_path.name))
-            self._reveal_in_finder(output_path)
+            if not getattr(self, "_pending_send", ""):
+                self.toast(self.tr("PDF saved — {name}").format(
+                    name=output_path.name))
+                self._reveal_in_finder(output_path)
             self.send_export_to_pending(output_path)
         else:
             self._pending_send = ""
+            self._discard_if_staged(output_path)
             self.status_label.setText(self.tr("Failed to create PDF (no images)."))
             self.toast(self.tr("PDF export failed."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
@@ -2809,20 +2864,18 @@ class MainWindow(QMainWindow):
 
     def _export_markdown(self):
         from aglaia.workers.md_export import write_markdown, ocr_engine_suffix
-        from PySide6.QtWidgets import QFileDialog
         ocr_engine = self._export_tab.selected_ocr_engine()
         try:
             with db_session(self.db_path) as conn:
                 suffix = ocr_engine_suffix(conn, ocr_engine)
         except Exception:
             suffix = ""
-        default = self.args.workspace_dir / f"{self.slug_name}{suffix}.md"
-        dest, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Export Markdown"), str(default),
+        output_path = self._export_destination(
+            f"{self.slug_name}{suffix}.md", self.tr("Export Markdown"),
             self.tr("Markdown (*.md)"))
-        if not dest:
+        if output_path is None:
+            self._pending_send = ""
             return
-        output_path = Path(dest)
         use_llm = bool(
             getattr(self._export_tab, "chk_llm_refine", None)
             and self._export_tab.chk_llm_refine.isEnabled()
@@ -2836,17 +2889,22 @@ class MainWindow(QMainWindow):
             with db_session(self.db_path) as conn:
                 ok = write_markdown(conn, output_path, refine=refine, engine=ocr_engine)
         except Exception as e:
+            self._pending_send = ""
+            self._discard_if_staged(output_path)
             self._on_log_line("error", f"Markdown export failed: {e}")
             self.status_label.setText(self.tr("Markdown export failed."))
             QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
             return
         if ok:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
-            self.toast(self.tr("Markdown saved — {name}").format(name=output_path.name))
-            self._reveal_in_finder(output_path)
+            if not getattr(self, "_pending_send", ""):
+                self.toast(self.tr("Markdown saved — {name}").format(
+                    name=output_path.name))
+                self._reveal_in_finder(output_path)
             self.send_export_to_pending(output_path)
         else:
             self._pending_send = ""
+            self._discard_if_staged(output_path)
             self.status_label.setText(self.tr("No OCR text to export."))
             self.toast(self.tr("Markdown export skipped — no OCR text."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))

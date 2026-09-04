@@ -148,5 +148,10 @@ lives in the DB. See [storage.md](storage.md) for the schema.
 | Exports (`--export pdf…` / `md`) | `<project_dir>/<slug>.pdf` and `<slug>.md` (written by `aglaia/workers/headless.py:_run_exports`) |
 
 For a new project, `<project_dir>` defaults to `--parent-dir` (or the input
-file's own parent) and `<slug>` derives from `--project-name` (or the input
-filename).
+file's own parent) and `<slug>` is `--project-name` (or the input filename)
+**as given**. It is not slugified: `--project-name "Corpus Hermeticum vol. 2"`
+produces `Corpus Hermeticum vol. 2.agl`, and the exports derived from it keep
+the same name. `aglaia.storage.safe_project_name` removes only what a
+filesystem will actually refuse — path separators, control characters, the
+characters Windows rejects, edge dots/spaces/dashes, reserved device names —
+and caps the result at 200 UTF-8 **bytes**.

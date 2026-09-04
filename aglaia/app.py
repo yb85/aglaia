@@ -452,7 +452,7 @@ def _choice_from_cfg(cfg: CliConfig) -> Optional["StartupChoice"]:
         name = default_project_name(cfg)
         parent = default_parent_dir(cfg)
         parent.mkdir(parents=True, exist_ok=True)
-        from slugify import slugify
+        from aglaia.storage import safe_project_name
         pipeline_path = resolve_pipeline_path(cfg.pipeline)
         yaml_text = pipeline_path.read_text(encoding="utf-8") if pipeline_path else ""
         mode = (StartupWindow.MODE_PDF if cfg.source == "pdfs"
@@ -462,7 +462,7 @@ def _choice_from_cfg(cfg: CliConfig) -> Optional["StartupChoice"]:
             project_dir=parent,
             parent_dir=parent,
             project_name=name,
-            project_slug=slugify(name) or "project",
+            project_slug=safe_project_name(name),
             input_files=list(cfg.inputs),
             pipeline_yaml=yaml_text,
         )
@@ -495,7 +495,6 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     Mirrors the legacy `main()` flow but skips the StartupWindow.
     """
     import threading as _threading
-    from slugify import slugify
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QPixmap
     from PySide6.QtWidgets import QSplashScreen
@@ -558,7 +557,8 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     finally:
         sys.argv = saved_argv
 
-    slug = choice.project_slug or slugify(
+    from aglaia.storage import safe_project_name
+    slug = choice.project_slug or safe_project_name(
         choice.project_name or choice.project_dir.name
     )
     if slug:

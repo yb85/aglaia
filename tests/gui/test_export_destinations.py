@@ -5,13 +5,17 @@
 # Source-available under the PolyForm Shield License 1.0.0; any use except
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
-"""Export plugins appear where the export happens.
+"""Export plugins appear where the export happens, as ordinary formats.
 
-An installed export plugin is only useful if it is offered in the Export tab.
-Two rules make the section honest: it lists only destinations that accept the
-format currently selected — being told "not accepted" *after* the export ran is
-a thing to prevent, not to report — and a destination that is not configured
-says what it needs and offers setup instead of a Send button that would fail.
+An exporter is an exporter. A plugin that puts a finished export somewhere gets
+the SAME card as PDF and Markdown, in the same list, selected the same way, run
+by the same Export button — not a second control below it with its own send
+buttons, which was two ways to start an export for one idea.
+
+What is left for this file to pin: the cards appear and disappear with the
+plugins; a destination that is not configured says so on the card instead of
+failing after the export has already run; and the card resolves to a format the
+app can actually produce.
 """
 import os
 
@@ -50,9 +54,15 @@ def tab(app, tmp_path, monkeypatch):
     d.reset_for_tests()
 
 
-def _cards(tab):
-    return [tab._send_layout.itemAt(i).widget()
-            for i in range(tab._send_layout.count())]
+P = ExportTab.SEND_PREFIX
+
+
+def _send_keys(tab):
+    return [k for k in tab.format_group.keys() if k.startswith(P)]
+
+
+def _frame(tab, key):
+    return tab.format_group._cards[key].frame
 
 
 def _texts(card):
@@ -63,30 +73,37 @@ def _button(card):
     return card.findChildren(QPushButton)[0]
 
 
-def test_pdf_offers_the_destinations_that_take_a_pdf(tab):
-    tab.format_group.set_current_key("pdf")
+def test_an_exporter_is_a_format_card_like_any_other(tab):
+    """Same group as PDF and Markdown — that is the whole point."""
     tab.refresh_destinations()
-    names = [_texts(c)[0] for c in _cards(tab)]
-    assert "Export to Calibre server" in names
-    assert "Export to Kindle by email" in names
+    keys = tab.format_group.keys()
+    assert "pdf" in keys and "markdown" in keys
+    assert f"{P}send-to-calibre" in keys
+    assert f"{P}send-to-kindle" in keys
 
 
-def test_a_format_nobody_accepts_hides_the_whole_section(tab):
-    """An empty heading with a promise under it is worse than no heading."""
-    tab.format_group.set_current_key("slim")     # .agl — nothing takes it
+def test_selecting_one_is_selecting_a_format(tab):
+    """No separate send button: the ordinary Export button runs it, so the
+    destination has to be reachable as the current format."""
     tab.refresh_destinations()
-    assert _cards(tab) == []
-    assert tab._send_label.isVisibleTo(tab) is False
-    assert tab._send_box.isVisibleTo(tab) is False
+    assert tab.format_group.set_current_key(f"{P}send-to-calibre")
+    assert tab.current_format() == f"{P}send-to-calibre"
 
 
-def test_an_unconfigured_destination_says_what_it_needs(tab):
-    tab.format_group.set_current_key("pdf")
+def test_an_unconfigured_destination_says_so_on_the_card(tab):
+    """Before it is used, not after the export has already run."""
     tab.refresh_destinations()
-    card = next(c for c in _cards(tab)
-                if _texts(c)[0] == "Export to Calibre server")
-    assert "Needs:" in _texts(card)[1]
-    assert _button(card).text() == "Set up…"
+    card = _frame(tab, f"{P}send-to-calibre")
+    assert any("Not set up yet" in t for t in _texts(card))
+
+
+def test_the_card_resolves_to_a_format_aglaia_can_produce(tab):
+    """calibre takes pdf/md/txt; Aglaïa writes pdf and md. txt must not be
+    offered, and the default must be one of the two."""
+    tab.refresh_destinations()
+    assert tab.destination_format("send-to-calibre") in ("pdf", "md")
+    # Kindle takes epub/docx too, and neither is something we can write.
+    assert tab.destination_format("send-to-kindle") in ("pdf", "md")
 
 
 def _install_ready_destination(tmp_path):
@@ -117,46 +134,57 @@ def _install_ready_destination(tmp_path):
     return slug
 
 
-def test_a_configured_destination_offers_send(tab, tmp_path):
-    slug = _install_ready_destination(tmp_path)
-    tab.format_group.set_current_key("pdf")
+def test_a_configured_destination_says_nothing_alarming(tab, tmp_path):
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
-    card = next(c for c in _cards(tab) if _texts(c)[0] == "Ready dest")
-    assert _texts(card)[1] == "Ready"
-    assert _button(card).text() == "Send"
+    card = _frame(tab, f"{P}ready-dest")
+    assert not any("Not set up yet" in t for t in _texts(card))
 
 
-def test_pressing_send_asks_the_host_by_name(tab, tmp_path):
+def test_the_settings_button_asks_the_host_by_name(tab):
     """The tab knows WHICH destination, not how to reach it."""
-    slug = _install_ready_destination(tmp_path)
-    tab.format_group.set_current_key("pdf")
     tab.refresh_destinations()
-    asked = []
-    tab.send_to_requested.connect(asked.append)
-    card = next(c for c in _cards(tab) if _texts(c)[0] == "Ready dest")
-    _button(card).click()
-    assert asked == [slug]
-
-
-def test_pressing_set_up_asks_for_settings_not_a_send(tab):
-    tab.format_group.set_current_key("pdf")
-    tab.refresh_destinations()
-    sends, settings = [], []
-    tab.send_to_requested.connect(sends.append)
+    settings = []
     tab.destination_settings_requested.connect(settings.append)
-    card = next(c for c in _cards(tab)
-                if _texts(c)[0] == "Export to Calibre server")
-    _button(card).click()
-    assert settings == ["send-to-calibre"] and sends == []
+    _button(_frame(tab, f"{P}send-to-calibre")).click()
+    assert settings == ["send-to-calibre"]
 
 
-def test_changing_the_format_rebuilds_the_section(tab):
-    tab.format_group.set_current_key("slim")
+def test_refreshing_keeps_the_selection(tab, tmp_path):
+    """Installing a plugin rebuilds the list; it must not silently move the
+    user off the format they had chosen."""
+    tab.format_group.set_current_key("markdown")
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
-    assert _cards(tab) == []
-    tab.format_group.set_current_key("pdf")
+    assert tab.current_format() == "markdown"
+
+
+def _uninstall_ready(tmp_path):
+    from aglaia.app_data import plugin_registry as reg
+    from aglaia.workers import destinations as d
+    reg.uninstall("ready-dest")
+    d.forget("ready-dest")
+    d.reset_for_tests()
+
+
+def test_a_removed_destination_loses_its_card(tab, tmp_path):
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
-    assert _cards(tab)
+    assert f"{P}ready-dest" in _send_keys(tab)
+    _uninstall_ready(tmp_path)
+    tab.refresh_destinations()
+    assert f"{P}ready-dest" not in _send_keys(tab)
+
+
+def test_removing_the_selected_destination_falls_back_to_pdf(tab, tmp_path):
+    """A card that goes away while selected would otherwise leave the Export
+    button pointed at nothing."""
+    _install_ready_destination(tmp_path)
+    tab.refresh_destinations()
+    tab.format_group.set_current_key(f"{P}ready-dest")
+    _uninstall_ready(tmp_path)
+    tab.refresh_destinations()
+    assert tab.current_format() == "pdf"
 
 
 def test_forget_removes_a_destination_from_this_process(tab, tmp_path):
@@ -182,7 +210,7 @@ def test_forget_removes_a_destination_from_this_process(tab, tmp_path):
     d.reset_for_tests()
     tab.format_group.set_current_key("pdf")
     tab.refresh_destinations()
-    assert "Ready dest" not in [_texts(c)[0] for c in _cards(tab)]
+    assert f"{P}ready-dest" not in _send_keys(tab)
 
 
 def test_forget_alone_does_not_survive_the_next_discovery(tab, tmp_path):

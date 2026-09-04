@@ -158,20 +158,34 @@ round trip to be told "no" is a round trip wasted.
 
 ## Where they appear
 
-An installed export plugin is offered in the **Export tab**, under *Send to*,
-below the format cards — an export plugin that is not offered where the export
-happens is a plugin nobody uses. The section is filtered by the selected
-format (`destinations.for_format`), so a Markdown export never lists a
-destination that only takes PDFs: being told "not accepted" *after* the export
-ran is a thing to prevent, not to report. A format nothing accepts hides the
-heading too, rather than leaving an empty promise.
+An exporter is an exporter. An installed export plugin gets **the same card as
+PDF and Markdown**, in the same list, selected the same way, run by the same
+**Export** button (card key `send:<slug>`). It was briefly a separate *Send to*
+strip below the button with its own send buttons, which meant two ways to start
+an export and two shapes of control for one idea.
 
-A destination that is not configured shows what it still needs and offers
-**Set up…** instead of a Send button that would fail. Pressing **Send** exports
-normally — the user still chooses where the file lands and still has it
-afterwards — and then hands the written file to the plugin. Sending is a step
-on top of the export, never a different export, so a destination that fails
-does not cost the file.
+A destination that accepts more than one format Aglaïa can write gets a small
+**Export as** picker in the card's extras; one that accepts a single format
+resolves silently. Formats Aglaïa cannot produce never appear — Kindle accepts
+`epub` and `docx`, and the card offers neither.
+
+A destination that is not configured says **"Not set up yet — needs …"** on the
+card, and pressing Export opens its settings rather than running an export that
+would be thrown away.
+
+**The export goes to a private staging directory, not to a file the user
+names.** A file that exists only to be handed to calibre is a courier, not a
+deliverable: asking for a folder and a filename for something the user will
+never open is a dialog for nothing, and it invites the one failure a courier
+must not have — overwriting last week's export because both are called
+`Book.pdf`. Each send gets a fresh `mkdtemp`, so two sends of the same book
+cannot collide. The *filename* is kept exactly as the save dialog would have
+proposed it, because it is not incidental: Kindle attaches the file under that
+name, and calibre reads a book title out of it. The courier is deleted once the
+plugin has had it, whether the send succeeded or not.
+
+A normal export is untouched: still asked for, still kept, still revealed in
+the Finder.
 
 There is also a **plug icon** in the right-hand rail, above Settings, that
 opens the Plugins tab.

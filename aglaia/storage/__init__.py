@@ -12,6 +12,8 @@ from aglaia.storage.repo import (
 )
 from aglaia.storage.persister import Persister
 
+import re
+
 
 # ── Aglaïa project file conventions ──────────────────────────────────
 #
@@ -28,6 +30,47 @@ PROJECT_DIALOG_FILTER = (
     "Legacy projects (*.scanproj.sqlite);;"
     "All files (*)"
 )
+
+
+#: Characters that cannot go in a filename, or cannot go in one everywhere.
+#: `/` and NUL are refused by the POSIX API itself; the rest are illegal on
+#: Windows and would make a project unopenable the moment it is copied to a
+#: shared drive. Everything else the user typed is kept.
+_FS_HOSTILE = re.compile(r'[/\\<>:"|?*\x00-\x1f]')
+
+#: Windows refuses these as filenames whatever the extension.
+_RESERVED = {"CON", "PRN", "AUX", "NUL",
+             *(f"COM{i}" for i in range(1, 10)),
+             *(f"LPT{i}" for i in range(1, 10))}
+
+
+def safe_project_name(name: str) -> str:
+    """The user's project name, made safe to use as a filename — and no more.
+
+    Aglaïa used to slugify this: "Corpus Hermeticum vol. 2" became
+    `corpus-hermeticum-vol-2.agl`, and every export inherited the mangling.
+    Nothing needed it. The name is a filename stem, not a URL or an
+    identifier, and the app already round-trips arbitrary stems — opening
+    `Mon Livre.agl` has always given back the slug `Mon Livre`. Creation was
+    simply the one place that threw the user's capitals, spaces and accents
+    away.
+
+    So this only removes what a filesystem will actually refuse, and leaves
+    the rest alone.
+    """
+    name = _FS_HOSTILE.sub("-", str(name or ""))
+    name = re.sub(r"\s+", " ", name).strip()
+    # Windows silently strips trailing dots and spaces, which would leave the
+    # on-disk name disagreeing with the one we recorded. Edge dashes go too:
+    # a name of nothing but separators substitutes down to "---", and a
+    # leading one reads as a command-line flag everywhere it is pasted.
+    name = name.strip(". -")
+    if name.split(".")[0].upper() in _RESERVED:
+        name = f"{name}_"
+    # 255 BYTES, not characters — accented names hit it sooner than they look.
+    while len(name.encode("utf-8")) > 200:
+        name = name[:-1]
+    return name.strip(". -") or "project"
 
 
 def project_filename(slug: str) -> str:

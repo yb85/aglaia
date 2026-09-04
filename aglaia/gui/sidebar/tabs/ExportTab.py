@@ -69,15 +69,14 @@ QPushButton:disabled {{ background-color: {COLOR_FONT_DIM}; color: {COLOR_FONT_P
 class ExportTab(QWidget):
     """Format-cards picker + single Export button."""
 
-    #: A Send-to card was pressed. The host does the export and the send —
-    #: this tab knows which destination, not how to reach it.
-    send_to_requested = Signal(str)
     #: A destination that is not configured yet: open its settings.
     destination_settings_requested = Signal(str)
 
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        #: destination name -> its format combo (None when it takes only one)
+        self._dest_formats: dict[str, Optional[QComboBox]] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -202,6 +201,7 @@ class ExportTab(QWidget):
         )
 
         self.format_group.set_current_key("pdf")
+        self.refresh_destinations()
 
         # ── Why-is-this-greyed-out hint ────────────────────────────
         # The Markdown card and the PDF OCR-layer toggle both go dead
@@ -247,23 +247,6 @@ class ExportTab(QWidget):
         except Exception:
             pass
         outer.addWidget(self.btn_export)
-
-        # ── Send to (export plugins) ───────────────────────────────
-        # An installed export plugin is only useful if it is offered where
-        # the export happens. Filtered by the chosen format, so a Markdown
-        # export never offers a destination that only takes PDFs — being
-        # told "not accepted" after the export ran is a thing to prevent,
-        # not to report.
-        self._send_label = self._field_label(self.tr("Send to"))
-        outer.addWidget(self._send_label)
-        self._send_box = QWidget()
-        self._send_layout = QVBoxLayout(self._send_box)
-        self._send_layout.setContentsMargins(0, 0, 0, 0)
-        self._send_layout.setSpacing(6)
-        outer.addWidget(self._send_box)
-        self.format_group.currentChanged.connect(
-            lambda *_: self.refresh_destinations())
-        self.refresh_destinations()
 
         # Character-width normalisation — pipeline-controlled visibility.
         self.chk_norm_widths = QCheckBox(self.tr("Normalize character width"))
@@ -356,70 +339,102 @@ class ExportTab(QWidget):
         return self.combo_ocr_layer.currentData()
 
     # ── export plugins ────────────────────────────────────────────
-    def refresh_destinations(self) -> None:
-        """Rebuild the Send-to cards for the current format.
+    #: Card keys for plugin exporters are prefixed so they cannot collide
+    #: with a built-in format, and so the host can tell them apart with a
+    #: string test instead of a second lookup.
+    SEND_PREFIX = "send:"
 
-        Cheap and idempotent — called on format change and after a plugin is
-        installed or removed, so the section never lists something that is no
-        longer there."""
-        while self._send_layout.count():
-            it = self._send_layout.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
-        fmt = {"pdf": "pdf", "markdown": "md",
-               "slim": "agl"}.get(self.format_group.current_key() or "", "")
+    def refresh_destinations(self) -> None:
+        """Rebuild the exporter cards from the installed plugins.
+
+        An exporter is an exporter: a plugin that puts a finished export
+        somewhere gets the same card as PDF and Markdown, in the same list,
+        selected the same way, run by the same Export button. It was briefly
+        a separate "Send to" strip below the button, which meant two ways to
+        start an export and two shapes of control for one idea.
+
+        Cheap and idempotent — called after a plugin is installed or removed,
+        so the list never offers something that is no longer there."""
+        keep = self.format_group.current_key()
+        for key in self.format_group.keys():
+            if key.startswith(self.SEND_PREFIX):
+                self.format_group.remove_card(key)
         try:
             from aglaia.workers import destinations as _dest
-            dests = _dest.for_format(fmt) if fmt else []
+            dests = list(_dest.load_all().values())
         except Exception:
             dests = []
-        # Nothing installed that takes this format: hide the heading too,
-        # rather than leaving an empty label with a promise under it.
-        self._send_label.setVisible(bool(dests))
-        self._send_box.setVisible(bool(dests))
+        dests.sort(key=lambda d: (d.display or d.name).lower())
         for d in dests:
-            self._send_layout.addWidget(self._destination_card(d))
+            self._add_destination_card(d)
+        if keep and not self.format_group.set_current_key(keep):
+            self.format_group.set_current_key("pdf")
 
-    def _destination_card(self, dest) -> QWidget:
-        from aglaia.gui.colors import (COLOR_BG_OVERLAY_SOFT, COLOR_ERROR,
-                                       COLOR_FONT_PRIMARY, COLOR_OUTLINE_FAINT,
-                                       COLOR_SUCCESS)
-        card = QFrame()
-        card.setObjectName("sendCard")
-        card.setStyleSheet(
-            f"QFrame#sendCard {{ background: {COLOR_BG_OVERLAY_SOFT}; "
-            f"border: 1px solid {COLOR_OUTLINE_FAINT}; border-radius: 8px; }}")
-        row = QHBoxLayout(card)
-        row.setContentsMargins(10, 8, 10, 8)
-        row.setSpacing(8)
-
-        col = QVBoxLayout()
-        col.setSpacing(1)
-        name = QLabel(dest.display or dest.name)
-        name.setStyleSheet(
-            f"color: {COLOR_FONT_PRIMARY}; font-weight: 600; font-size: 12px;")
-        col.addWidget(name)
+    def _add_destination_card(self, dest) -> None:
+        from aglaia.gui.colors import COLOR_ERROR
         missing = dest.missing_settings()
-        state = QLabel(self.tr("Ready") if not missing
-                       else self.tr("Needs: {what}").format(
-                           what=", ".join(missing)))
-        state.setWordWrap(True)
-        state.setStyleSheet(
-            f"color: {COLOR_SUCCESS if not missing else COLOR_ERROR}; "
-            f"font-size: 10px;")
-        col.addWidget(state)
-        row.addLayout(col, 1)
+        # What the plugin will actually be handed. Only formats Aglaïa can
+        # produce count, so a destination that takes epub and pdf offers pdf
+        # and says nothing about epub.
+        formats = [f for f in ("pdf", "md") if f in dest.accepts]
 
-        btn = QPushButton(self.tr("Send") if not missing
-                          else self.tr("Set up…"))
+        extras = QWidget()
+        col = QVBoxLayout(extras)
+        col.setContentsMargins(0, 4, 0, 0)
+        col.setSpacing(4)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        combo = None
+        if len(formats) > 1:
+            row.addWidget(self._field_label(self.tr("Export as")))
+            combo = QComboBox()
+            for f in formats:
+                combo.addItem({"pdf": "PDF", "md": "Markdown"}[f], f)
+            combo.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
+            row.addWidget(combo, 1)
+        else:
+            row.addStretch(1)
+        btn = QPushButton(self.tr("Settings…"))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet("font-size: 10px; padding: 2px 8px;")
         btn.clicked.connect(
-            lambda _=False, d=dest, m=bool(missing):
-                (self.destination_settings_requested.emit(d.name) if m
-                 else self.send_to_requested.emit(d.name)))
+            lambda _=False, n=dest.name: self.destination_settings_requested.emit(n))
         row.addWidget(btn)
-        return card
+        col.addLayout(row)
+
+        if missing:
+            # A card that will refuse the moment it is used should say so
+            # before it is used, not after the export has already run.
+            warn = QLabel(self.tr("Not set up yet — needs {what}.").format(
+                what=", ".join(missing)))
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color: {COLOR_ERROR}; font-size: 10px;")
+            col.addWidget(warn)
+
+        self._dest_formats[dest.name] = combo
+        self.format_group.add_card(
+            f"{self.SEND_PREFIX}{dest.name}",
+            dest.display or dest.name,
+            dest.description or "",
+            icon_name="upload",
+            extras=extras,
+        )
+
+    def destination_format(self, name: str) -> str:
+        """Which export format the chosen destination card asks for."""
+        combo = self._dest_formats.get(name)
+        if combo is not None:
+            return str(combo.currentData() or "pdf")
+        try:
+            from aglaia.workers import destinations as _dest
+            d = _dest.load_all().get(name)
+            for f in ("pdf", "md"):
+                if d is not None and f in d.accepts:
+                    return f
+        except Exception:
+            pass
+        return "pdf"
 
     def current_format(self) -> Optional[str]:
         return self.format_group.current_key()
