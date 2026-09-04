@@ -31,6 +31,7 @@ os.environ.setdefault("ENABLE_PJRT_COMPATIBILITY", "1")
 # installs (full CUDA present) are unaffected. setdefault → user-overridable.
 os.environ.setdefault("JAX_SKIP_CUDA_CONSTRAINTS_CHECK", "1")
 
+from aglaia.processors import erase as _erase
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.batching import BatchableTrait, BatchItem
@@ -1340,6 +1341,13 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         )
         # Shift upstream ROI into padded coords — fallback paths return the
         # padded buffer as-is and would otherwise carry a misaligned ROI.
+        # Erase masks shift with it — the padding is a translation, and a
+        # mask left un-shifted would erase a band of the padding instead of
+        # the stamp.
+        _pre_shift = _erase.get(img_buf.meta)
+        if _pre_shift:
+            img_buf.meta[_erase.META_KEY] = _erase.transform_translate(
+                _pre_shift, pad_px, pad_px)
         if (roi := img_buf.meta.get("roi")):
             shifted = [[float(x) + pad_px, float(y) + pad_px] for x, y in roi]
             img_buf.meta["roi"] = shifted
@@ -1802,6 +1810,18 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                 roi_full[:, 0] *= scale_x
                 roi_full[:, 1] *= scale_y
                 img_buf.meta["roi"] = roi_full.tolist()
+
+        # Erase masks take the same trip, on the same decimated grid: there
+        # is no closed form for pushing a point through a sampling grid, so
+        # they are rasterised, remapped and read back as contours exactly as
+        # the ROI is. Done unconditionally — a page can carry an erase mask
+        # and no ROI.
+        _erase_polys = _erase.get(img_buf.meta)
+        if _erase_polys:
+            img_buf.meta[_erase.META_KEY] = _erase.transform_remap(
+                _erase_polys, img.shape, im_x_dec, im_y_dec,
+                scale_x=target_w / float(w_small),
+                scale_y=target_h / float(h_small))
 
         # OOB stats
         oh, ow = img.shape[:2]

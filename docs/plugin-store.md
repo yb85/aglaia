@@ -108,7 +108,9 @@ per-kind history.
   "plugins": [
     {
       "slug": "deskew-hough", "kind": "processors", "version": "1.2.0",
-      "name": "Hough deskew", "summary": "…", "author": "…",
+      "name": "Hough deskew", "summary": "…",
+      "author": "Jane Doe",           // shown in the install disclaimer
+      "source_url": "https://github.com/yb85/aglaia-plugins/tree/<sha>/processors/deskew-hough",
       "license": "MIT", "homepage": "…",
       "requires": { "aglaia": ">=0.1.0rc5,<0.2", "python": ">=3.12" },
       "capabilities": { "secrets": false, "network": false, "config": true },
@@ -126,6 +128,10 @@ against a public key **compiled into the app**, and refuses the index outright
 on mismatch. A compromised CDN or a hijacked repo cannot inject a plugin
 without the signing key. The key lives offline; CI does not hold it — signing
 is a release step, like notarization.
+
+`source_url` is pinned to the **merged commit**, not to `main`: the install
+dialog links to the code that was actually reviewed, and it keeps pointing
+there after the plugin is updated.
 
 `revoked` is the kill switch: an entry there disables that plugin at next
 index refresh, with the reason shown to the user.
@@ -338,10 +344,29 @@ is a thing a reviewer should ask about.
    configurable interval.
 2. **Verify.** Signature over `index.json`; per-file sha256 on download;
    `requires.aglaia` and `requires.api` checked against the running host.
-3. **Consent.** A capability sheet — what it declares, what it imports, who
-   wrote it, which version — and an **Install** button. No typing: this one was
-   reviewed, and demanding a ritual for the safe path devalues the ritual on
-   the dangerous one.
+3. **Consent.** A capability sheet — what it declares, what it imports, which
+   version — above a disclaimer that names the person it actually came from:
+
+   > Reviewed and merged into the Aglaïa plugin registry. It was **written and
+   > submitted by Jane Doe**, not by Aglaïa, and it runs with the same access
+   > to your files as Aglaïa itself.
+   >
+   > [Read the source](https://github.com/yb85/aglaia-plugins/tree/main/processors/deskew-hough) · deskew-hough 1.2.0 · MIT
+
+   The source link is built from the index entry (`kind/slug` at the merged
+   commit), so it points at the exact code that was reviewed, not at whatever
+   `main` holds today. Reviewing something does not make it ours, and a user
+   who is going to run a stranger's code should be told whose it is and be one
+   click from reading it.
+
+   The button says **I trust the code and/or its author** — not "Install".
+   "and/or" is doing real work: a reader who checked the diff and a reader who
+   knows Jane are both consenting truthfully, and neither has to pretend to
+   the other's grounds.
+
+   Still no typed sentence here. The registry tier already has a human review
+   behind it; reserving the ritual for the unreviewed tier is what keeps the
+   ritual meaningful.
 4. **Install.** Extract to `<APP_DATA>/plugins/<kind>/<slug>/`, record
    `source="registry"`, version, per-file hashes, and the manifest in the
    `plugins` table. Load without restart where the kind allows it; OCR engines

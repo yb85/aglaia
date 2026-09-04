@@ -28,6 +28,7 @@ import cv2
 import numpy as np
 
 from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors import erase as _erase
 from aglaia.Status import Status
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.geometry import (
@@ -799,7 +800,11 @@ class TrapezoidalCorrection(AbstractImageProcessor):
             pts = np.array(old_roi, dtype=np.float32).reshape(-1, 1, 2)
             new_pts = cv2.perspectiveTransform(pts, H_total.astype(np.float64))
             out.meta["roi"] = new_pts.reshape(-1, 2).tolist()
-        else:
+        # Erase masks go through the same homography, ROI or not.
+        _erase.carry(buf.meta, out.meta,
+                     lambda ps: _erase.transform_perspective(
+                         ps, H_total.astype(np.float64)))
+        if not buf.meta.get("roi"):
             # No upstream ROI — use the rectified column quad as ROI.
             out.meta["roi"] = [
                 [0.0, 0.0],
@@ -889,6 +894,8 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         # Passthrough: image unchanged, propagate ROI so downstream
         # Binarizer can still mask off the non-page area. Default to the
         # full image rect if no upstream ROI.
+        # Image unchanged, so the erase masks travel as they are.
+        _erase.carry(buf.meta, out.meta)
         if (roi := buf.meta.get("roi")):
             out.meta["roi"] = roi
         else:

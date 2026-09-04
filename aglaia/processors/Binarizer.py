@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from dataclasses import dataclass, field, make_dataclass
 from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors import erase as _erase
 from aglaia.processors.utils import to_gray, to_rgb, is_binary
 from aglaia.processors.abstraction import (
     AbstractImageProcessor, AbstractProcessorOption, ReplayTrait, _fmt_value,
@@ -124,6 +125,12 @@ def _build_binarizer_options() -> Dict[str, Any]:
         "to a global cut.",
         visible_when={"method": ["bernsen"]},
     )
+    opts["erase_grow"] = _i(
+        2, 0, 32,
+        "Erase masks (meta.erase — e.g. from StampRemover): grow the polygon "
+        "by N px when whitening it after binarisation. The mirror of "
+        "roi_shrink: it takes with it any one-pixel rim the binariser "
+        "produced at the boundary.", advanced=True)
     opts["roi_shrink"] = _i(
         2, 0, 50,
         "If meta.roi is set, erode the mask N iterations before applying.",
@@ -149,6 +156,7 @@ def _build_binarizer_option_class():
         ("method", str, "wolf++"),
         ("bernsen_contrast", int, 15),
         ("roi_shrink", int, 2),
+        ("erase_grow", int, 2),
         ("morpho_close", int, 0),
         ("extra", Any, field(default_factory=dict)),
     ]
@@ -207,6 +215,7 @@ def _build_binarizer_option_class():
 
         self.bernsen_contrast = int(kwargs.pop("bernsen_contrast", 15))
         self.roi_shrink = kwargs.pop("roi_shrink", 2)
+        self.erase_grow = kwargs.pop("erase_grow", 2)
         # Clamp to the spec range so a stray yaml value can't drag a
         # huge kernel through cv2 and tank a scan's elapsed_ms.
         mc = int(kwargs.pop("morpho_close", 0))
@@ -422,13 +431,33 @@ class Binarizer(AbstractImageProcessor):
         if img_buf.type == ImageType.BW:
             return img_buf
 
-        # No pre-binarisation bg-fill — interior lighting gradients still
-        # produce ink rings and halo erosion clips text on tight bboxes.
-        # Use the post-mask erosion path instead.
+        # No pre-binarisation bg-fill for the ROI — interior lighting
+        # gradients still produce ink rings and halo erosion clips text on
+        # tight bboxes. Use the post-mask erosion path instead.
+        #
+        # Erase masks (`meta["erase"]`) ARE pre-filled, and the difference is
+        # the reason: a stamp is a small local region, so the paper level is
+        # measured from a ring around each one rather than once for the page.
+        # That is what the abandoned ROI fill could not do. See
+        # `processors/erase.py`.
 
         # DOXA takes Gray
         if self.mode == "DOXA":
             gray = img_buf.to_gray()
+            erase_polys = _erase.get(img_buf.meta)
+            if erase_polys:
+                # Half a window plus a safety margin: Wolf's window has to be
+                # able to sit centred on the polygon edge and still see only
+                # paper on the erased side, or it marks a ring along it.
+                halo = max(_erase.DEFAULT_HALO_PX,
+                           self._resolve_window_px(img_buf) // 2 + 4)
+                n = _erase.fill_with_paper(
+                    gray, erase_polys, halo_px=halo,
+                    roi_polygon=img_buf.meta.get("roi"))
+                if self.debug_enabled():
+                    print(f"[{self.name}] erase: filled {n}px across "
+                          f"{len(erase_polys)} region(s) before binarising",
+                          flush=True)
             try:
                 self.binarizer.initialize(gray)
                 binary = np.empty_like(gray)
@@ -461,8 +490,25 @@ class Binarizer(AbstractImageProcessor):
                 "k": float(current_params.get("k", k_default)),
                 "roi_shrink": int(self.options.roi_shrink),
                 "morpho_close": int(self.options.morpho_close),
+                # PROVENANCE ONLY — `apply_replay` must not use these. They
+                # are in this step's input frame, and replay binarises a
+                # differently-sized fused composite, so applying them there
+                # would erase the wrong part of the page. Replay handles erase
+                # regions through the MASK instead: the producing processor
+                # punches its polygons out of the ROI mask, which is already
+                # carried through every geometric step, and `wolf_masked` then
+                # excludes them from the local statistics and the final
+                # `np.where(mask, bw, 255)` whitens them. That is a truer
+                # statistics exclusion than the forward pass's paper fill, and
+                # it costs nothing extra. Kept here so a node still records
+                # what was erased and by whom.
+                "erase": erase_polys,
+                "erase_grow": int(self.options.erase_grow),
             }
             self._apply_roi_mask(img_buf)
+            if erase_polys:
+                _erase.whiten(img_buf.buffer, erase_polys,
+                              grow=int(self.options.erase_grow))
             if self.morpho_close_n() > 0:
                 img_buf.buffer = morpho_close(
                     img_buf.buffer, self.morpho_close_n(),

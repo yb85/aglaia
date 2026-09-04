@@ -125,6 +125,71 @@ differently-sized frame is refused and detection resumes, like every other
 spatial override. It outranks a per-branch `roi`, which was drawn on a crop
 that may no longer be the same shape.
 
+## Erase masks (`aglaia/processors/erase.py`)
+
+`meta["roi"]` names the region to **keep**. `meta["erase"]` names regions to
+**drop** — a list of polygons in the coordinates of the buffer carrying them.
+It is a general facility, not one plugin's private arrangement: any processor
+that can find something the page should not contain (a library stamp, an
+owner's inscription, a barcode label, a finger) says so by appending a polygon,
+and the `Binarizer` consumes them.
+
+Polygons rather than rasters, because the region has to survive the geometry —
+deskew rotates, keystone applies a homography, dewarp remaps a curved sheet,
+and the mask must arrive at the binarizer sitting exactly where the stamp is.
+`roi` already makes that trip. **The rule for carriers is one line: if you
+transform `roi`, transform `erase` on the same line.** A mask left at the old
+coordinates erases the wrong part of the page, silently. `erase.py` provides
+`transform_affine`, `transform_perspective`, `transform_translate`,
+`transform_remap` and `carry` so no carrier has to invent it.
+
+### Removing a region without leaving a rim
+
+Painting the stamp white before binarizing is the obvious move and it is wrong
+twice:
+
+* **A hard white patch is a strong local edge.** Wolf's threshold comes from a
+  window's mean and variance; a window straddling the boundary sees a step and
+  marks a black ring along it — a spurious blob exactly where the user asked
+  for nothing.
+* **Wolf is globally sensitive to a dark region.** Its formula uses the image's
+  global minimum grey, so a big black stamp shifts thresholds across the whole
+  page. Removing it before binarizing *is* a statistics exclusion — which is
+  why "exclude from the statistics" and "paint it out" are two halves of one
+  operation, not two competing options.
+
+So the forward pass (`fill_with_paper`) fills each region with the **paper
+level measured from a ring just outside it** — not white, and not one value
+for the page. The `Binarizer` once had a global bg-fill for the ROI and gave
+it up (`"interior lighting gradients still produce ink rings"` —
+`_fill_outside_roi_with_bg`, now dead code); the lesson is that one paper level
+cannot serve a page that is brighter at one edge, and a fill that does not
+match its surroundings *is* the step it was meant to remove. Locally, the ring
+value is the paper. The fill extends a halo of at least half a Wolf window
+outside the polygon, so a window centred on the edge sees only paper on the
+erased side.
+
+After binarizing, `whiten` fills the polygon pure white with `LINE_8` — never
+`LINE_AA`, since an anti-aliased edge is a row of mid-greys and a mid-grey
+beside a threshold is a black pixel — grown by `erase_grow` (default 2, the
+mirror of `roi_shrink`) to take any surviving rim with it.
+
+### In replay
+
+Replay carries a keep-mask through every geometric step and binarises once at
+the end with `wolf_masked`, which already skips masked-out pixels when
+computing its local statistics and whitens them afterwards. That is exactly
+what an erase region needs, and it is *better* than the forward pass's fill: a
+true exclusion rather than a substitution approximating one. So in replay an
+erase region is not painted at all — the producing processor subtracts it from
+the keep-mask (`erase.punch`) at the point in the chain where it was found, and
+it rides the geometry to the final binarize for free.
+
+The forward binarize stamps `erase` into `replay_params` as **provenance
+only**. Those coordinates are in its own input frame; replay binarises a
+differently-sized fused composite, so applying them there would erase the wrong
+part of the page.
+
 ## Binarizer (`aglaia/processors/Binarizer.py`)
 
 ![Local adaptive binarization: an unevenly-lit page (left) becomes clean black-on-white text (right), the shadow gradient removed.](figures/binarize_example.jpg)

@@ -10,6 +10,7 @@ import numpy as np
 import math
 from dataclasses import dataclass
 from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors import erase as _erase
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.manual import manual_value, stamp_manual
 from aglaia.processors.option_specs import _b, _f, _i
@@ -197,6 +198,13 @@ class SkewFinder(AbstractImageProcessor):
             pts = old_roi.reshape((-1, 1, 2))
             new_pts = cv2.transform(pts, M)
             img_buf.meta["roi"] = new_pts.reshape((-1, 2)).tolist()
+            # Erase masks ride the same rotation. If you transform `roi`,
+            # transform `erase` on the same line — a mask left at the old
+            # coordinates erases the wrong part of the page, silently.
+            _polys = _erase.get(img_buf.meta)
+            if _polys:
+                img_buf.meta[_erase.META_KEY] = _erase.transform_affine(
+                    _polys, M)
 
             # Check binary integrity. NEAREST warp preserves binarity,
             # CUBIC never yields a binary result — input_is_bw already
