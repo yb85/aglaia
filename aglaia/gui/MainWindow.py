@@ -3338,12 +3338,37 @@ class MainWindow(QMainWindow):
             "scans (including any page selection) and re-enqueues "
             "the raw inputs."
         ).format(n=n)
-        reply = QMessageBox.question(
-            self, self.tr("Force rerun"), msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(self.tr("Force rerun"))
+        box.setText(msg)
+        box.setInformativeText(self.tr(
+            "Manual per-page tuning (deskew angle, page ROI, dewarp curl) "
+            "survives a rerun — the pages come back as you corrected them. "
+            "Clear it only if you want the pipeline's own estimate back."))
+        run_btn = box.addButton(self.tr("Reprocess all"),
+                                QMessageBox.ButtonRole.AcceptRole)
+        # DestructiveRole so the platform places it as such; the colour says
+        # the rest. This one throws away work the user did BY HAND, which no
+        # rerun can recover.
+        wipe_btn = box.addButton(self.tr("Reprocess all and clear manual "
+                                         "overrides"),
+                                 QMessageBox.ButtonRole.DestructiveRole)
+        wipe_btn.setStyleSheet(
+            f"QPushButton {{ color: {COLOR_ERROR}; "
+            f"border: 1px solid {COLOR_ERROR}; }}")
+        cancel_btn = box.addButton(self.tr("Cancel"),
+                                   QMessageBox.ButtonRole.RejectRole)
+        # macOS sizes message-box buttons to a default width and clips these
+        # labels; widen each to its own text.
+        for _b in (run_btn, wipe_btn, cancel_btn):
+            _b.setMinimumWidth(_b.sizeHint().width() + 28)
+        box.setDefaultButton(cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is cancel_btn or clicked is None:
+            return
+        if clicked is wipe_btn and not self._clear_manual_overrides():
             return
         try:
             self._force_reprocess_callback()
@@ -3361,6 +3386,26 @@ class MainWindow(QMainWindow):
         # Broadcast now so badges + the OCR frame's pending count refresh
         # immediately, not only after the first branch_ready.
         self.ocr_state_changed.emit()
+
+    def _clear_manual_overrides(self) -> bool:
+        """Drop every per-page manual override in the project. Returns
+        whether the rerun should go ahead.
+
+        Only `manual_overrides` (M9): the per-page step DISABLES live in
+        `step_overrides` and have their own toggles in the three scan views,
+        so wiping them from a button labelled "manual overrides" would be a
+        surprise the user cannot undo either."""
+        try:
+            with db_session(str(self.db_path)) as conn:
+                conn.execute("DELETE FROM manual_overrides")
+                conn.commit()
+        except Exception as e:
+            QMessageBox.critical(
+                self, self.tr("Force rerun"),
+                self.tr("Could not clear the manual overrides: {err}")
+                .format(err=e))
+            return False
+        return True
 
     def _on_stop_pipeline_clicked(self) -> None:
         if self._stop_pipeline_callback is None:

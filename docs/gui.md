@@ -153,6 +153,13 @@ the **Reprocess** button lights up, and is dimmed while auto-process is on
 because there would be nothing for it to do. **Clear override** drops this
 layout's stored values and restores the automatic result.
 
+Manual tuning **survives a force rerun**: the pages come back as they were
+corrected. The Force-rerun dialog therefore offers three ways out — *Cancel*,
+*Reprocess all*, and *Reprocess all and clear manual overrides* (in the danger
+colour: it throws away work done by hand, which no rerun can recover). The
+third clears `manual_overrides` only; the per-page step **disables** live in
+`step_overrides` and keep their own toggles in the scan views.
+
 The slider ranges are chosen for manual tuning, not for the solver's freedom:
 curl is clamped at ±0.5 internally but a page past ±0.35 is already extreme,
 and a full-width slider over the solver's range would make every useful value
