@@ -66,5 +66,6 @@ PageDewarper	thickness_char_mult	bounded_float	TEXT_MAX_THICKNESS = mult × medi
 PageDewarper	edge_max_length_char_mult	bounded_float	EDGE_MAX_LENGTH = mult × median char height. Max gap between atoms the span-builder will link.	false	3.0
 PageDewarper	processing_dpi	bounded_float	Downsample to this DPI for span analysis; full-res for the remap.	false	150.0
 PageDewarper	norm_width	bool	Surface the 'Normalize character width' checkbox in the GUI (pre-ticked).	true	false
-MarginSetter	margin_mm	string	CSS-style margin in mm. "10" all sides; "10 20" V H; "10 20 30 40" L R T B.	false	5
+MarginSetter	margin_mm	string	CSS-style margin in mm. "10" all sides; "10 20" V H; "10 20 30 40" L R T B.	false	2
 MarginSetter	margin_px	string	Same as margin_mm but in pixels (overrides margin_mm when set).	false	
+MarginSetter	width_floor	bool	Pad back out to the step's input width when the cropped page is narrower. Overrides the horizontal margin with the dewarp canvas's leftover whitespace — leave off unless you need every page at least as wide as the dewarp made it.	true	false

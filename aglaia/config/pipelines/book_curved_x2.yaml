@@ -98,5 +98,5 @@ pipeline:
 - name: output_margin
   processor: MarginSetter
   options:
-    margin_mm: 5
+    margin_mm: 2
 replay: true
