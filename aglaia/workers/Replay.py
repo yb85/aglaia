@@ -35,6 +35,7 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
+from aglaia.processors import erase as _erase
 from aglaia.processors.replay_transform import (
     AffineTransform, ReplayContext, interp_for, remap_by_coords,
 )
@@ -66,6 +67,42 @@ def _trait_rank(processor_name: Optional[str]) -> int:
     """Replay-order rank from a processor's REPLAY_TRAIT: COORDINATE (0) →
     PIXEL_VALUE (1) → ROI (2). Unknown/untagged → 0 (ordered by step_idx)."""
     return _TRAIT_RANK.get(_node_trait(processor_name), 0)
+
+
+def _anchor_erase(source_node: dict, nodes: list[dict],
+                  anchor_shape) -> tuple[list, str]:
+    """Erase polygons expressed in the ANCHOR's frame, or nothing.
+
+    Walks the segment in pipeline order and takes the first node that carries
+    `meta["erase"]`. Its polygons are only usable here if nothing has moved
+    the pixels between the anchor and it — which is true when the producer
+    runs straight after the layout split, the place a stamp finder belongs,
+    and false otherwise. The check is the node's own image size against the
+    anchor's: cheap, and it fails in the safe direction.
+
+    Returns `(polygons, note)`; the note travels into the replay summary so a
+    skipped erase is visible rather than silent."""
+    src_erase = _erase.get(source_node.get("meta") or {})
+    if src_erase:
+        return src_erase, ""
+    h_a, w_a = int(anchor_shape[0]), int(anchor_shape[1])
+    for n in sorted(nodes, key=lambda d: int(d.get("step_idx") or 0)):
+        polys = _erase.get(n.get("meta") or {})
+        if not polys:
+            continue
+        wh = (n.get("meta") or {}).get("frame_wh") or n.get("image_wh")
+        if wh:
+            try:
+                if int(wh[0]) != w_a or int(wh[1]) != h_a:
+                    return [], (
+                        f"erase regions from {n.get('step_name')} were drawn "
+                        f"on a {wh[0]}x{wh[1]} frame but replay anchors on "
+                        f"{w_a}x{h_a}; skipped rather than applied to the "
+                        f"wrong pixels")
+            except (TypeError, ValueError, IndexError):
+                pass
+        return polys, ""
+    return [], ""
 
 
 def _ordered_replay_steps(nodes: list[dict]) -> list[dict]:
@@ -265,6 +302,22 @@ def replay_branch(conn: sqlite3.Connection, scan_id: int,
     else:
         mask[:] = 255
 
+    # Erase regions (meta["erase"]) are punched OUT of that mask here, at the
+    # anchor, so they ride every coordinate transform with it and the final
+    # `wolf_masked` both excludes them from its local statistics and whitens
+    # them. That is a truer exclusion than the forward pass's paper fill.
+    #
+    # Here and not as a step: erase-producing processors are PIXEL_VALUE, and
+    # `_ordered_replay_steps` sorts those AFTER the coordinate fusion — their
+    # polygons would be in the pre-warp frame by then and would erase the
+    # wrong part of the page. The frame is checked rather than assumed: a
+    # producer that sits after a geometric step is skipped with a note, not
+    # applied blind.
+    erase_polys, erase_note = _anchor_erase(source_node, candidate_nodes,
+                                            (h_src, w_src))
+    if erase_polys:
+        mask = _erase.punch(mask, erase_polys, (h_src, w_src))
+
     steps = _ordered_replay_steps(candidate_nodes)
     if not steps:
         raise ValueError("No replay-participating nodes")
@@ -311,6 +364,8 @@ def replay_branch(conn: sqlite3.Connection, scan_id: int,
 
     return buf, {
         "replay_applied": applied,
+        "replay_erase": len(erase_polys),
+        "replay_erase_note": erase_note,
         "n_steps_total": len(nodes),
         "n_replay_steps": len(steps),
     }

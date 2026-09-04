@@ -63,6 +63,14 @@ Built and shipping:
   `scripts/build_plugin_index.py` generating `index.json` and CI checking that
   the committed copy is current.
 
+* Plugin-contributed **windows**: `PluginWindow` + `register_window`, gated on
+  a declared `ui` capability, listed under a *Plugins* menu grouped by slug
+  (`aglaia/workers/plugin_windows.py`). `PySide6` joins a plugin's allow-list
+  only with that capability — which does not widen what a plugin *could* do,
+  since it already runs in-process, but does put "adds a window" in the
+  install dialog and tells a reviewer to look harder: a plugin that can draw
+  can draw something that looks like Aglaïa asking for a password.
+
 **Not built: the index signature.** It needs an offline signing key and a
 release step. Until then the index is fetched over HTTPS and every file is
 verified against the sha256 the index gives for it, and `IndexResult.signed`

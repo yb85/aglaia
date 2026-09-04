@@ -830,6 +830,10 @@ class MainWindow(QMainWindow):
             self._view_mode_actions[_mode] = a
 
         # Help menu — docs link, diagnostics, bug report, about.
+        # Plugin-contributed windows, grouped under the owning plugin's name
+        # so two plugins cannot collide even with the same window title.
+        self._build_plugin_menu(mb, _act)
+
         help_menu = mb.addMenu(self.tr("Help"))
         help_menu.addAction(_act(
             self.tr("Aglaïa Documentation"), None, self._open_docs))

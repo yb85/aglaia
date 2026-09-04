@@ -51,6 +51,15 @@ from aglaia.processors.abstraction import (                    # noqa: E402
 from aglaia.processors.utils import (                          # noqa: E402
     is_binary, to_bw, to_gray, to_rgb,
 )
+# Erase masks (`meta["erase"]`): a processor that finds something the page
+# should not contain says so with `add_erase`, and the host removes it —
+# through the geometry, out of the binarizer's statistics, and white in the
+# output. See `docs/processors.md`. Exposed here because a plugin must not
+# reach into `aglaia.processors` for it; the import scan refuses that, and it
+# refused the first draft of StampRemover for exactly this.
+from aglaia.processors.erase import (                          # noqa: E402
+    add as add_erase, get as get_erase,
+)
 from aglaia.workers.ocr.engine import (                        # noqa: E402
     OcrEngine, OcrLine, OcrResult, register as register_ocr_engine,
 )
@@ -243,6 +252,48 @@ class Destination:
         raise NotImplementedError
 
 
+# ── plugin-owned windows ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class PluginWindow:
+    """A window a plugin contributes, listed under *Plugins* in the menu bar.
+
+    Some plugins need a workspace, not a settings form: a stamp library wants
+    to show snippets and let you trace a polygon on one. `Field` cannot
+    express that, and inventing a UI description language that could would be
+    a worse answer than letting the plugin build the widget.
+
+    So `factory(ctx) -> QWidget` is a real Qt widget, and a plugin that wants
+    one declares `ui = true` in its manifest — which puts `PySide6` on its
+    import allow-list and puts "adds a window" in the install dialog.
+
+    **This changes nothing about the threat model** (`docs/plugin-store.md`
+    §1): a plugin already runs in-process with the host's privileges, and
+    could import Qt whether or not the scan allowed it. What it does change is
+    what a *reviewer* looks for, and the guidelines say it: a plugin that can
+    draw can draw something that looks like Aglaïa asking for a password. UI
+    plugins get read harder.
+    """
+
+    key: str
+    title: str
+    factory: Any            # Callable[[PluginContext], QWidget]
+    menu: str = "Plugins"
+    #: Shown beside the entry; keep it to a few words.
+    summary: str = ""
+
+
+#: Populated by `@register_window`, keyed by the owning plugin's slug.
+WINDOW_REGISTRY: dict[str, list[PluginWindow]] = {}
+
+
+def register_window(slug: str, window: PluginWindow) -> PluginWindow:
+    """Contribute a window. The host groups entries under the plugin's name,
+    so two plugins cannot collide in the menu even with the same title."""
+    WINDOW_REGISTRY.setdefault(str(slug), []).append(window)
+    return window
+
+
 #: Populated by `@register_destination`.
 DESTINATION_REGISTRY: dict[str, type[Destination]] = {}
 
@@ -263,10 +314,13 @@ __all__ = [
     "AbstractImageProcessor", "AbstractProcessorOption", "ReplayTrait",
     "option_bool", "option_enum", "option_float", "option_int", "option_str",
     "to_gray", "to_rgb", "to_bw", "is_binary",
+    "add_erase", "get_erase",
     # ocr
     "OcrEngine", "OcrResult", "OcrLine", "register_ocr_engine",
     # destinations
     "Destination", "DESTINATION_REGISTRY", "register_destination",
+    # windows
+    "PluginWindow", "WINDOW_REGISTRY", "register_window",
     "Field", "BookMeta", "SendResult", "CheckResult",
     # context
     "PluginContext", "PluginConfig", "PluginSecrets",

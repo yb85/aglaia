@@ -80,6 +80,9 @@ STDLIB_REFUSED = frozenset({
 #: supply-chain surface, and is why this list can be closed rather than open.
 THIRD_PARTY_ALLOWED = frozenset({
     "numpy", "cv2", "scipy", "PIL", "yaml", "httpx",
+    # Only meaningful with `ui = true`; declaring it without is refused the
+    # same way `httpx` is refused without `network`.
+    "PySide6",
 })
 
 #: Only with `network = true` in the manifest.
@@ -113,18 +116,20 @@ class Manifest:
     secrets: bool = False
     network: bool = False
     files: bool = False
+    ui: bool = False
 
     @property
     def capabilities(self) -> dict[str, bool]:
         return {"config": self.config, "secrets": self.secrets,
-                "network": self.network, "files": self.files}
+                "network": self.network, "files": self.files, "ui": self.ui}
 
     def declared(self) -> list[str]:
         """Capability names that are on, for the install dialog."""
         labels = {"config": "its own settings",
                   "secrets": "stores secrets in your keychain",
                   "network": "network access",
-                  "files": "reads/writes files outside its own folder"}
+                  "files": "reads/writes files outside its own folder",
+                  "ui": "adds a window to the Plugins menu"}
         return [labels[k] for k, v in self.capabilities.items() if v]
 
 
@@ -192,6 +197,11 @@ def parse_manifest(path: Path, *, kind: Optional[str] = None,
             raise ManifestError(
                 f"{mod!r} talks to the network, so the manifest must declare "
                 f"capabilities.network = true")
+        if mod == "PySide6" and not bool(caps.get("ui", False)):
+            raise ManifestError(
+                "PySide6 draws windows, so the manifest must declare "
+                "capabilities.ui = true — it is what puts 'adds a window' in "
+                "the install dialog")
 
     return Manifest(
         slug=slug, kind=kind or "", name=str(plugin.get("name") or slug),
@@ -205,6 +215,7 @@ def parse_manifest(path: Path, *, kind: Optional[str] = None,
         config=bool(caps.get("config", False)),
         secrets=bool(caps.get("secrets", False)),
         network=network, files=bool(caps.get("files", False)),
+        ui=bool(caps.get("ui", False)),
     )
 
 
@@ -259,7 +270,17 @@ def scan_source(source: str, man: Optional[Manifest] = None) -> ScanResult:
 
     declared = set(man.imports) if man else set()
 
+    ui_ok = bool(man and man.ui)
+
     def classify(mod: str, full: str) -> None:
+        if mod == "PySide6":
+            # The widest surface a plugin gets, and only on request. It does
+            # not widen what a plugin COULD do — it already runs in-process —
+            # but it does mean it can draw, so the capability puts "adds a
+            # window" in the install dialog and tells a reviewer to look
+            # harder (docs/plugin-store.md §1).
+            (res.allowed if ui_ok else res.undeclared).append(full)
+            return
         if mod == "aglaia":
             # Only the façade. Everything else under `aglaia` is internal and
             # may move without notice.

@@ -190,6 +190,21 @@ only**. Those coordinates are in its own input frame; replay binarises a
 differently-sized fused composite, so applying them there would erase the wrong
 part of the page.
 
+### Who produces one
+
+`StampRemover` (a registry plugin, `processors/stamp-remover`) is the first
+producer: it matches a library stamp by SIFT against a user-built library and
+appends the matched exclusion polygon. It changes **no pixels** — it finds, and
+the host removes. That split is why the plugin is small and why the removal is
+correct in replay as well as in the forward pass.
+
+Placement matters and is not a suggestion: an erase producer belongs right
+after the layout split, before any geometric step. Replay folds erase regions
+into its keep-mask **at the anchor**, so a producer sitting after a warp has
+polygons in the wrong frame by then; `_anchor_erase` checks the frame and skips
+with a note rather than erasing the wrong pixels — meaning a badly-placed
+producer works in the forward pass and quietly does nothing on replay.
+
 ## Binarizer (`aglaia/processors/Binarizer.py`)
 
 ![Local adaptive binarization: an unevenly-lit page (left) becomes clean black-on-white text (right), the shadow gradient removed.](figures/binarize_example.jpg)
