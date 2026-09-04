@@ -88,9 +88,18 @@ Both live in `engine.py` (one place for picker, env, and DB key):
 
 `mistral_cloud` needs an API key. Stored in the OS keychain via `keyring`
 (macOS Keychain / Windows Credential Locker / Linux Secret Service), with
-a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain backend is
-available (`aglaia/app_data/secrets.py`). The key never touches the project
-DB or the config DB. Install with `uv sync --extra cloud`.
+a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain is reachable
+(`aglaia/app_data/secrets.py`). The key never touches the project DB or the
+config DB. Install with `uv sync --extra cloud`.
+
+**`keyring` ships in that same `cloud` extra**, and the usual dev syncs
+(`--extra dev --extra gui --extra macos`) leave it out — so a source checkout
+can have `mistralai` and no keychain at all, and the key lands in the
+plaintext `.env`. `secrets.keychain_backend()` returns `(False,
+"not_installed")` for that and `(False, "no_backend")` for a real absence of
+any store, and the GUI names which one rather than blaming the OS keychain
+(#107). The shipped macOS app always includes `cloud`, so this only bites
+from source.
 
 ## Mistral batch OCR (async, cheaper)
 
@@ -116,7 +125,14 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
 3. **Check result** — polls each pending job; for `SUCCESS`, downloads the
    output JSONL and writes each page's markdown back to its OCR run via
    `ocr_repo.finish` (dims from `ocr_runs → nodes → images`), then marks the
-   job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs.
+   job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs. It is
+   re-clickable: the poll runs in a `MistralBatchWorker` QThread handed to
+   `MainWindow._track_worker(…, attr="_batch_worker")`, which clears the
+   owning attribute when the thread ends. Leaving it set left a
+   `deleteLater`-freed husk there, and `isRunning()` on a husk raises rather
+   than returning False — so one click on a not-yet-ready job disabled the
+   button for the whole session (#111). `_worker_alive` is the guard that
+   treats "already deleted" as "not running".
 4. **Jobs tab** — *View → Mistral OCR jobs…* (or the card's **Jobs** pill):
    a zebra table of every Aglaïa job on the account (`batch.jobs.list`,
    newest first); the job's `aglaia_project` metadata is a clickable link

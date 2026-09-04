@@ -18,13 +18,16 @@ import os
 import pytest
 
 # `keyring` ships with the `cloud` extra (Mistral key storage). CI syncs only
-# `dev`, so skip this module's keychain-fallback tests when it's absent —
-# secrets.py itself imports keyring lazily and degrades to the .env path.
-pytest.importorskip("keyring")
+# `dev`, so the fixture below skips when it's absent — secrets.py itself
+# imports keyring lazily and degrades to the .env path. The
+# `keychain_backend` tests do NOT take that fixture: reporting a missing
+# PACKAGE as a missing BACKEND is exactly the bug (#107), and the case worth
+# covering everywhere is the one where keyring is not installed.
 
 
 @pytest.fixture()
 def sec(tmp_path, monkeypatch):
+    pytest.importorskip("keyring")
     monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     import aglaia.app_data as ad
@@ -89,3 +92,55 @@ def test_keychain_read_prompts_only_on_macos(sec, monkeypatch):
     for plat, prompts in (("darwin", True), ("linux", False), ("win32", False)):
         monkeypatch.setattr(sec.sys, "platform", plat)
         assert sec.keychain_read_prompts() is prompts
+
+
+# ── keychain availability, and WHY not ────────────────────────────────
+
+def test_keychain_backend_reports_a_missing_package_as_such(monkeypatch):
+    """`import keyring` failing is a missing dependency, not a broken OS
+    keychain. Saying "No OS keychain was available" for it sent a user
+    hunting a Keychain fault on a Mac whose Keychain was fine (#107)."""
+    import builtins
+    import aglaia.app_data.secrets as secrets
+    real_import = builtins.__import__
+
+    def _no_keyring(name, *a, **k):
+        if name == "keyring" or name.startswith("keyring."):
+            raise ModuleNotFoundError("No module named 'keyring'")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _no_keyring)
+    assert secrets.keychain_backend() == (False, "not_installed")
+
+
+def test_keychain_backend_reports_the_fail_backend_as_no_backend(monkeypatch):
+    """keyring installed but nothing to store into — a headless Linux with
+    no Secret Service — resolves to `keyring.backends.fail.Keyring`."""
+    pytest.importorskip("keyring")
+    import keyring
+    from keyring.backends.fail import Keyring as FailKeyring
+    import aglaia.app_data.secrets as secrets
+    monkeypatch.setattr(keyring, "get_keyring", lambda: FailKeyring())
+    assert secrets.keychain_backend() == (False, "no_backend")
+
+
+def test_keychain_backend_accepts_a_real_backend(monkeypatch):
+    pytest.importorskip("keyring")
+    import keyring
+    from keyring.backend import KeyringBackend
+    import aglaia.app_data.secrets as secrets
+
+    class _Store(KeyringBackend):
+        priority = 1  # type: ignore[assignment]
+
+        def get_password(self, service, username):
+            return None
+
+        def set_password(self, service, username, password):
+            pass
+
+        def delete_password(self, service, username):
+            pass
+
+    monkeypatch.setattr(keyring, "get_keyring", lambda: _Store())
+    assert secrets.keychain_backend() == (True, "")

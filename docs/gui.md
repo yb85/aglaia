@@ -180,6 +180,13 @@ re-targets every open tab of that page-branch and re-keys `_debug_tabs` —
 without it the tab keeps showing the pre-edit chain and the editor reads as
 broken.
 
+While that rerun is in flight the tab keeps the **previous composites** on
+screen (`_adopt_stale_overlays`), row by row and only where the processor
+still matches. Dropping them meant the dewarp's source | output picture was
+replaced by the bare stage image plus the light Qt overlay for the whole
+render — exactly while the user was comparing the live slider grid against
+it (#106).
+
 **Auto-process** (on by default, remembered for the session) reruns the page
 as soon as a value changes. Turn it off to make several edits and run once —
 the **Reprocess** button lights up, and is dimmed while auto-process is on
@@ -320,6 +327,15 @@ Engine cards:
   On Linux (Secret Service) and Windows (Credential Locker) the read is
   silent, so the card probes at startup — deferring there only hid a key that
   was stored.
+
+  *When there is no keychain* — the key falls back to a plaintext
+  `APP_DATA/.env` (0600). `secrets.keychain_backend()` says which of the two
+  reasons applies, and both the key dialog and the post-save message name it:
+  `not_installed` (the `keyring` package is absent — it ships in the **cloud**
+  extra, which `uv sync --extra dev --extra gui --extra macos` leaves out) or
+  `no_backend` (keyring is there, nothing answered — headless Linux, bare
+  Windows). Reporting the second for the first read as a broken macOS
+  Keychain on a machine whose Keychain was fine (#107).
 
 **Gating** (`aglaia/workers/ocr/apple_caps.py`): not macOS → both Apple cards
 disabled ("macOS only"); macOS pre-26 → only the Document card disabled

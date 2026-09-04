@@ -20,9 +20,12 @@ The only secret today is the **Mistral Cloud OCR** API key.
    Locker, Linux Secret Service.
 
 **Write** prefers the most secure store: the OS keychain, falling back to
-the plaintext ``.env`` (0600) only when no keychain backend is available
-(headless Linux / bare Windows). Whichever store wins, the other's copy is
-cleared so there's a single source of truth.
+the plaintext ``.env`` (0600) only when no keychain is reachable — either
+because the `keyring` package isn't installed (it ships in the **cloud**
+extra) or because no backend answered (headless Linux / bare Windows).
+`keychain_backend` tells those two apart so the UI can say which it is.
+Whichever store wins, the other's copy is cleared so there's a single
+source of truth.
 
 ``set_mistral_api_key`` returns where the value landed (``"keychain"`` /
 ``"env_file"`` / ``""`` when cleared) so the UI can tell the user.
@@ -161,6 +164,35 @@ def _env_file_clear(key: str) -> None:
     if key in values:
         values.pop(key, None)
         _write_env_file(values)
+
+
+def keychain_backend() -> tuple[bool, str]:
+    """Can an OS keychain actually hold a secret here, and if not, why not.
+
+    ``(True, "")`` when `keyring` resolves to a real store. Otherwise
+    ``(False, reason)``:
+
+    * ``"not_installed"`` — the `keyring` package is absent. It ships in the
+      **cloud** extra (``uv sync --extra cloud``), which the usual dev sync
+      leaves out, so this is the common case on a source checkout.
+    * ``"no_backend"`` — keyring is installed but found no store: a headless
+      Linux box with no Secret Service running, a bare Windows.
+
+    Told apart because the remedy differs, and because reporting the second
+    for the first is actively misleading: it sent a user hunting a broken
+    macOS Keychain on a machine whose Keychain was fine (#107)."""
+    try:
+        import keyring
+        from keyring.backends.fail import Keyring as _FailKeyring
+    except Exception:
+        return False, "not_installed"
+    try:
+        backend = keyring.get_keyring()
+    except Exception:
+        return False, "no_backend"
+    if isinstance(backend, _FailKeyring):
+        return False, "no_backend"
+    return True, ""
 
 
 def keychain_read_prompts() -> bool:

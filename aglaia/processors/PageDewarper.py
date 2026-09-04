@@ -349,16 +349,16 @@ class DewarpOption(AbstractProcessorOption):
     # one wide justified word gap + safety margin. Lower = stricter
     # spans (more fragments), higher = risk of cross-line linking.
     edge_max_length_char_mult: float = 3.0
-    # Refuse to fit on a content block that is wider than it is tall.
-    # Below this span count the cubic-sheet fit is under-constrained:
-    # the optimizer wanders for OPT_MAX_ITER iterations on what amounts
-    # to a noisy 2-3-baseline problem, ballooning MLX/JAX memory and
-    # almost always producing worse output than the input. Title pages,
-    # half-titles, figure-only spreads, blank versos all land here.
-    # 8 spans gives the cubic fit ~5 redundant constraints — enough
-    # margin to absorb the few-noisy-baselines case without admitting
-    # title-page / figure-only crops that destabilise the optimizer.
-    min_spans: int = 4
+    # Floor on the span count before the sheet fit is allowed to run.
+    # The number this guard was tuned for belongs to the retired Powell
+    # optimizer, which wandered for OPT_MAX_ITER iterations on a noisy
+    # 2-3-baseline problem, ballooned MLX/JAX memory, and usually returned
+    # something worse than its input. `lm_solver` (#59/#60) does not: with
+    # analytic Jacobians and the arrowhead/Schur structure it converges from
+    # far fewer baselines, so the old floor was refusing pages it fits well.
+    # 3 is where the cubic still has redundancy; below it a title page or a
+    # figure-only spread would be fitted on nothing.
+    min_spans: int = 3
     # Drop spans whose total width is < this fraction of the widest span
     # in the scan. Partial baselines at page edges (footer + author line
     # + page number — none of which span the full text column) bias the
@@ -559,9 +559,11 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         "max_oob": _f(500.0, 0.0, 5000.0, 10.0,
                       "Reject the dewarp if remap goes more than this many "
                       "pixels out of bounds.", advanced=True),
-        "min_spans": _i(4, 1, 50,
+        "min_spans": _i(3, 1, 50,
                         "Minimum span count to run the cubic fit. Below this, "
-                        "the optimizer is under-constrained and passthrough is safer.",
+                        "the fit is under-constrained and passthrough is safer. "
+                        "3 since the LM solver replaced Powell — it recovers a "
+                        "sheet from far fewer baselines.",
                         advanced=True),
         "min_span_width_ratio": _f(0.2, 0.0, 1.0, 0.05,
                                    "Drop spans whose width is less than this fraction "
@@ -906,7 +908,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         self.thickness_char_mult = float(getattr(options, "thickness_char_mult", 3.0))
         self.edge_max_length_char_mult = float(
             getattr(options, "edge_max_length_char_mult", 3.0))
-        self.min_spans = int(getattr(options, "min_spans", 4))
+        self.min_spans = int(getattr(options, "min_spans", 3))
         self.min_span_width_ratio = float(
             getattr(options, "min_span_width_ratio", 0.0))
         self.cubic_cost = float(getattr(options, "cubic_cost", 0.0))

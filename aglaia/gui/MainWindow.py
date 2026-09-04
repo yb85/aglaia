@@ -3502,11 +3502,21 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _track_worker(self, w) -> None:
+    def _track_worker(self, w, *, attr: Optional[str] = None) -> None:
         """Keep a QThread worker referenced until it actually finishes, then let
         Qt delete it. Without this, dropping the last Python reference (e.g. a
         re-press reassigning the owning attribute) can GC the QThread mid-run →
-        the fatal 'QThread: Destroyed while thread is still running' abort."""
+        the fatal 'QThread: Destroyed while thread is still running' abort.
+
+        Pass `attr` when an attribute owns the worker: it is cleared once the
+        thread finishes. `deleteLater` frees the C++ object while the Python
+        attribute keeps pointing at the husk, and `isRunning()` on that husk
+        does NOT return False — it raises `RuntimeError: Internal C++ object
+        already deleted`, straight out of whatever slot re-checked it. One
+        'Check result' click therefore disabled that button for the rest of
+        the session (#111). `_stop_voice` avoids it by nulling
+        `self.voice_thread` before handing the thread over; `attr` is the
+        general form of that."""
         workers = getattr(self, "_live_workers", None)
         if workers is None:
             workers = self._live_workers = []
@@ -3517,18 +3527,33 @@ class MainWindow(QMainWindow):
                 workers.remove(w)
             except ValueError:
                 pass
+            if attr is not None and getattr(self, attr, None) is w:
+                setattr(self, attr, None)
             w.deleteLater()
 
         w.finished.connect(_done)
 
+    @staticmethod
+    def _worker_alive(w) -> bool:
+        """True only while `w` is a still-valid, still-running QThread.
+
+        A freed wrapper raises on `isRunning()` instead of answering, so every
+        `if worker is not None and worker.isRunning()` guard is a latent
+        one-shot failure. Treat "already deleted" as "not running" — it is."""
+        if w is None:
+            return False
+        try:
+            return bool(w.isRunning())
+        except RuntimeError:
+            return False
+
     def _on_batch_check_requested(self) -> None:
         from aglaia.workers.MistralBatchWorker import MistralBatchWorker
-        if getattr(self, "_batch_worker", None) is not None \
-                and self._batch_worker.isRunning():
+        if self._worker_alive(getattr(self, "_batch_worker", None)):
             return
         self._batch_worker = MistralBatchWorker(
             action="check", db_path=str(self.db_path))
-        self._track_worker(self._batch_worker)
+        self._track_worker(self._batch_worker, attr="_batch_worker")
         self._batch_worker.log_line.connect(self._on_log_line)
         self._batch_worker.check_done.connect(self._on_batch_check_done)
         self.toast(self.tr("Checking Mistral batch job(s)…"))
@@ -3800,6 +3825,31 @@ class MainWindow(QMainWindow):
         # `page_order`. Cheap full rebuild = guaranteed in sync.
         self._broadcast_scan_set_changed()
 
+    def _scans_in_display_order(self) -> dict:
+        """`{scan_id: ScanItemWidget}` in the order the user sees.
+
+        The grid's FlowLayout IS that order: it is seeded from
+        `ScanRepo.list_scans` (``ORDER BY page_order``) and a drag-reorder
+        moves the widget inside it. The alt views used to enumerate
+        `scan_widgets_by_scan` sorted by **scan_id**, which matches only
+        until the first reorder — after one, the list and the gallery showed
+        an order the grid disagreed with, and the drop index the list handed
+        `_on_card_dropped` indexed a different sequence than the layout that
+        handler walks. Anything not in the layout (transient, mid-teardown)
+        is appended by id so nothing is ever dropped."""
+        out: dict = {}
+        try:
+            for i in range(self.scroll_layout.count()):
+                w = self.scroll_layout.itemAt(i).widget()
+                sid = getattr(w, "scan_id", None)
+                if sid is not None and int(sid) in self.scan_widgets_by_scan:
+                    out[int(sid)] = w
+        except Exception:
+            out = {}
+        for sid in sorted(self.scan_widgets_by_scan):
+            out.setdefault(int(sid), self.scan_widgets_by_scan[sid])
+        return out
+
     def _ocr_branch_state_map(self) -> dict:
         """Per-branch OCR state for `ScansTableView` row badges. Single
         DB query; format matches `OcrRepo.branch_status_map`."""
@@ -3812,11 +3862,8 @@ class MainWindow(QMainWindow):
     # ── ScansGalleryView providers ────────────────────────────────
     def _gallery_snaps(self) -> list[tuple[int, str]]:
         """Ordered (scan_id, raw_filestem) — vertical axis of the gallery."""
-        out: list[tuple[int, str]] = []
-        for sid in sorted(self.scan_widgets_by_scan.keys()):
-            w = self.scan_widgets_by_scan[sid]
-            out.append((int(sid), str(getattr(w, "raw_filestem", f"scan-{sid}"))))
-        return out
+        return [(int(sid), str(getattr(w, "raw_filestem", f"scan-{sid}")))
+                for sid, w in self._scans_in_display_order().items()]
 
     def _gallery_stages(self) -> list[str]:
         """Pipeline stage names — horizontal axis of the gallery.
@@ -4515,7 +4562,7 @@ class MainWindow(QMainWindow):
         if self._scans_table is None:
             from aglaia.gui.ScansTableView import ScansTableView
             t = ScansTableView(
-                get_snap_widgets=lambda: self.scan_widgets_by_scan,
+                get_snap_widgets=self._scans_in_display_order,
                 thumb_loader=self.thumb_loader,
                 ocr_state_provider=self._ocr_branch_state_map,
                 cell_states_provider=self.cell_disable_states,
