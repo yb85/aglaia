@@ -11,9 +11,13 @@ const DOWNLOADS = {
 };
 const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
-// iOS: launching on the App Store — set the real product id once approved
-// (currently in TestFlight review). https://apps.apple.com/app/idXXXXXXXXXX
+// iOS: launching on the App Store. `id0000000000` is a PLACEHOLDER — set the
+// real product id here once approved, and the badge becomes a live link on
+// its own. Until then it renders inert rather than sending people to a dead
+// App Store page: a "Coming soon" badge that 404s is worse than one that
+// simply does not move. https://apps.apple.com/app/idXXXXXXXXXX
 const APPSTORE = 'https://apps.apple.com/app/id0000000000';
+const APPSTORE_LIVE = !APPSTORE.includes('id0000000000');
 // Comparison-table check / cross marks.
 const CHK = '<svg class="ic ic--ok" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="yes"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
 const NO  = '<svg class="ic ic--no" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="no"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
@@ -118,9 +122,12 @@ const powers = [
           </p>
           <!-- iOS below the desktop download: the app people can install TODAY comes first, the one they can look forward to second. -->
           <p class="cta__alt reveal">Coming soon on your iPhone</p>
-          <!-- iOS is the primary, phone-first CTA -->
           <div class="cta cta--ios reveal">
-            <a class="appstore" href={APPSTORE} aria-label="Download Aglaïa on the App Store">
+            <a class="appstore" href={APPSTORE_LIVE ? APPSTORE : undefined}
+               aria-disabled={APPSTORE_LIVE ? undefined : 'true'}
+               aria-label={APPSTORE_LIVE
+                 ? 'Download Aglaïa on the App Store'
+                 : 'Aglaïa for iPhone — coming soon to the App Store'}>
               <svg class="appstore__logo" viewBox="0 0 384 512" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M318.7 268c-.3-40.5 18.1-71 55.3-93.4-20.8-29.8-52.2-46.2-93.7-49.4-39.3-3.1-82.2 23-98 23-16.7 0-54.7-21.9-84.6-21.9C39.3 127.2 0 165.1 0 240.4c0 22.2 4.1 45.1 12.2 68.7 10.9 31.6 50.2 108.9 91.2 107.6 21.4-.5 36.6-15.2 64.5-15.2 27 0 41.1 15.2 64.9 15.2 41.4-.6 77-70.9 87.4-102.6-55.6-26.2-52.7-76.8-52.5-79.1zM255.1 79.5c30.4-36.1 27.6-68.9 26.7-80.7-26.8 1.5-57.8 18.2-75.5 38.8-19.5 22-30.9 49.2-28.4 78.6 28.9 2.2 55.3-12.6 77.2-36.7z"/></svg>
             <span class="appstore__txt"><small>Download on the</small><b>App Store</b></span>
               <span class="appstore__soon">Coming soon</span>
@@ -928,8 +935,11 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
       .lede__l1, .lede__l3 { color: #cfddec; }
       .lede__l2 { color: #8ea2b7; }
       .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
-      /* iOS is the primary CTA — the App Store badge, phone-first. */
+      /* The App Store badge, phone-first. */
       .cta--ios { margin-top: 30px; }
+      /* No product id yet → no href. Keep the badge looking like itself, but
+         stop it behaving like a link that goes somewhere. */
+      .appstore[aria-disabled="true"] { cursor: default; }
       .appstore { position: relative; display: inline-flex; align-items: center; gap: 11px;
         padding: 12px 22px; border-radius: 13px; background: #000; color: #fff;
         border: 1px solid #2a2a2a; text-decoration: none;

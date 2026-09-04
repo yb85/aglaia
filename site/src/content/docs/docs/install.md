@@ -57,9 +57,9 @@ and the [Server](/docs/concepts/server) page for the job API.
 
 OCR engines need no extras of their own any more. Surya 2 is a Qwen3.5-VL
 model served through the shared local-VLM backend — `mlx-vlm` on Apple
-Silicon (`[macos]`), vLLM on CUDA — exactly like GLM-OCR and Unlimited-OCR,
-so the old `surya-ocr` / torch / `llama-server` stack and its dependency
-conflict are both gone. PaddleOCR-VL was dropped in 2026-07: weak on Greek,
+Silicon (`[macos]`), vLLM on CUDA — exactly like GLM-OCR, so the old
+`surya-ocr` / torch / `llama-server` stack and its dependency conflict are
+both gone. PaddleOCR-VL was dropped in 2026-07: weak on Greek,
 and it pulled in paddleocr + paddlepaddle + opencv-contrib for little gain.
 
 ```bash

@@ -36,7 +36,7 @@ plugin](./processors.md) appears automatically.
 | **apple_vision** | on-device | line-based `VNRecognizeTextRequest`, Latin-first, **no page** — good for the searchable-**PDF** text layer, not for Markdown structure; **default** |
 | **surya** | on-device | Qwen-VL served via `mlx-vlm`; `whole_doc` |
 | **glm** | on-device | VLM served via `mlx-vlm` |
-| **unlimited** | on-device | Baidu Unlimited-OCR (MLX port, in-process); whole-doc, per-page (window=1), DPI-independent |
+| **unlimited** | on-device | Baidu Unlimited-OCR (MLX port, in-process); whole-doc, per-page (window=1), DPI-independent. **Not offered to users yet** — the q4 weights it needs are unpublished, so the card reads *(missing)* on every machine but a developer's. Registered and benchmarked (see [ocr-benchmark](ocr-benchmark.md)); left out of the user-facing engine list until the model ships. |
 | **mistral_cloud** | cloud | Mistral Document AI over HTTPS; reads any script; footnote + header/footer post-processing |
 
 ## Footnote lift (`aglaia/workers/ocr/md_postprocess.py`)
