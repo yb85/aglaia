@@ -400,6 +400,21 @@ class RadioCardGroup(QWidget):
             else Qt.CursorShape.ArrowCursor
         )
 
+    def set_card_visible(self, key: str, visible: bool) -> None:
+        """Show or hide one card without removing it.
+
+        Hidden, not destroyed: the card keeps its state, its extras and its
+        place in `keys()`, so a caller can fold a long list down to the few
+        that matter and unfold it again without rebuilding anything."""
+        c = self._cards.get(key)
+        if c is None:
+            return
+        c.frame.setVisible(bool(visible))
+
+    def is_card_visible(self, key: str) -> bool:
+        c = self._cards.get(key)
+        return bool(c is not None and not c.frame.isHidden())
+
     def set_card_tooltip(self, key: str, tooltip: str) -> None:
         """Set (or clear, with "") the hover tooltip on a card — used to
         explain why a disabled card can't be picked."""

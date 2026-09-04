@@ -207,6 +207,18 @@ class OcrTab(QWidget):
         # the available room.
         self._cards_scroll.setMinimumHeight(150)
         outer.addWidget(self._cards_scroll, 1)
+        # "More…" — six engine cards is a wall, and the answer for almost
+        # everyone is one of the first two. The rest fold away behind this.
+        self._more_btn = QPushButton()
+        self._more_btn.setFlat(True)
+        self._more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._more_btn.setStyleSheet(
+            f"QPushButton {{ color: {COLOR_FONT_MUTED}; font-size: 11px; "
+            f"border: none; padding: 2px 0 6px 0; text-align: left; }}"
+            f"QPushButton:hover {{ color: {COLOR_PRIMARY}; }}")
+        self._more_btn.clicked.connect(self._toggle_more_engines)
+        outer.addWidget(self._more_btn)
+        self._engines_expanded = False
         self._populate_engines()
         # Track the active engine so we can detect REAL switches (the
         # currentChanged signal also fires on initial seed / refresh).
@@ -427,12 +439,18 @@ class OcrTab(QWidget):
         names = [n for n in names if _platform_ok(n)]
 
         self._complement_combo = None  # rebuilt below if apple_docs present
+        # `available` is set in the engine's __init__ (deps probed at
+        # construction), never on the class — so it has to be recorded here,
+        # while the instance exists, not read back off ENGINE_REGISTRY later.
+        self._engine_available: dict[str, bool] = {}
         for name in names:
             cls = ENGINE_REGISTRY[name]
             try:
                 eng = cls()
             except Exception:
                 continue
+            self._engine_available[name] = bool(
+                getattr(eng, "available", False))
             # "missing" (not "not installed") + a hard length cap: long names
             # like "PaddleOCR-VL" otherwise overflow the sidebar card width,
             # pushing the speed/quality badges off the row.
@@ -466,6 +484,69 @@ class OcrTab(QWidget):
 
         self._apply_engine_gating()
         self._select_default_engine()
+        self._apply_engine_overflow()
+
+    #: How many engine cards stay on screen before the rest fold away.
+    #: Three is what fits without scrolling and covers the real choice:
+    #: on macOS Apple Document, Cloud and a local VLM; elsewhere Cloud and
+    #: the two local VLMs.
+    VISIBLE_ENGINES = 3
+
+    def _visible_engine_keys(self) -> list[str]:
+        """The engines to show while folded, in card order.
+
+        The first `VISIBLE_ENGINES` that are actually usable — an engine
+        whose weights are not downloaded is a card offering an Install
+        button, which is not what someone opening this panel is looking for,
+        so it waits under "More…" with the rest.
+
+        The current selection is always among them. Hiding the engine that
+        is about to run would be a panel that lies about what it will do."""
+        avail = getattr(self, "_engine_available", {})
+        usable: list[str] = []
+        for key in self.engine_group.keys():
+            card = self.engine_group._cards.get(key)
+            if card is None or not card.frame.isEnabled():
+                continue
+            if not avail.get(key, False):
+                continue
+            usable.append(key)
+        shown = usable[:self.VISIBLE_ENGINES]
+        current = self.engine_group.current_key()
+        if current and current not in shown:
+            shown.append(current)
+        if not shown:
+            # Nothing usable at all (a fresh install with no models and no
+            # key): show the first few anyway, or the panel is empty and the
+            # Install buttons are unreachable.
+            shown = self.engine_group.keys()[:self.VISIBLE_ENGINES]
+        return shown
+
+    def _apply_engine_overflow(self) -> None:
+        keys = self.engine_group.keys()
+        shown = set(self._visible_engine_keys())
+        hidden = [k for k in keys if k not in shown]
+        # Auto-expand when the user's own engine is one of the folded ones —
+        # their choice is persisted, so someone who works in Surya opens the
+        # panel already unfolded instead of clicking "More…" every session.
+        if self._engines_expanded or not hidden:
+            for k in keys:
+                self.engine_group.set_card_visible(k, True)
+        else:
+            for k in keys:
+                self.engine_group.set_card_visible(k, k in shown)
+        n = len(hidden)
+        if not n:
+            self._more_btn.setVisible(False)
+            return
+        self._more_btn.setVisible(True)
+        self._more_btn.setText(
+            self.tr("▴  Fewer engines") if self._engines_expanded
+            else self.tr("▾  {n} more engine(s)…").format(n=n))
+
+    def _toggle_more_engines(self) -> None:
+        self._engines_expanded = not self._engines_expanded
+        self._apply_engine_overflow()
 
     def _select_default_engine(self) -> None:
         """Pick the default engine, skipping disabled / unavailable cards.

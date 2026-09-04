@@ -373,6 +373,21 @@ The sidebar **OCR** tab (`aglaia/gui/sidebar/tabs/OcrTab.py`) picks an engine vi
 `RadioCardGroup` and fires `run_requested(engine, languages, mode, complement)`
 → `MainWindow._on_ocr_run_requested` → `OcrWorker`.
 
+**Only three cards are shown**, with the rest behind a *"N more engine(s)…"*
+handle. Six cards is a wall, and for almost everyone the answer is one of the
+first two — Apple Document and Cloud on a Mac, Cloud and GLM elsewhere, which
+is what the declared card order already lands on once `_platform_ok` has
+dropped the engines this OS cannot run.
+
+Which three: the first three that are **usable** (`_visible_engine_keys`). A
+card whose weights are not downloaded is an Install button, and that is not
+what someone opening this panel came for, so it waits with the rest. Two rules
+keep the fold honest: the **selected** engine is always shown — hiding the
+engine that is about to run would be a panel lying about what it will do, and
+it also means someone whose persisted choice is Surya opens the panel already
+unfolded — and when *nothing* is usable (a fresh install, no models, no key)
+the first three are shown anyway, or the Install buttons would be unreachable.
+
 Engine cards:
 
 - **Apple Document engine** (`apple_docs`) — **default on a capable Mac.**
