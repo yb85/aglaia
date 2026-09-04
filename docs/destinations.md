@@ -156,6 +156,26 @@ The API's four outcomes stay four:
 Inadmissible extensions are refused locally against the API's own list — a
 round trip to be told "no" is a round trip wasted.
 
+## Where they appear
+
+An installed export plugin is offered in the **Export tab**, under *Send to*,
+below the format cards — an export plugin that is not offered where the export
+happens is a plugin nobody uses. The section is filtered by the selected
+format (`destinations.for_format`), so a Markdown export never lists a
+destination that only takes PDFs: being told "not accepted" *after* the export
+ran is a thing to prevent, not to report. A format nothing accepts hides the
+heading too, rather than leaving an empty promise.
+
+A destination that is not configured shows what it still needs and offers
+**Set up…** instead of a Send button that would fail. Pressing **Send** exports
+normally — the user still chooses where the file lands and still has it
+afterwards — and then hands the written file to the plugin. Sending is a step
+on top of the export, never a different export, so a destination that fails
+does not cost the file.
+
+There is also a **plug icon** in the right-hand rail, above Settings, that
+opens the Plugins tab.
+
 ## Listing them
 
 ```bash

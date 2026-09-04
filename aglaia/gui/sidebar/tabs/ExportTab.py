@@ -33,9 +33,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -66,6 +68,13 @@ QPushButton:disabled {{ background-color: {COLOR_FONT_DIM}; color: {COLOR_FONT_P
 
 class ExportTab(QWidget):
     """Format-cards picker + single Export button."""
+
+    #: A Send-to card was pressed. The host does the export and the send —
+    #: this tab knows which destination, not how to reach it.
+    send_to_requested = Signal(str)
+    #: A destination that is not configured yet: open its settings.
+    destination_settings_requested = Signal(str)
+
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -239,6 +248,23 @@ class ExportTab(QWidget):
             pass
         outer.addWidget(self.btn_export)
 
+        # ── Send to (export plugins) ───────────────────────────────
+        # An installed export plugin is only useful if it is offered where
+        # the export happens. Filtered by the chosen format, so a Markdown
+        # export never offers a destination that only takes PDFs — being
+        # told "not accepted" after the export ran is a thing to prevent,
+        # not to report.
+        self._send_label = self._field_label(self.tr("Send to"))
+        outer.addWidget(self._send_label)
+        self._send_box = QWidget()
+        self._send_layout = QVBoxLayout(self._send_box)
+        self._send_layout.setContentsMargins(0, 0, 0, 0)
+        self._send_layout.setSpacing(6)
+        outer.addWidget(self._send_box)
+        self.format_group.currentChanged.connect(
+            lambda *_: self.refresh_destinations())
+        self.refresh_destinations()
+
         # Character-width normalisation — pipeline-controlled visibility.
         self.chk_norm_widths = QCheckBox(self.tr("Normalize character width"))
         self.chk_norm_widths.setStyleSheet(
@@ -328,6 +354,72 @@ class ExportTab(QWidget):
     def selected_ocr_engine(self) -> Optional[str]:
         """The engine whose OCR layer to export, or None for the latest layer."""
         return self.combo_ocr_layer.currentData()
+
+    # ── export plugins ────────────────────────────────────────────
+    def refresh_destinations(self) -> None:
+        """Rebuild the Send-to cards for the current format.
+
+        Cheap and idempotent — called on format change and after a plugin is
+        installed or removed, so the section never lists something that is no
+        longer there."""
+        while self._send_layout.count():
+            it = self._send_layout.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        fmt = {"pdf": "pdf", "markdown": "md",
+               "slim": "agl"}.get(self.format_group.current_key() or "", "")
+        try:
+            from aglaia.workers import destinations as _dest
+            dests = _dest.for_format(fmt) if fmt else []
+        except Exception:
+            dests = []
+        # Nothing installed that takes this format: hide the heading too,
+        # rather than leaving an empty label with a promise under it.
+        self._send_label.setVisible(bool(dests))
+        self._send_box.setVisible(bool(dests))
+        for d in dests:
+            self._send_layout.addWidget(self._destination_card(d))
+
+    def _destination_card(self, dest) -> QWidget:
+        from aglaia.gui.colors import (COLOR_BG_OVERLAY_SOFT, COLOR_ERROR,
+                                       COLOR_FONT_PRIMARY, COLOR_OUTLINE_FAINT,
+                                       COLOR_SUCCESS)
+        card = QFrame()
+        card.setObjectName("sendCard")
+        card.setStyleSheet(
+            f"QFrame#sendCard {{ background: {COLOR_BG_OVERLAY_SOFT}; "
+            f"border: 1px solid {COLOR_OUTLINE_FAINT}; border-radius: 8px; }}")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(10, 8, 10, 8)
+        row.setSpacing(8)
+
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        name = QLabel(dest.display or dest.name)
+        name.setStyleSheet(
+            f"color: {COLOR_FONT_PRIMARY}; font-weight: 600; font-size: 12px;")
+        col.addWidget(name)
+        missing = dest.missing_settings()
+        state = QLabel(self.tr("Ready") if not missing
+                       else self.tr("Needs: {what}").format(
+                           what=", ".join(missing)))
+        state.setWordWrap(True)
+        state.setStyleSheet(
+            f"color: {COLOR_SUCCESS if not missing else COLOR_ERROR}; "
+            f"font-size: 10px;")
+        col.addWidget(state)
+        row.addLayout(col, 1)
+
+        btn = QPushButton(self.tr("Send") if not missing
+                          else self.tr("Set up…"))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(
+            lambda _=False, d=dest, m=bool(missing):
+                (self.destination_settings_requested.emit(d.name) if m
+                 else self.send_to_requested.emit(d.name)))
+        row.addWidget(btn)
+        return card
 
     def current_format(self) -> Optional[str]:
         return self.format_group.current_key()

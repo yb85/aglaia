@@ -509,13 +509,10 @@ class PluginsTab(QWidget):
         bar.addWidget(self._refresh_btn)
         root.addLayout(bar)
 
-        note = QLabel(self.tr(
-            "A plugin runs inside Aglaïa, with the same access to your files. "
-            "Registry plugins have been reviewed; anything you install from a "
-            "file has not."))
-        note.setWordWrap(True)
-        note.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
-        root.addWidget(note)
+        # No standing warning banner here: the install dialogs carry it, at
+        # the moment it is a decision. A permanent one is read once and then
+        # never again, which is worse than none — it trains the eye to skip
+        # the place warnings appear.
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -562,11 +559,12 @@ class PluginsTab(QWidget):
         if index.error:
             self._status.setText(index.error)
         else:
+            # Just the count. Whether the index is signed is a property of
+            # the distribution, not something a user standing here can act
+            # on — it belongs in the docs, not in a status line they read
+            # every time they open the tab.
             self._status.setText(
-                self.tr("{n} in the registry").format(n=len(index.entries))
-                + ("" if index.signed else
-                   " · " + self.tr("index not signed yet — files are still "
-                                   "hash-checked")))
+                self.tr("{n} in the registry").format(n=len(index.entries)))
         self._rebuild()
 
     # ── rendering ─────────────────────────────────────────────────────
@@ -786,6 +784,18 @@ class PluginsTab(QWidget):
         dest.reset_for_tests()
         self._status.setText(res.message)
         self._rebuild()
+        self._notify_export_tab()
+
+    def _notify_export_tab(self) -> None:
+        """The Export tab lists installed destinations; a new or removed one
+        must show up there without a restart."""
+        w = self.window()
+        tab = getattr(w, "_export_tab", None)
+        if tab is not None and hasattr(tab, "refresh_destinations"):
+            try:
+                tab.refresh_destinations()
+            except Exception:
+                pass
 
     def _install_from_file(self) -> None:
         from aglaia.app_data import plugin_registry as reg
@@ -812,6 +822,7 @@ class PluginsTab(QWidget):
         dest.reset_for_tests()
         self._status.setText(res.message)
         self._rebuild()
+        self._notify_export_tab()
 
     def _uninstall(self, slug: str) -> None:
         from aglaia.app_data import plugin_registry as reg
@@ -826,6 +837,8 @@ class PluginsTab(QWidget):
         dest.reset_for_tests()
         self._status.setText(res.message)
         self._rebuild()
+        self._notify_export_tab()
+        self._notify_export_tab()
 
     def _configure(self, slug: str) -> None:
         from aglaia.workers import destinations as dest

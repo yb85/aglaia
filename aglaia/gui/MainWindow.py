@@ -1489,6 +1489,9 @@ class MainWindow(QMainWindow):
 
         # ── Export-tab wiring ──────────────────────────────────────
         self._export_tab.btn_export.clicked.connect(self._on_export_clicked)
+        self._export_tab.send_to_requested.connect(self._on_send_to_requested)
+        self._export_tab.destination_settings_requested.connect(
+            self._on_destination_settings)
         self._export_tab.chk_norm_widths.stateChanged.connect(
             self._on_norm_widths_toggled
         )
@@ -1522,6 +1525,10 @@ class MainWindow(QMainWindow):
         self.sidebar.add_bottom_action(
             "report_bug", "bug", self.tr("Report a bug"),
             lambda: self._on_report_bug(),
+        )
+        self.sidebar.add_bottom_action(
+            "plugins", "plug", self.tr("Plugins"),
+            lambda: self.open_plugins_tab(),
         )
         self.sidebar.add_bottom_action(
             "settings", "settings", self.tr("Settings"),
@@ -1887,6 +1894,77 @@ class MainWindow(QMainWindow):
             self._export_markdown()
         elif fmt == "slim":
             self._export_slim_project()
+
+    def _on_destination_settings(self, name: str) -> None:
+        """Open one export plugin's settings from the Export tab."""
+        from aglaia.gui.PluginsTab import PluginSettingsDialog
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            QMessageBox.warning(
+                self, self.tr("{name} did not load").format(name=name),
+                dest.load_error(name) or self.tr("it is not loaded"))
+            return
+        PluginSettingsDialog(d, self).exec()
+        # Its "Needs: …" line is now stale.
+        self._export_tab.refresh_destinations()
+
+    def _on_send_to_requested(self, name: str) -> None:
+        """Export, then hand the file to the chosen plugin.
+
+        The export runs first and normally — the user still picks where it
+        lands, and still has the file afterwards. Sending is an extra step on
+        top, not a different export: a destination that fails must not cost
+        the export."""
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            QMessageBox.warning(
+                self, self.tr("{name} did not load").format(name=name),
+                dest.load_error(name) or self.tr("it is not loaded"))
+            return
+        missing = d.missing_settings()
+        if missing:
+            self._on_destination_settings(name)
+            return
+        self._pending_send = name
+        self._on_export_clicked()
+
+    def send_export_to_pending(self, path) -> None:
+        """Called by an export path once it has written a file.
+
+        Named rather than wired to a signal because the three export routines
+        finish in three different places; each one that knows its output path
+        can call this, and the ones that do not simply never send."""
+        name = getattr(self, "_pending_send", "")
+        self._pending_send = ""
+        if not name or not path:
+            return
+        from pathlib import Path as _P
+        from aglaia.plugin_api import BookMeta
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            return
+        meta = BookMeta(title=self._project_title(),
+                        project_path=str(self.db_path))
+        self.toast(self.tr("Sending to {name}…").format(
+            name=d.display or name))
+        try:
+            res = d.send(_P(path), meta)
+        except Exception as e:  # noqa: BLE001 — someone else's code
+            self.toast(f"{d.display or name}: {type(e).__name__}: {e}")
+            return
+        self.toast(res.message)
+
+    def _project_title(self) -> str:
+        """A title for a destination, from the project file's name — the one
+        piece of metadata Aglaïa always has."""
+        try:
+            from pathlib import Path as _P
+            return _P(str(self.db_path)).stem.replace("_", " ").strip()
+        except Exception:
+            return ""
 
     def _init_zoom_range(self):
         """Pull the device max_zoom from WebcamThread once it has resolved."""
@@ -2595,7 +2673,9 @@ class MainWindow(QMainWindow):
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
             self.toast(self.tr("PDF saved — {name}").format(name=output_path.name))
             self._reveal_in_finder(output_path)
+            self.send_export_to_pending(output_path)
         else:
+            self._pending_send = ""
             self.status_label.setText(self.tr("Failed to create PDF (no images)."))
             self.toast(self.tr("PDF export failed."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
@@ -2764,7 +2844,9 @@ class MainWindow(QMainWindow):
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
             self.toast(self.tr("Markdown saved — {name}").format(name=output_path.name))
             self._reveal_in_finder(output_path)
+            self.send_export_to_pending(output_path)
         else:
+            self._pending_send = ""
             self.status_label.setText(self.tr("No OCR text to export."))
             self.toast(self.tr("Markdown export skipped — no OCR text."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
