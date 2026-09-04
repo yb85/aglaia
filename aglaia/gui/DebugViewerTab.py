@@ -26,7 +26,8 @@ import base64
 import json
 from typing import Optional
 
-from PySide6.QtCore import QCoreApplication, QPointF, Qt, QThread, Signal
+from PySide6.QtCore import (QCoreApplication, QPointF, Qt, QThread,
+                            QTimer, Signal)
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -274,6 +275,10 @@ class DebugViewerWidget(QWidget):
         self._current_geom: dict = {}
         self._poly_field = "roi"
         self._busy = False
+        self._pending_slider: dict = {}
+        self._slider_timer = QTimer(self)
+        self._slider_timer.setSingleShot(True)
+        self._slider_timer.timeout.connect(self._commit_slider)
         # Must exist before `_load()`: seeding the strip selects a row, which
         # paints through `_on_row_changed`.
         self._overlay_bytes: list[Optional[bytes]] = []
@@ -511,8 +516,14 @@ class DebugViewerWidget(QWidget):
             sl = QSlider(Qt.Orientation.Horizontal)
             sl.setMinimum(0)
             sl.setMaximum(int(round((hi - lo) / step)))
+            # Two signals, two jobs. `valueChanged` only moves the LIVE
+            # preview: writing and rerunning per step made the background
+            # image change under the grid on every pixel of the drag, which
+            # is unusable — you cannot compare a preview against a picture
+            # that is itself moving. The commit happens once, on release.
             sl.valueChanged.connect(
                 lambda raw, k=key: self._on_slider(k, raw))
+            sl.sliderReleased.connect(self._commit_slider)
             row.addWidget(sl, 1)
             val = QLabel("—")
             val.setFixedWidth(56)
@@ -836,8 +847,11 @@ class DebugViewerWidget(QWidget):
             allow_insert=(processor != "TrapezoidalCorrection"))
         self._poly_field = ("quad" if processor == "TrapezoidalCorrection"
                             else "roi")
-        # A preview belongs to the row it was drawn for.
+        # A preview — and an uncommitted drag — belong to the row they were
+        # made on.
         self.canvas.set_preview(None)
+        self._slider_timer.stop()
+        self._pending_slider = {}
         self.force_chk.blockSignals(True)
         self.force_chk.setChecked(bool(stored.get("force")))
         self.force_chk.blockSignals(False)
@@ -878,17 +892,35 @@ class DebugViewerWidget(QWidget):
         self._slider_labels[key].setText(self._fmt(key, value))
         if key == "skew_deg":
             self.canvas.set_rotation_deg(value)
-            self._store({"skew_deg": float(value)})
-            return
-        row = self.strip.currentRow()
-        base = (self._stored(row).get("curl")
-                or (self._current_geom.get("curl") or {}))
-        derived = self._from_curl(base)
-        derived[key] = float(value)
-        curl = self._to_curl(derived["arch"], derived["tilt"],
-                             derived["gamma"])
-        self._preview_curl(curl)
-        self._store({"curl": curl})
+            self._pending_slider = {"skew_deg": float(value)}
+        else:
+            row = self.strip.currentRow()
+            base = (self._stored(row).get("curl")
+                    or (self._current_geom.get("curl") or {}))
+            derived = self._from_curl(base)
+            derived[key] = float(value)
+            curl = self._to_curl(derived["arch"], derived["tilt"],
+                                 derived["gamma"])
+            self._preview_curl(curl)
+            self._pending_slider = {"curl": curl}
+        sl = self._sliders.get(key)
+        if sl is not None and sl.isSliderDown():
+            return          # committed on release, see `_commit_slider`
+        # Keyboard / wheel: no release to wait for, so settle briefly instead
+        # of writing on every arrow key.
+        self._slider_timer.start(self.SLIDER_COMMIT_MS)
+
+    #: How long a non-drag slider change (arrow key, wheel) settles before it
+    #: is written and rerun. Long enough to absorb a held arrow key, short
+    #: enough not to feel stuck.
+    SLIDER_COMMIT_MS = 350
+
+    def _commit_slider(self) -> None:
+        """Write what the slider is showing, and rerun if asked to."""
+        self._slider_timer.stop()
+        fields, self._pending_slider = self._pending_slider, {}
+        if fields:
+            self._store(fields)
 
     def _preview_curl(self, curl: dict) -> None:
         """Draw the sheet the curl sliders describe, without reprocessing.

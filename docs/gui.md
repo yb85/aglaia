@@ -198,6 +198,31 @@ curl is clamped at ±0.5 internally but a page past ±0.35 is already extreme,
 and a full-width slider over the solver's range would make every useful value
 a two-pixel move.
 
+## Hand-edited pages in the scan views
+
+A page carrying manual overrides looked exactly like one the pipeline decided
+alone, everywhere outside the debug editor. All three views now mark it with
+one quiet dot — `widgets.ManualPip`, the primary accent, no glyph, no text —
+whose tooltip names what was touched ("Hand-tuned: deskew angle, dewarp
+curl").
+
+| View | Where |
+|---|---|
+| Table | beside the branch label, where the eye reads the row's identity |
+| Card grid | top-right of the layout thumbnail, clear of the disabled band (top edge) and the nav buttons |
+| Gallery | top-right of the stage image, clear of the star (top-left) and the disabled glyph (centre) |
+
+Quiet is the requirement: a hand-edited page is not a warning, so the mark
+must not compete with the disable strike (red) or the trashed state, and it is
+absent entirely on a page with no override — which is the common case, and the
+reason the mark says anything at all.
+
+All three read `MainWindow.manual_fields_for_layout(scan_id, branch_path)`,
+which merges the layout's own payload with the pre-split trunk's. It is
+memoised per scan like `cell_disable_states` — the views ask on every repaint
+and it is one SQLite round-trip each — and the cache is dropped on
+`branch_ready` and on every edit the editor writes.
+
 ## Calibration buttons
 
 - **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `config/camera_params.json`. Restart capture to pick up the new calibration.

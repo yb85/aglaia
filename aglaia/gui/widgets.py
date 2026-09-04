@@ -37,6 +37,58 @@ from aglaia.gui.colors import (
 )
 
 
+#: Human-readable names for the manual-override fields, in the order a page
+#: is processed. Used by every view's tooltip so the same page reads the same
+#: way wherever the user meets it (M9 #102).
+MANUAL_FIELD_LABELS = {
+    "skew_deg": "deskew angle",
+    "roi": "page ROI",
+    "quad": "keystone quad",
+    "curl": "dewarp curl",
+    "force": "forced dewarp",
+}
+
+
+def manual_tooltip(fields) -> str:
+    """"Hand-tuned: deskew angle, dewarp curl" — or "" for no override."""
+    names = [MANUAL_FIELD_LABELS[f] for f in MANUAL_FIELD_LABELS
+             if f in set(fields or ())]
+    if not names:
+        return ""
+    return "Hand-tuned: " + ", ".join(names)
+
+
+class ManualPip(QWidget):
+    """A small dot marking a page the user tuned by hand (M9 #102).
+
+    Deliberately quiet. A hand-edited page is not a warning: it must read as a
+    MARK, not an alert, and it must not compete with the disable strike (red)
+    or the trashed state. So: the primary accent, one dot, no glyph, no text —
+    at a glance you see that a page differs from its neighbours, and the
+    tooltip says how.
+    """
+
+    SIZE = 7
+
+    def __init__(self, fields, parent=None):
+        super().__init__(parent)
+        self._fields = list(fields or [])
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                          False)
+        self.setToolTip(manual_tooltip(self._fields))
+
+    def paintEvent(self, _ev):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # A hairline of the page background keeps the dot readable on a busy
+        # thumbnail without turning it into a badge.
+        p.setPen(qcolor(COLOR_FONT_INVERSE))
+        p.setBrush(qcolor(COLOR_PRIMARY))
+        p.drawEllipse(0, 0, self.SIZE - 1, self.SIZE - 1)
+        p.end()
+
+
 def make_icon_button(
     icon_name: str,
     *,

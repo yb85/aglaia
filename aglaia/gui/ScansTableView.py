@@ -260,6 +260,7 @@ class _RowWidget(QWidget):
                  on_cell_toggle=None, cell_states: Optional[dict] = None,
                  on_toggle_visibility=None,
                  on_debug=None,
+                 manual_fields: Optional[list] = None,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.stem = stem
@@ -305,6 +306,13 @@ class _RowWidget(QWidget):
         lbl.setStyleSheet(f"color:{COLOR_FONT_PLACEHOLDER}; font-size:11px;")
         lbl.setFixedWidth(20)
         h.addWidget(lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+        # Hand-edited mark (M9 #102) — beside the branch label, where the
+        # eye reads the row's identity. Absent when the page carries no
+        # override, which is the common case.
+        if manual_fields:
+            from aglaia.gui.widgets import ManualPip
+            h.addWidget(ManualPip(manual_fields),
+                        0, Qt.AlignmentFlag.AlignVCenter)
         # OCR badge slot.
         self._ocr_lbl = QLabel()
         self._ocr_lbl.setFixedSize(14, 14)
@@ -436,6 +444,7 @@ class _SnapBlock(QFrame):
                  ocr_state: str = "none",
                  ocr_branch_state: Optional[dict] = None,
                  cell_states: Optional[dict] = None,
+                 manual_fields_provider=None,
                  bg: str = COLOR_BG, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.scan_id = scan_id
@@ -482,6 +491,8 @@ class _SnapBlock(QFrame):
                 cell_states=cell_states,
                 on_toggle_visibility=self._on_row_visibility_toggled,
                 on_debug=self._on_row_debug_requested,
+                manual_fields=(manual_fields_provider(scan_id, branch_path)
+                               if manual_fields_provider else None),
                 parent=rows_host,
             )
             self._rows[stem] = row
@@ -679,6 +690,7 @@ class ScansTableView(QScrollArea):
 
     def __init__(self, *, get_snap_widgets, thumb_loader,
                  ocr_state_provider=None, cell_states_provider=None,
+                 manual_fields_provider=None,
                  thumb_h: int = DEFAULT_THUMB_H,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -687,6 +699,8 @@ class ScansTableView(QScrollArea):
         self._ocr_state_provider = ocr_state_provider
         # scan_id → {node_id: (toggleable, disabled)} for the stage strip.
         self._cell_states_provider = cell_states_provider
+        # (scan_id, branch_path) → [field, …] for the hand-edited mark.
+        self._manual_fields_provider = manual_fields_provider
         self._thumb_h = max(MIN_THUMB_H, min(MAX_THUMB_H, int(thumb_h)))
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -754,6 +768,7 @@ class ScansTableView(QScrollArea):
             ocr_state=str(getattr(w, "_ocr_state", "none")),
             ocr_branch_state=branch_state,
             cell_states=self._cell_states(sid),
+            manual_fields_provider=self._manual_fields_provider,
             bg=bg,
             # Parent straight to the eventual host — a parentless QWidget
             # flashes as a bare top-level window on macOS between
