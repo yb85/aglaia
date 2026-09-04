@@ -187,8 +187,46 @@ replaced by the bare stage image plus the light Qt overlay for the whole
 render — exactly while the user was comparing the live slider grid against
 it (#106).
 
+### The layout set (PageDetector rows)
+
+On a PageDetector row the handles work on **every layout at once, in PARENT
+coordinates** — the whole photo, not one child's crop. Before, the polygon
+lived in the crop the detector had chosen and was clamped to it, so a page
+could only ever be corrected *inwards*: a vertex could not be dragged out to
+where the page really was, and the orange box was a wall.
+
+- **Drag a vertex** anywhere on the photo; double-click an edge to insert one.
+- **Trash badge** — a translucent disc at each layout's barycentre. The last
+  layout keeps none: deleting it would leave the page with nothing to process.
+- **Add badge** — top-right of the picture. Drops in a rectangle to drag into
+  shape, offset from the ones already there so a second Add is not hidden
+  under the first.
+
+The set is stored once per scan on the **trunk** (`branch_path == ""`,
+`manual_overrides.layouts` + `layouts_frame_wh`), because it decides how many
+branches exist and so belongs to none of them. `PageDetector` reads it before
+its own empty-page guard and lets it REPLACE detection: that is what makes a
+deletion stick (a layout removed by hand is not found again next run), what
+lets a layout be added to a page the detector saw as blank, and what lets the
+crop follow the polygon instead of the other way round. `smart_merge` and
+`max_pages` are skipped — they guard a guess, and this is not one.
+
+Editing the set reruns the **whole scan**, not one branch: which branches
+exist is exactly what is being decided, so resuming from the split point would
+rerun children about to be renumbered or deleted. Each resulting child is
+stamped `manual: layouts`, named for the instrument — only that one explains a
+changed page count.
+
 **Auto-process** (on by default, remembered for the session) reruns the page
-as soon as a value changes. Turn it off to make several edits and run once —
+once a value *settles* — never per drag step. `EditCanvas.edited` fires on
+every mouse-move so the handle tracks the cursor; `edit_finished` is the
+commit, emitted on release (and immediately for an atomic edit like a
+double-click vertex insert). Persisting and rerunning on `edited` launched a
+chain rerun per move event, hundreds deep into one drag, until memory ran out
+and the app died (#116). The sliders debounce the same way, on
+`sliderReleased`.
+
+Turn it off to make several edits and run once —
 the **Reprocess** button lights up, and is dimmed while auto-process is on
 because there would be nothing for it to do. **Clear override** drops this
 layout's stored values and restores the automatic result.

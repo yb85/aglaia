@@ -47,18 +47,41 @@ _ROT_LINE = QColor(255, 190, 60)
 #: The live dewarp preview. Deliberately NOT the renderer's green: that grid
 #: is what was fitted, this one is what the sliders are asking for.
 _PREVIEW_LINE = QColor(255, 90, 200)
+#: Per-layout outline colours, cycled — they have to be told apart, and the
+#: composite underneath already tints each crop from its own list.
+_LAYOUT_LINES = (QColor(60, 220, 60), QColor(80, 190, 255),
+                 QColor(255, 190, 60), QColor(240, 120, 220))
+_BADGE_BG = QColor(20, 20, 24, 150)
+_BADGE_FG = QColor(255, 255, 255, 230)
+#: Radius of the barycentre trash badge and the top-right add badge, in view
+#: pixels. Big enough to hit without magnifying, small enough not to cover
+#: the text it sits on.
+BADGE_R = 15
 
 
 class EditCanvas(ZoomCanvas):
     """A `ZoomCanvas` that can also hand back an edited overlay.
 
-    `edited` fires on every drag step, not only on release: with
-    auto-process off the user wants to see the handle follow the cursor, and
-    with it on the host is the one that decides to debounce a rerun.
+    `edited` fires on every drag step, not only on release, so the handle
+    follows the cursor. It is NOT a commit signal: persisting and rerunning
+    per step meant hundreds of chain reruns stacked up inside one drag, which
+    exhausted memory and killed the app (#116). `edit_finished` is the commit
+    — emitted once on release, and immediately for an atomic edit like a
+    double-click vertex insert.
     """
 
     #: ``(kind, value)`` — ``("roi", [[x, y], …])`` or ``("skew_deg", float)``.
+    #: Fires on every drag STEP so the handle tracks the cursor.
     edited = Signal(str, object)
+    #: The drag ended. This is the one to persist and rerun on: `edited`
+    #: alone had the host writing SQLite and launching a chain rerun per
+    #: mouse-move event, hundreds deep into a single drag, until memory ran
+    #: out and the app died (#116).
+    edit_finished = Signal()
+    #: Layout SET changed by a badge press — ``("delete", index)`` or
+    #: ``("add", None)``. Separate from `edited` because the host answers it
+    #: by rewriting the whole set, not by moving a point (#118).
+    layout_action = Signal(str, object)
 
     def __init__(self, parent: Optional[QWidget] = None, **kw):
         super().__init__(parent, **kw)
@@ -82,6 +105,13 @@ class EditCanvas(ZoomCanvas):
         self._preview: list = []
         self._drag_vertex: Optional[int] = None
         self._drag_rot = False
+        # Layout-set mode (#118): several polygons at once, each with a
+        # delete badge, plus one add badge. `_poly` stays the single-shape
+        # path (the keystone quad, and PageDetector rows on a node with no
+        # parent to draw on).
+        self._layouts: list = []
+        self._layout_labels: list = []
+        self._drag_layout: Optional[int] = None
 
     # ── public API ────────────────────────────────────────────────
     def set_editable(self, *, polygon=None, rotation_deg=None,
@@ -97,6 +127,9 @@ class EditCanvas(ZoomCanvas):
                       if polygon else None)
         self._rot_deg = (float(rotation_deg) if rotation_deg is not None
                          else None)
+        self._layouts = []
+        self._layout_labels = []
+        self._drag_layout = None
         self._drag_vertex = None
         self._drag_rot = False
         self.update()
@@ -112,6 +145,66 @@ class EditCanvas(ZoomCanvas):
         value, which would otherwise echo back and fight the user."""
         self._rot_deg = float(deg)
         self.update()
+
+    def set_layouts(self, polygons, *, labels=None, origin=(0, 0),
+                    frame_wh=None, scale=1.0) -> None:
+        """Install the editable layout SET — several polygons in one frame.
+
+        The single-polygon path clamps a dragged vertex into the frame it was
+        given, and for a PageDetector row that frame was ONE child's crop: the
+        orange box in the debug view. So a vertex could not be moved to where
+        the page actually is, only to where the detector had already decided
+        it was. Here the frame is the PARENT, every layout is reachable, and
+        the set itself can grow and shrink (#118)."""
+        self._origin = (float(origin[0]), float(origin[1]))
+        self._scale = float(scale) or 1.0
+        self._frame_wh = (tuple(int(v) for v in frame_wh)
+                          if frame_wh else None)
+        self._layouts = [[[float(x), float(y)] for x, y in poly]
+                         for poly in (polygons or [])]
+        self._layout_labels = [str(v) for v in (labels or [])]
+        self._poly = None
+        self._rot_deg = None
+        self._drag_vertex = None
+        self._drag_layout = None
+        self._drag_rot = False
+        self.update()
+
+    def layouts(self) -> list:
+        return [[list(pt) for pt in poly] for poly in self._layouts]
+
+    def _add_badge_centre(self) -> Optional[QPointF]:
+        """Top-right corner of the PICTURE, inset by a badge radius."""
+        fit = self._fit_rect()
+        if fit.isEmpty() or not self._layouts and self._frame_wh is None:
+            return None
+        return QPointF(fit.right() - BADGE_R - 6, fit.top() + BADGE_R + 6)
+
+    @staticmethod
+    def _barycentre(poly) -> tuple[float, float]:
+        n = len(poly) or 1
+        return (sum(p[0] for p in poly) / n, sum(p[1] for p in poly) / n)
+
+    def _trash_badge_centre(self, i: int) -> Optional[QPointF]:
+        if not (0 <= i < len(self._layouts)):
+            return None
+        cx, cy = self._barycentre(self._layouts[i])
+        return self._to_view(cx, cy)
+
+    def _badge_hit(self, pos) -> Optional[tuple]:
+        """``("add", None)`` / ``("delete", i)`` under `pos`, else None."""
+        target = QPointF(pos)
+        add = self._add_badge_centre()
+        if add is not None and (add - target).manhattanLength() <= BADGE_R * 2:
+            return ("add", None)
+        # A single layout keeps no trash badge: deleting the last one would
+        # leave the page with nothing to process.
+        if len(self._layouts) > 1:
+            for i in range(len(self._layouts)):
+                c = self._trash_badge_centre(i)
+                if c is not None and (c - target).manhattanLength() <= BADGE_R * 2:
+                    return ("delete", i)
+        return None
 
     def set_preview(self, lines) -> None:
         """Install read-only polylines (stage coords), or clear with None.
@@ -172,6 +265,21 @@ class EditCanvas(ZoomCanvas):
     def mousePressEvent(self, ev: QMouseEvent) -> None:  # noqa: N802
         pos = ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
         if ev.button() == Qt.MouseButton.LeftButton and self._pix is not None:
+            if self._layouts:
+                hit = self._badge_hit(pos)
+                if hit is not None:
+                    # A badge press is the whole gesture — never also the
+                    # start of a drag on whatever sits under it.
+                    self.layout_action.emit(hit[0], hit[1])
+                    return
+                for li, poly in enumerate(self._layouts):
+                    for i, (x, y) in enumerate(poly):
+                        if (self._to_view(x, y)
+                                - QPointF(pos)).manhattanLength() <= GRAB_PX * 2:
+                            self._drag_layout = li
+                            self._drag_vertex = i
+                            self.update()
+                            return
             end = self._rot_end()
             if end is not None and (end - QPointF(pos)).manhattanLength() <= GRAB_PX * 2:
                 self._drag_rot = True
@@ -197,6 +305,17 @@ class EditCanvas(ZoomCanvas):
                 self.edited.emit("skew_deg", self._rot_deg)
                 self.update()
             return
+        if self._drag_vertex is not None and self._drag_layout is not None:
+            src = self._to_src(pos)
+            if src is not None and self._pix is not None:
+                fw, fh = self._frame()
+                poly = self._layouts[self._drag_layout]
+                poly[self._drag_vertex] = [
+                    max(0.0, min(float(fw - 1), src[0])),
+                    max(0.0, min(float(fh - 1), src[1]))]
+                self.edited.emit("layouts", self.layouts())
+                self.update()
+            return
         if self._drag_vertex is not None and self._poly:
             src = self._to_src(pos)
             if src is not None and self._pix is not None:
@@ -216,7 +335,11 @@ class EditCanvas(ZoomCanvas):
         if self._drag_rot or self._drag_vertex is not None:
             self._drag_rot = False
             self._drag_vertex = None
+            self._drag_layout = None
             self.update()
+            # AFTER clearing the flags: the host checks `is_editing()` to
+            # tell a drag step from a commit.
+            self.edit_finished.emit()
             return
         super().mouseReleaseEvent(ev)
 
@@ -226,6 +349,12 @@ class EditCanvas(ZoomCanvas):
         A hull that follows the text usually needs a point ADDED, not moved —
         the detector's polygon is convex and the page rarely is."""
         pos = ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
+        if (ev.button() == Qt.MouseButton.LeftButton and self._layouts
+                and self._pix is not None):
+            if self._insert_into_layouts(pos):
+                return
+            super().mouseDoubleClickEvent(ev)
+            return
         if (ev.button() != Qt.MouseButton.LeftButton or not self._poly
                 or self._pix is None or not self._allow_insert):
             super().mouseDoubleClickEvent(ev)
@@ -253,13 +382,74 @@ class EditCanvas(ZoomCanvas):
             return
         self._poly.insert(best_i + 1, [src[0], src[1]])
         self.edited.emit("roi", self.polygon())
+        # Atomic — there is no drag to wait for, so it commits at once.
+        self.edit_finished.emit()
         self.update()
+
+    def _insert_into_layouts(self, pos) -> bool:
+        """Add a vertex on the nearest edge of the nearest layout."""
+        target = QPointF(pos)
+        best = None                      # (dist, layout, edge, foot)
+        for li, poly in enumerate(self._layouts):
+            n = len(poly)
+            for i in range(n):
+                a = self._to_view(*poly[i])
+                b = self._to_view(*poly[(i + 1) % n])
+                ab = b - a
+                L2 = ab.x() ** 2 + ab.y() ** 2
+                if L2 <= 1e-9:
+                    continue
+                t = max(0.0, min(1.0,
+                                 QPointF.dotProduct(target - a, ab) / L2))
+                foot = a + ab * t
+                d = (foot - target).manhattanLength()
+                if d <= GRAB_PX * 2 and (best is None or d < best[0]):
+                    best = (d, li, i, foot)
+        if best is None:
+            return False
+        _d, li, edge, foot = best
+        src = self._to_src(foot.toPoint())
+        if src is None:
+            return False
+        self._layouts[li].insert(edge + 1, [src[0], src[1]])
+        self.edited.emit("layouts", self.layouts())
+        self.edit_finished.emit()
+        self.update()
+        return True
+
+    def _draw_badge(self, p: QPainter, centre: QPointF, glyph: str) -> None:
+        """Semi-transparent disc + glyph. Deliberately translucent: it sits on
+        top of the page the user is reading to decide whether to keep it."""
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(_BADGE_BG)
+        p.drawEllipse(centre, BADGE_R, BADGE_R)
+        pen = QPen(_BADGE_FG, 2)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        x, y, r = centre.x(), centre.y(), BADGE_R
+        if glyph == "+":
+            p.drawLine(QPointF(x - r * 0.45, y), QPointF(x + r * 0.45, y))
+            p.drawLine(QPointF(x, y - r * 0.45), QPointF(x, y + r * 0.45))
+            return
+        # Trash: lid, can, two ribs.
+        w, h = r * 0.46, r * 0.52
+        p.drawLine(QPointF(x - w, y - h * 0.6), QPointF(x + w, y - h * 0.6))
+        p.drawLine(QPointF(x - w * 0.45, y - h * 0.6),
+                   QPointF(x - w * 0.45, y - h))
+        p.drawLine(QPointF(x + w * 0.45, y - h * 0.6),
+                   QPointF(x + w * 0.45, y - h))
+        p.drawLine(QPointF(x - w * 0.75, y - h * 0.6),
+                   QPointF(x - w * 0.6, y + h))
+        p.drawLine(QPointF(x + w * 0.75, y - h * 0.6),
+                   QPointF(x + w * 0.6, y + h))
+        p.drawLine(QPointF(x - w * 0.6, y + h), QPointF(x + w * 0.6, y + h))
+        p.drawLine(QPointF(x, y - h * 0.25), QPointF(x, y + h * 0.6))
 
     # ── paint ─────────────────────────────────────────────────────
     def paintEvent(self, ev) -> None:  # noqa: N802
         super().paintEvent(ev)
         if self._pix is None or (self._poly is None and self._rot_deg is None
-                                 and not self._preview):
+                                 and not self._preview and not self._layouts):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -269,6 +459,24 @@ class EditCanvas(ZoomCanvas):
             for line in self._preview:
                 pts = QPolygonF([self._to_view(x, y) for x, y in line])
                 p.drawPolyline(pts)
+        for li, lpoly in enumerate(self._layouts):
+            col = _LAYOUT_LINES[li % len(_LAYOUT_LINES)]
+            p.setPen(QPen(col, 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPolygon(QPolygonF([self._to_view(x, y) for x, y in lpoly]))
+            for i, (x, y) in enumerate(lpoly):
+                active = (li == self._drag_layout and i == self._drag_vertex)
+                p.setPen(QPen(col, 2))
+                p.setBrush(_POLY_ACTIVE if active else _POLY_VERTEX)
+                p.drawEllipse(self._to_view(x, y), 5, 5)
+            if len(self._layouts) > 1:
+                c = self._trash_badge_centre(li)
+                if c is not None:
+                    self._draw_badge(p, c, "trash")
+        if self._layouts:
+            add = self._add_badge_centre()
+            if add is not None:
+                self._draw_badge(p, add, "+")
         if self._poly:
             poly = QPolygonF([self._to_view(x, y) for x, y in self._poly])
             p.setPen(QPen(_POLY_LINE, 2))

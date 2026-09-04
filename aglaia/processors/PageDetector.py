@@ -5,6 +5,7 @@
 # Source-available under the PolyForm Shield License 1.0.0; any use except
 # building a competing product. See LICENSE or https://polyformproject.org/licenses/shield/1.0.0/
 
+import math
 import os
 import cv2
 import itertools
@@ -209,6 +210,62 @@ def _manual_roi_for(input_buf, branch_label: str, *, frame_wh):
         return [[float(x), float(y)] for x, y in pts]
     except Exception:
         return None
+
+
+def _poly_bbox_int(poly, w: int, h: int):
+    """Integer bbox of a polygon, clamped into the image. None if degenerate."""
+    xs = [float(pt[0]) for pt in poly]
+    ys = [float(pt[1]) for pt in poly]
+    x1 = max(0, int(math.floor(min(xs))))
+    y1 = max(0, int(math.floor(min(ys))))
+    x2 = min(int(w), int(math.ceil(max(xs))))
+    y2 = min(int(h), int(math.ceil(max(ys))))
+    if x2 - x1 < 2 or y2 - y1 < 2:
+        return None
+    return (x1, y1, x2, y2)
+
+
+def _manual_layouts_for(input_buf, *, frame_wh):
+    """The user's hand-drawn layout SET for this page, or None.
+
+    A list of polygons in the coordinates of PageDetector's own input — the
+    parent frame the debug view draws on. Stored once per scan on the trunk
+    (`branch_path == ""`), because it decides how many branches there will
+    be: it is not a property of any one of them (#118).
+
+    When present it REPLACES detection for this page. That is what makes a
+    deletion stick — a layout removed by hand must not be found again on the
+    next run — and it is what lets a polygon reach outside the crop the
+    detector chose, since the crop is derived from the polygon rather than
+    the other way round.
+
+    Validated against the frame it was drawn on, like every other spatial
+    override: a polygon applied to an image of another size would be
+    silently shifted."""
+    payload = ((getattr(input_buf, "meta", None) or {})
+               .get("manual_overrides_all") or {}).get("")
+    if not isinstance(payload, dict):
+        return None
+    polys = payload.get("layouts")
+    if not polys:
+        return None
+    stored = payload.get("layouts_frame_wh")
+    if stored:
+        try:
+            if (int(stored[0]) != int(frame_wh[0])
+                    or int(stored[1]) != int(frame_wh[1])):
+                return None
+        except Exception:
+            pass
+    out = []
+    for poly in polys:
+        try:
+            pts = [[float(x), float(y)] for x, y in poly]
+        except (TypeError, ValueError):
+            continue
+        if len(pts) >= 3:
+            out.append(pts)
+    return out or None
 
 
 def tighten_x(inner, *, rect_x, gap_frac=0.10,
@@ -702,37 +759,60 @@ class PageDetector(AbstractImageProcessor):
                 self.debug_save(vis, "0b_contrast_filter", input_buf)
             pages = kept
 
+        # A hand-drawn layout set REPLACES detection for this page (#118):
+        # its bboxes are the pages, in the order the user left them. Checked
+        # before the empty guard, so a layout can be added to a page the
+        # detector found nothing on — and a layout deleted by hand is not
+        # found again on the next run, which is what makes a deletion stick.
+        manual_layouts = _manual_layouts_for(input_buf,
+                                             frame_wh=(w_orig, h_orig))
+        if manual_layouts is not None:
+            pages = [r for r in (_poly_bbox_int(poly, w_orig, h_orig)
+                                 for poly in manual_layouts) if r is not None]
+            if not pages:
+                manual_layouts = None
+
         if not pages:
             return input_buf
 
-        # Smart merge: score-based, gap + width-imbalance aware.
-        # Auto-merges over-split pairs (score ≥ threshold) and forces
-        # merges to hit the `max_pages` cap.
-        layouts_before = len(pages)
-        pages = list(smart_merge(
-            pages,
-            max_pages=self.max_pages,
-            page_w=w_orig, page_h=h_orig,
-            threshold=self.merge_threshold,
-            gap_weight=self.merge_gap_weight,
-            width_weight=self.merge_width_weight,
-            gap_norm_cap=self.merge_gap_norm_cap,
-            over_cap_strategy=getattr(self, "over_cap", "merge"),
-        ))
-        # Surface n_layouts, merged count, and sizes through the chain
-        # op-log line. Preserve the working_wh_dpi key we stashed before
-        # detection so the size chain still renders correctly.
-        sizes = [f"{lx2 - lx1}×{ly2 - ly1}"
-                 for (lx1, ly1, lx2, ly2) in pages]
-        self.last_stats.update({
-            "pages": len(pages),
-            "merged": max(0, layouts_before - len(pages)),
-            "sizes": sizes,
-        })
-        if self.debug_enabled() and layouts_before != len(pages):
-            print(f"[PageDetector] smart_merge: {layouts_before} → {len(pages)} "
-                  f"(threshold={self.merge_threshold:.2f}, max={self.max_pages})",
-                  flush=True)
+        if manual_layouts is not None:
+            # No merge, no cap: the set is the user's, exactly as drawn.
+            self.last_stats.update({
+                "pages": len(pages),
+                "merged": 0,
+                "manual": True,
+                "sizes": [f"{lx2 - lx1}×{ly2 - ly1}"
+                          for (lx1, ly1, lx2, ly2) in pages],
+            })
+        else:
+            # Smart merge: score-based, gap + width-imbalance aware.
+            # Auto-merges over-split pairs (score ≥ threshold) and forces
+            # merges to hit the `max_pages` cap.
+            layouts_before = len(pages)
+            pages = list(smart_merge(
+                pages,
+                max_pages=self.max_pages,
+                page_w=w_orig, page_h=h_orig,
+                threshold=self.merge_threshold,
+                gap_weight=self.merge_gap_weight,
+                width_weight=self.merge_width_weight,
+                gap_norm_cap=self.merge_gap_norm_cap,
+                over_cap_strategy=getattr(self, "over_cap", "merge"),
+            ))
+            # Surface n_layouts, merged count, and sizes through the chain
+            # op-log line. Preserve the working_wh_dpi key we stashed before
+            # detection so the size chain still renders correctly.
+            sizes = [f"{lx2 - lx1}×{ly2 - ly1}"
+                     for (lx1, ly1, lx2, ly2) in pages]
+            self.last_stats.update({
+                "pages": len(pages),
+                "merged": max(0, layouts_before - len(pages)),
+                "sizes": sizes,
+            })
+            if self.debug_enabled() and layouts_before != len(pages):
+                print(f"[PageDetector] smart_merge: {layouts_before} → {len(pages)} "
+                      f"(threshold={self.merge_threshold:.2f}, max={self.max_pages})",
+                      flush=True)
 
         if self.debug_enabled():
             vis = to_rgb(img_cv).copy() if img_cv.ndim == 2 else img_cv.copy()
@@ -786,6 +866,13 @@ class PageDetector(AbstractImageProcessor):
             spine_side = None
             if spread_sides is not None and spread_gutter is not None:
                 spine_side = "right" if spread_sides[idx] == "left" else "left"
+            # Hand-drawn layout: the polygon IS the ROI. None of the
+            # text-tightening below applies — the user has already said where
+            # the page is, and re-deriving it from the boxes would drag the
+            # answer back to what the detector thought.
+            hand_poly = (manual_layouts[idx]
+                         if manual_layouts is not None
+                         and idx < len(manual_layouts) else None)
             inner = [b for b in boxes
                      if lx1 <= (b[0] + b[2]) / 2 <= lx2
                      and ly1 <= (b[1] + b[3]) / 2 <= ly2]
@@ -816,6 +903,10 @@ class PageDetector(AbstractImageProcessor):
             roi_ly1 = max(0, tight_ly1 - roi_pad)
             roi_lx2 = min(w_orig, tight_lx2 + roi_pad)
             roi_ly2 = min(h_orig, tight_ly2 + roi_pad)
+            if hand_poly is not None:
+                # The polygon's own bbox, unpadded: the ROI is what was drawn,
+                # and the crop below still adds margin_mm of masked halo.
+                roi_lx1, roi_ly1, roi_lx2, roi_ly2 = lx1, ly1, lx2, ly2
 
             fx1 = max(0, roi_lx1 - margin_px)
             fy1 = max(0, roi_ly1 - margin_px)
@@ -833,7 +924,10 @@ class PageDetector(AbstractImageProcessor):
                 [float(roi_x2), float(roi_y2)],
                 [float(roi_x1), float(roi_y2)],
             ]
-            if self.roi_hull:
+            if hand_poly is not None:
+                child_roi = [[float(x) - fx1, float(y) - fy1]
+                             for x, y in hand_poly]
+            elif self.roi_hull:
                 hull = self._hull_roi(
                     boxes,
                     rect=(tight_lx1, tight_ly1, tight_lx2, tight_ly2),
@@ -850,10 +944,15 @@ class PageDetector(AbstractImageProcessor):
             # SECOND run, exactly as iOS's `ManualOverrides.roi` does. Still
             # clamped into the crop below and intersected with the parent ROI,
             # so a hand-drawn polygon cannot reach outside the child image.
-            manual_roi = _manual_roi_for(
-                input_buf, suffix, frame_wh=(fx2 - fx1, fy2 - fy1))
+            manual_roi = (None if hand_poly is not None else _manual_roi_for(
+                input_buf, suffix, frame_wh=(fx2 - fx1, fy2 - fy1)))
             if manual_roi is not None:
                 child_roi = manual_roi
+                manual_branches.append(suffix)
+            elif hand_poly is not None:
+                # The layout set is the newer, coarser instrument: it decides
+                # how many branches exist, so it outranks a per-branch `roi`
+                # drawn on a crop that may no longer be the same shape.
                 manual_branches.append(suffix)
             if parent_roi := input_buf.meta.get("roi"):
                 # Intersect text-tight child_roi (in child coords) with
@@ -890,7 +989,11 @@ class PageDetector(AbstractImageProcessor):
             if child_roi:
                 l_buf.meta["roi"] = child_roi
             if suffix in manual_branches:
-                l_buf.meta.setdefault("manual", []).append("roi")
+                # Name WHICH instrument drew it: a per-branch `roi` and a
+                # hand-drawn layout set are both hand edits, but only one of
+                # them explains why the page count changed.
+                l_buf.meta.setdefault("manual", []).append(
+                    "layouts" if hand_poly is not None else "roi")
 
             if spread_sides is not None:
                 l_buf.meta["page_side"] = spread_sides[idx]

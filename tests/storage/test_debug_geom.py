@@ -42,22 +42,42 @@ def test_skew_geom_omits_an_angle_it_does_not_have():
     assert "skew_deg" not in _skew_renderer(_img(), None, {})[0]["geom"]
 
 
-def test_page_geom_is_the_roi_in_the_CHILD_frame():
-    """The parent composite shows every layout at once, which is the right
-    picture to look at and the wrong one to edit on: the polygon the pipeline
-    consumes is in child coordinates."""
+def test_page_geom_without_a_parent_is_the_roi_in_the_child_frame():
+    """Nothing to draw the set on — edit this one polygon, in its own frame."""
     roi = [[5, 5], [100, 5], [100, 180], [5, 180]]
-    child = _img()
     meta = {"roi": roi, "parent_crop_xywh": [10, 20, 120, 200]}
-    on_child = _page_renderer(child, None, meta)[0]["geom"]
-    on_parent = _page_renderer(child, _img(400, 400), meta)[0]["geom"]
-    # Same polygon and same frame either way — only WHERE that frame sits in
-    # the composite differs, which is what `origin` is for.
-    assert on_child["frame_wh"] == on_parent["frame_wh"] == [120, 200]
-    assert on_child["roi"] == on_parent["roi"] == [
-        [5.0, 5.0], [100.0, 5.0], [100.0, 180.0], [5.0, 180.0]]
-    assert on_child["origin"][0] == 0
-    assert on_parent["origin"][0] == 10          # the child's crop offset
+    geom = _page_renderer(_img(), None, meta)[0]["geom"]
+    assert geom["frame_wh"] == [120, 200]
+    assert geom["roi"] == [[5.0, 5.0], [100.0, 5.0],
+                           [100.0, 180.0], [5.0, 180.0]]
+    assert geom["origin"][0] == 0
+
+
+def test_page_geom_on_a_parent_is_the_layout_SET_in_parent_coords():
+    """With a parent to draw on, the handles work on every layout at once, in
+    PARENT coordinates (#118).
+
+    They used to live in ONE child's frame, which is why a vertex could not be
+    dragged outside that child's crop — the clamp WAS the crop, so the page
+    could only be corrected inwards, never outwards."""
+    roi = [[5, 5], [100, 5], [100, 180], [5, 180]]
+    meta = {"roi": roi, "parent_crop_xywh": [10, 20, 120, 200]}
+    geom = _page_renderer(_img(), _img(400, 400), meta)[0]["geom"]
+    assert geom["frame_wh"] == [400, 400]        # the PARENT
+    # Each point carries its child's crop offset — (10, 20) here.
+    assert geom["layouts"] == [[[15.0, 25.0], [110.0, 25.0],
+                                [110.0, 200.0], [15.0, 200.0]]]
+    assert geom["origin"][0] == 0                # only the label bar remains
+    assert geom["origin"][1] > 0
+
+
+def test_a_layout_without_a_stamped_roi_falls_back_to_its_crop():
+    """An older node carries no ROI. Give the crop rect instead — a layout
+    with no handles at all could not be deleted or corrected."""
+    meta = {"parent_crop_xywh": [10, 20, 120, 200]}
+    geom = _page_renderer(_img(), _img(400, 400), meta)[0]["geom"]
+    assert geom["layouts"] == [[[10.0, 20.0], [130.0, 20.0],
+                                [130.0, 220.0], [10.0, 220.0]]]
 
 
 def test_dewarp_geom_is_the_curl_of_the_fit():

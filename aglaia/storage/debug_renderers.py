@@ -189,10 +189,9 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     crop = meta.get("parent_crop_xywh")
     roi = meta.get("roi")
     page_nums = meta.get("page_nums")
-    # THIS node's ROI, in THIS node's own frame — the child crop. The parent
-    # composite below shows every layout at once, which is the right picture
-    # to look at and the wrong one to edit on: the polygon the pipeline
-    # consumes is in child coordinates, so that is where the handles go.
+    # THIS node's ROI, in THIS node's own frame. Only the no-parent fallback
+    # below edits on it; when the parent is available the handles work on the
+    # whole layout SET in PARENT coordinates instead (see `layouts`).
     _roi_pts = [[float(x), float(y)] for x, y in roi] if roi else None
 
     if parent is not None:
@@ -260,13 +259,33 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
         if page_nums:
             txt += f" | page#={page_nums}"
         canvas = _label_bar(canvas, txt)
-        # Drawn on the PARENT: this node's polygon sits at its crop offset,
-        # under the label bar.
-        ox, oy = (int(crop[0]), int(crop[1])) if crop else (0, 0)
+        # Every layout's ROI in PARENT coordinates, in sibling order — the
+        # editable set (#118). The handles used to live in ONE child's frame,
+        # which is why a vertex could not be dragged outside that child's
+        # crop: the clamp was the crop. In the parent frame the whole page is
+        # reachable, and the layout SET becomes editable rather than one
+        # polygon of it.
+        layouts: list = []
+        labels: list = []
+        for s_label, s_crop, s_roi, _ in items:
+            fx, fy = int(s_crop[0]), int(s_crop[1])
+            if s_roi:
+                pts = [[float(x) + fx, float(y) + fy] for x, y in s_roi]
+            else:
+                # No ROI stamped (an old node): fall back to the crop rect,
+                # so the layout is still grabbable.
+                cw, ch = int(s_crop[2]), int(s_crop[3])
+                pts = [[float(fx), float(fy)], [float(fx + cw), float(fy)],
+                       [float(fx + cw), float(fy + ch)],
+                       [float(fx), float(fy + ch)]]
+            layouts.append(pts)
+            labels.append(str(s_label))
         return [{"url": _png_data_url(canvas),
                  "label": "parent + layouts",
-                 "geom": _geom(img, origin=(ox, oy + _bar_h(canvas.shape[1])),
-                               composite=canvas, roi=_roi_pts)}]
+                 "geom": _geom(parent, origin=(0, _bar_h(canvas.shape[1])),
+                               composite=canvas,
+                               layouts=layouts or None,
+                               layout_labels=labels or None)}]
 
     canvas = _to_bgr(img).copy()
     if roi:

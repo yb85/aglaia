@@ -1091,14 +1091,25 @@ class MainWindow(QMainWindow):
         from the split point, and a scan that isn't split (or a missing branch
         callback) falls back to the whole-scan rerun rather than silently
         doing nothing."""
+        snaps = self._reprocess_snaps_callback
+        # An empty branch_path means the SPLIT itself changed — the layout set
+        # was edited (#118), so which branches exist is what is being decided.
+        # Resuming from a split point would rerun children about to be
+        # renumbered or deleted, so this one goes from raw. (`reprocess_branch`
+        # happens to fall back the same way, since trunk nodes carry a NULL
+        # label and never match `branch_label = ''` — but relying on that is
+        # relying on an accident.)
+        if not str(branch_path or ""):
+            if snaps is not None:
+                snaps({int(scan_id)})
+            return
         cb = self._reprocess_branch_callback
         if cb is not None:
             try:
-                cb(int(scan_id), str(branch_path or ""))
+                cb(int(scan_id), str(branch_path))
                 return
             except Exception:
                 pass
-        snaps = self._reprocess_snaps_callback
         if snaps is not None:
             snaps({int(scan_id)})
 

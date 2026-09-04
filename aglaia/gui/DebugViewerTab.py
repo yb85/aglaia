@@ -310,6 +310,11 @@ class DebugViewerWidget(QWidget):
         right_v.setSpacing(4)
         self.canvas = EditCanvas(placeholder=self.tr("Select a step"))
         self.canvas.edited.connect(self._on_canvas_edited)
+        self.canvas.edit_finished.connect(self._on_canvas_edit_finished)
+        self.canvas.layout_action.connect(self._on_layout_action)
+        # What the live drag is showing, not yet written. See
+        # `_on_canvas_edit_finished`.
+        self._pending_canvas: dict = {}
         bar = QHBoxLayout()
         bar.setContentsMargins(2, 0, 2, 0)
         self.zoom_bar = ZoomToolbar(self.canvas, default=2.0)
@@ -840,6 +845,83 @@ class DebugViewerWidget(QWidget):
                 return key
         return None
 
+    def _trunk_stored(self, row: int) -> dict:
+        """The SCAN-level payload (`branch_path == ""`), where the layout set
+        lives — it decides how many branches there are, so it belongs to none
+        of them."""
+        key = self._row_key(row)
+        if key is None:
+            return {}
+        try:
+            with db_session(self.db_path) as conn:
+                return ManualOverrideRepo(conn).get(int(key[0]), "")
+        except Exception:
+            return {}
+
+    def _store_layouts(self, row: int, polys, frame_wh) -> None:
+        """Write the layout set and rerun the WHOLE scan.
+
+        Not the branch: changing the set changes which branches exist, so
+        resuming from the split point would rerun children that are about to
+        be renumbered — or deleted."""
+        key = self._row_key(row)
+        if key is None:
+            return
+        fields = {"layouts": [[[float(x), float(y)] for x, y in poly]
+                              for poly in polys]}
+        if frame_wh:
+            fields["layouts_frame_wh"] = [int(frame_wh[0]), int(frame_wh[1])]
+        try:
+            with db_session(self.db_path) as conn:
+                ManualOverrideRepo(conn).set(int(key[0]), "", fields)
+                conn.commit()
+        except Exception:
+            return
+        self._manual_note.setText(
+            self.tr("manual: {fields}").format(fields="layouts"))
+        self._pending_edit = {"scan_id": int(key[0]), "branch_path": ""}
+        self._sync_run_controls()
+        self._reprocess_if_auto()
+
+    def _on_layout_action(self, action: str, index) -> None:
+        """Add or delete a layout from the badges on the canvas."""
+        row = self.strip.currentRow()
+        polys = self.canvas.layouts()
+        geom = (self._overlay_geom[row]
+                if 0 <= row < len(self._overlay_geom) else {}) or {}
+        frame = geom.get("frame_wh")
+        if action == "delete":
+            if index is None or not (0 <= int(index) < len(polys)):
+                return
+            if len(polys) <= 1:
+                return                  # never leave the page with no layout
+            polys.pop(int(index))
+        elif action == "add":
+            polys.append(self._new_layout_poly(polys, frame))
+        else:
+            return
+        self.canvas.set_layouts(
+            polys, labels=[chr(ord("A") + i) for i in range(len(polys))],
+            origin=geom.get("origin") or (0, 0), frame_wh=frame,
+            scale=float(geom.get("scale", 1.0) or 1.0))
+        self._store_layouts(row, polys, frame)
+
+    @staticmethod
+    def _new_layout_poly(existing, frame_wh):
+        """A rectangle to start from, placed where it can be seen and grabbed.
+
+        Offset from the ones already there so a second Add doesn't hide under
+        the first, and kept well inside the frame so every vertex is on
+        screen."""
+        w, h = (int(frame_wh[0]), int(frame_wh[1])) if frame_wh else (1000, 1000)
+        step = len(existing) * int(min(w, h) * 0.05)
+        x1 = min(int(w * 0.15) + step, int(w * 0.6))
+        y1 = min(int(h * 0.15) + step, int(h * 0.6))
+        x2 = min(x1 + int(w * 0.3), w - 1)
+        y2 = min(y1 + int(h * 0.3), h - 1)
+        return [[float(x1), float(y1)], [float(x2), float(y1)],
+                [float(x2), float(y2)], [float(x1), float(y2)]]
+
     def _stored(self, row: int) -> dict:
         key = self._row_key(row)
         if key is None:
@@ -866,6 +948,25 @@ class DebugViewerWidget(QWidget):
         skew = stored.get("skew_deg")
         if skew is None:
             skew = geom.get("skew_deg")
+        if processor == "PageDetector" and geom.get("layouts"):
+            # The whole layout SET, in PARENT coordinates (#118). Stored on
+            # the trunk, because it decides how many branches exist.
+            trunk = self._trunk_stored(row)
+            polys = trunk.get("layouts") or geom.get("layouts")
+            frame = geom.get("frame_wh")
+            if (trunk.get("layouts")
+                    and trunk.get("layouts_frame_wh") and frame
+                    and list(trunk["layouts_frame_wh"]) != list(frame)):
+                # Drawn on another frame — the processor drops it too, so
+                # show what the detector actually produced.
+                polys = geom.get("layouts")
+            self.canvas.set_layouts(
+                polys, labels=geom.get("layout_labels") or [],
+                origin=origin, frame_wh=frame,
+                scale=float(geom.get("scale", 1.0) or 1.0))
+            self._poly_field = "layouts"
+            self._sync_editor_tail(row, stored, skew, geom)
+            return
         if processor == "PageDetector":
             poly = stored.get("roi") or geom.get("roi")
         elif processor == "TrapezoidalCorrection":
@@ -880,11 +981,18 @@ class DebugViewerWidget(QWidget):
             allow_insert=(processor != "TrapezoidalCorrection"))
         self._poly_field = ("quad" if processor == "TrapezoidalCorrection"
                             else "roi")
+        self._sync_editor_tail(row, stored, skew, geom)
+
+    def _sync_editor_tail(self, row: int, stored: dict, skew, geom: dict) -> None:
+        """Everything below the handle layer: preview, force box, sliders,
+        the hand-edited note. Shared by the single-shape path and the layout
+        set, which differ only in what they hand the canvas."""
         # A preview — and an uncommitted drag — belong to the row they were
         # made on.
         self.canvas.set_preview(None)
         self._slider_timer.stop()
         self._pending_slider = {}
+        self._pending_canvas = {}
         self.force_chk.blockSignals(True)
         self.force_chk.setChecked(bool(stored.get("force")))
         self.force_chk.blockSignals(False)
@@ -995,6 +1103,14 @@ class DebugViewerWidget(QWidget):
         self.canvas.set_preview(lines)
 
     def _on_canvas_edited(self, kind: str, value) -> None:
+        """A drag STEP. Update what the panel shows, stash the value, and —
+        while the mouse is still down — write nothing.
+
+        This used to persist and rerun here. `edited` fires per mouse-move,
+        so one drag across the canvas launched a chain rerun per move event;
+        they piled up until memory ran out and the app died (#116). The
+        commit is `_on_canvas_edit_finished`, exactly as the sliders beside
+        it commit on `sliderReleased`."""
         if kind == "skew_deg":
             lo, _hi, step = self._RANGES["skew_deg"]
             sl = self._sliders["skew_deg"]
@@ -1006,11 +1122,32 @@ class DebugViewerWidget(QWidget):
             sl.blockSignals(False)
             self._slider_labels["skew_deg"].setText(
                 self._fmt("skew_deg", float(value)))
-            self._store({"skew_deg": float(value)})
+            self._pending_canvas = {"skew_deg": float(value)}
+        elif kind == "layouts":
+            self._pending_canvas = {"layouts": value}
         elif kind == "roi":
             # The canvas knows a polygon, not which field it is: the layout
             # ROI and the keystone quad are the same shape.
-            self._store({getattr(self, "_poly_field", "roi"): value})
+            self._pending_canvas = {
+                getattr(self, "_poly_field", "roi"): value}
+        else:
+            return
+        if not self.canvas.is_editing():
+            # No drag to wait for (a double-click insert): commit now.
+            self._on_canvas_edit_finished()
+
+    def _on_canvas_edit_finished(self) -> None:
+        """The drag ended — persist once, and let auto-process rerun once."""
+        fields, self._pending_canvas = self._pending_canvas, {}
+        if not fields:
+            return
+        if "layouts" in fields:
+            row = self.strip.currentRow()
+            geom = (self._overlay_geom[row]
+                    if 0 <= row < len(self._overlay_geom) else {}) or {}
+            self._store_layouts(row, fields["layouts"], geom.get("frame_wh"))
+            return
+        self._store(fields)
 
     def _store(self, fields: dict) -> None:
         """Persist an edit for the selected row, then rerun if asked to.
@@ -1048,16 +1185,22 @@ class DebugViewerWidget(QWidget):
     #: must drop the curl and leave a deskew correction alone.
     _STAGE_FIELDS = {
         "SkewFinder": ("skew_deg",),
-        "PageDetector": ("roi", "frame_wh"),
+        "PageDetector": ("roi", "frame_wh", "layouts"),
         "TrapezoidalCorrection": ("quad", "frame_wh"),
         "PageDewarper": ("curl", "force"),
     }
 
     def _stage_stored(self, row: int) -> dict:
-        """The part of the stored payload THIS stage owns."""
+        """The part of the stored payload THIS stage owns.
+
+        The layout set is the exception: it lives on the trunk, not on this
+        branch, so it has to be read from there or "Clear override" would
+        stay dark over a set the user had drawn."""
         key = self._row_key(row)
         fields = self._STAGE_FIELDS.get(key[2] if key else "", ())
-        stored = self._stored(row)
+        stored = dict(self._stored(row))
+        if "layouts" in fields and self._trunk_stored(row).get("layouts"):
+            stored["layouts"] = True
         return {k: v for k, v in stored.items()
                 if k in fields and k != "frame_wh"}
 
@@ -1069,14 +1212,22 @@ class DebugViewerWidget(QWidget):
         fields = self._STAGE_FIELDS.get(key[2], ())
         if not fields:
             return
+        # The layout set is scan-level; clearing it restores DETECTION, so it
+        # reruns the whole scan rather than one branch.
+        had_layouts = bool(self._trunk_stored(row).get("layouts"))
         try:
             with db_session(self.db_path) as conn:
-                ManualOverrideRepo(conn).set(int(key[0]), key[1],
-                                             {f: None for f in fields})
+                repo = ManualOverrideRepo(conn)
+                repo.set(int(key[0]), key[1],
+                         {f: None for f in fields if f != "layouts"})
+                if "layouts" in fields:
+                    repo.set(int(key[0]), "",
+                             {"layouts": None, "layouts_frame_wh": None})
                 conn.commit()
         except Exception:
             return
-        self._pending_edit = {"scan_id": int(key[0]), "branch_path": key[1]}
+        self._pending_edit = {"scan_id": int(key[0]),
+                              "branch_path": "" if had_layouts else key[1]}
         self._configure_editor(row)
         self._reprocess_if_auto()
 
