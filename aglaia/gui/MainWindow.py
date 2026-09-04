@@ -313,6 +313,8 @@ class MainWindow(QMainWindow):
         self.slug_name = slug_name
         #: Directories holding an export made only to hand to a plugin.
         self._send_staging: set[str] = set()
+        #: The in-flight `DestinationJob`, if any.
+        self._send_job = None
         self.current_idx = start_idx
 
         # M0 DB context
@@ -1984,32 +1986,56 @@ class MainWindow(QMainWindow):
 
         Named rather than wired to a signal because the three export routines
         finish in three different places; each one that knows its output path
-        can call this, and the ones that do not simply never send."""
+        can call this, and the ones that do not simply never send.
+
+        The send itself runs on a worker thread. Its duration is unbounded and
+        not ours: mailing a 45 MB PDF opens an SMTP session with a 60 s timeout
+        and then uploads over the user's link, and a calibre server on a
+        sleeping laptop answers when it answers. On the GUI thread that is a
+        beach ball for as long as the far end takes."""
         name = getattr(self, "_pending_send", "")
         self._pending_send = ""
         if not name or not path:
             return
         from pathlib import Path as _P
+        from aglaia.gui.plugin_jobs import DestinationJob
         from aglaia.plugin_api import BookMeta
         from aglaia.workers import destinations as dest
         d = dest.load_all().get(name)
         if d is None:
             return
+        label = d.display or name
         meta = BookMeta(title=self._project_title(),
                         project_path=str(self.db_path))
-        self.toast(self.tr("Sending to {name}…").format(
-            name=d.display or name))
-        try:
-            res = d.send(_P(path), meta)
-        except Exception as e:  # noqa: BLE001 — someone else's code
-            self.toast(f"{d.display or name}: {type(e).__name__}: {e}")
-            return
-        finally:
-            # The courier copy goes whether the send worked or not: keeping
-            # it helps nobody, since the user cannot find it and would not
-            # know it was there.
-            self._discard_if_staged(path)
-        self.toast(res.message)
+        self.toast(self.tr("Sending to {name}…").format(name=label))
+        self.status_label.setText(
+            self.tr("Sending to {name}…").format(name=label))
+        # Two sends at once would be two plugin calls sharing one settings
+        # object and one progress line. The overlay both says so and enforces
+        # it; it comes down in `_done`, which runs whichever way the send
+        # ends.
+        self._export_tab.set_busy(
+            self.tr("Sending to {name}…").format(name=label))
+
+        src = _P(path)
+
+        def _done(outcome) -> None:
+            self._export_tab.set_busy("")
+            # The courier copy goes whether the send worked or not: keeping it
+            # helps nobody, since the user cannot find it and would not know
+            # it was there.
+            self._discard_if_staged(src)
+            msg = outcome.message or (
+                self.tr("{name}: done.").format(name=label))
+            self.toast(f"{label}: {msg}" if outcome.error else msg,
+                       6000 if not outcome.ok else 4000)
+            self.status_label.setText(self.tr("Ready."))
+
+        job = DestinationJob(lambda: d.send(src, meta), self)
+        job.done.connect(_done)
+        self._send_job = job
+        self._track_worker(job, attr="_send_job")
+        job.start()
 
     def _project_title(self) -> str:
         """A title for a destination, from the project file's name — the one
@@ -2710,17 +2736,29 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             self.tr("Generating PDF ({src}, {comp})…").format(src=source_type, comp=compression)
         )
+        # The build itself still runs on the GUI thread, so the overlay is
+        # painted by the singleShot's turn of the event loop and then stays
+        # up, frozen, until the PDF is written. Frozen-with-a-caption beats
+        # frozen-with-nothing: the window at least says what it is doing.
+        self._export_tab.set_busy(self.tr("Generating PDF…"))
         QTimer.singleShot(100, lambda: self._run_pdf_maker(
             step_filter, output_path, compression, add_ocr_layer, ocr_engine))
 
     def _run_pdf_maker(self, step_name: Optional[str], output_path: Path,
                        compression: str = "auto", add_ocr_layer: bool = False,
                        ocr_engine: Optional[str] = None):
-        with db_session(self.db_path) as conn:
-            success = create_pdf_from_db(
-                conn, output_path, step_name=step_name, compression=compression,
-                add_ocr_layer=add_ocr_layer, engine=ocr_engine,
-            )
+        try:
+            with db_session(self.db_path) as conn:
+                success = create_pdf_from_db(
+                    conn, output_path, step_name=step_name,
+                    compression=compression,
+                    add_ocr_layer=add_ocr_layer, engine=ocr_engine,
+                )
+        finally:
+            # Down before the send, which puts its own caption up. Nothing
+            # repaints in between, so there is no flicker — and an exception
+            # here must not leave the tab locked behind a spinner.
+            self._export_tab.set_busy("")
         if success:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
             if not getattr(self, "_pending_send", ""):
@@ -2882,19 +2920,27 @@ class MainWindow(QMainWindow):
             and self._export_tab.chk_llm_refine.isChecked()
         )
         refine = "apple_fm" if use_llm else None
-        self.status_label.setText(
-            self.tr("Polishing with Apple Intelligence…") if use_llm
-            else self.tr("Writing Markdown…"))
+        caption = (self.tr("Polishing with Apple Intelligence…") if use_llm
+                   else self.tr("Writing Markdown…"))
+        self.status_label.setText(caption)
+        self._export_tab.set_busy(caption)
+        # No deferral here as there is for the PDF, so nothing would paint the
+        # overlay before the write blocks the thread.
+        QApplication.processEvents()
         try:
             with db_session(self.db_path) as conn:
                 ok = write_markdown(conn, output_path, refine=refine, engine=ocr_engine)
         except Exception as e:
+            self._export_tab.set_busy("")
             self._pending_send = ""
             self._discard_if_staged(output_path)
+            self.toast(self.tr("Markdown export failed — {why}").format(
+                why=f"{type(e).__name__}: {e}"), 6000)
             self._on_log_line("error", f"Markdown export failed: {e}")
             self.status_label.setText(self.tr("Markdown export failed."))
             QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
             return
+        self._export_tab.set_busy("")
         if ok:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
             if not getattr(self, "_pending_send", ""):

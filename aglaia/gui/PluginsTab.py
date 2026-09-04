@@ -160,6 +160,10 @@ class PluginSettingsDialog(QDialog):
     def __init__(self, dest, parent=None) -> None:
         super().__init__(parent)
         self.dest = dest
+        #: False once this dialog is gone, so a test that answers late does
+        #: not write into a deleted widget.
+        self._alive = True
+        self._test_job = None
         self.setWindowTitle(self.tr("{name} — settings").format(
             name=dest.display or dest.name))
         self.setMinimumWidth(520)
@@ -173,9 +177,29 @@ class PluginSettingsDialog(QDialog):
             v.addWidget(top)
 
         self._widgets: dict[str, tuple] = {}
-        for field in list(dest.CONFIG_FIELDS) + list(dest.SECRET_FIELDS):
-            is_secret = field.kind == "secret"
-            v.addWidget(self._field_row(field, is_secret))
+        for field in dest.CONFIG_FIELDS:
+            v.addWidget(self._field_row(field, False))
+
+        if dest.SECRET_FIELDS:
+            # Where a secret goes is the HOST's fact and it is the same for
+            # every plugin, so it is said once here rather than repeated in
+            # each plugin's field help. It also has to be true: without the
+            # `cloud` extra there is no keyring and the value is written as
+            # plain text, which the user is entitled to know before typing a
+            # password into the box.
+            secrets = getattr(getattr(dest, "ctx", None), "secrets", None)
+            in_keychain = bool(getattr(secrets, "available", False))
+            note = QLabel(
+                self.tr("Stored in your keychain.") if in_keychain else
+                self.tr("No keychain available — these are stored as plain "
+                        "text in the app's data folder."))
+            note.setWordWrap(True)
+            note.setStyleSheet(
+                f"color: {COLOR_FONT_MUTED if in_keychain else COLOR_ERROR}; "
+                f"font-size: 11px; padding-top: 6px;")
+            v.addWidget(note)
+            for field in dest.SECRET_FIELDS:
+                v.addWidget(self._field_row(field, True))
 
         self._status = QLabel("")
         self._status.setWordWrap(True)
@@ -267,22 +291,39 @@ class PluginSettingsDialog(QDialog):
                 self.dest.ctx.config.set(key, value)
 
     def _on_test(self) -> None:
+        """Test the connection off the GUI thread.
+
+        `check()` reaches the network — an SMTP login, or an HTTP round trip
+        to a server that may be asleep. On the GUI thread that froze the whole
+        window, modal dialog included, for as long as the far end took to
+        answer or time out."""
+        from aglaia.gui.plugin_jobs import DestinationJob
         self._collect()
         self._status.setText(self.tr("Testing…"))
+        self._status.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 11px;")
         self._test_btn.setEnabled(False)
-        try:
-            res = self.dest.check()
-        except Exception as e:  # noqa: BLE001
-            res = None
-            self._status.setText(f"{type(e).__name__}: {e}")
+
+        def _done(outcome) -> None:
+            # The dialog can be closed while the test is in flight; the C++
+            # object is then gone and touching a label raises out of a slot
+            # nobody can catch.
+            if not self._alive:
+                return
+            self._status.setText(outcome.message or self.tr("No answer."))
             self._status.setStyleSheet(
-                f"color: {COLOR_ERROR}; font-size: 11px;")
-        if res is not None:
-            self._status.setText(res.message)
-            self._status.setStyleSheet(
-                f"color: {COLOR_SUCCESS if res.ok else COLOR_ERROR}; "
+                f"color: {COLOR_SUCCESS if outcome.ok else COLOR_ERROR}; "
                 f"font-size: 11px;")
-        self._test_btn.setEnabled(True)
+            self._test_btn.setEnabled(True)
+
+        job = DestinationJob(self.dest.check)
+        job.done.connect(_done)
+        job.finished.connect(job.deleteLater)
+        self._test_job = job
+        job.start()
+
+    def closeEvent(self, ev):  # noqa: N802 — Qt API
+        self._alive = False
+        super().closeEvent(ev)
 
     def _on_save(self) -> None:
         self._collect()

@@ -61,19 +61,16 @@ class CorpusDestination(Destination):
               help="Your Corpus instance. Include the scheme."),
         Field("default_language", "Default language", "str", "",
               placeholder="French",
-              help="Used when the project does not say. Left empty, the "
-                   "field is simply not sent."),
+              help="Used when the project does not say."),
         Field("default_categories", "Default categories", "str", "",
               placeholder="Ecclésiologie",
               help="Used when the project does not say."),
         Field("timeout_s", "Timeout (seconds)", "int", 300,
-              help="Uploads can be large; the ceiling is 2 GiB."),
+              help="Maximum upload size is 2 GiB."),
     )
     SECRET_FIELDS = (
         Field("api_key", "API key", "secret", "", required=True,
-              help="CORPUS_APP_KEY — sent as the X-API-Key header. It "
-                   "lives in the instance's .env, never in a versioned "
-                   "file."),
+              help="Sent as the X-API-Key header."),
     )
 
     # ── plumbing ──────────────────────────────────────────────────────

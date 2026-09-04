@@ -7,6 +7,7 @@
 
 """Leaf widgets used by sidebar tabs."""
 
+from .BusyOverlay import BusyOverlay  # noqa: F401
 from .ComboBoxWithDescription import ComboBoxWithDescription  # noqa: F401
 from .PipelineTimingView import PipelineTimingView  # noqa: F401
 from .RadioCardGroup import RadioCardGroup  # noqa: F401

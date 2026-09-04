@@ -68,11 +68,10 @@ class CalibreDestination(Destination):
               help="calibre defaults to digest. Basic is what the manual "
                    "recommends behind an HTTPS reverse proxy."),
         Field("add_duplicates", "Add even if already present", "bool", False,
-              help="Off: a book calibre recognises as a duplicate is reported "
-                   "as already there and nothing is written. Leave it off "
-                   "unless you mean to keep two copies."),
+              help="Off: a book calibre recognises as a duplicate is "
+                   "reported as already there and nothing is written."),
         Field("timeout_s", "Timeout (seconds)", "int", 120,
-              help="A large PDF over a slow link needs more than the default."),
+              help="Raise it for large files or a slow link."),
     )
     SECRET_FIELDS = (
         Field("username", "Username", "secret", "", required=True,

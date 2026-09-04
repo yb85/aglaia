@@ -53,7 +53,9 @@ from aglaia.gui.colors import (
     COLOR_PRIMARY,
     COLOR_PRIMARY_HOVER,
 )
-from aglaia.gui.sidebar.widgets import RadioCardGroup, ToggleSwitch
+from aglaia.gui.sidebar.widgets import (
+    BusyOverlay, RadioCardGroup, ToggleSwitch,
+)
 
 
 _PRIMARY_BTN_QSS = f"""
@@ -77,6 +79,12 @@ class ExportTab(QWidget):
         super().__init__(parent)
         #: destination name -> its format combo (None when it takes only one)
         self._dest_formats: dict[str, Optional[QComboBox]] = {}
+        # A send takes as long as the far end takes — a 45 MB PDF over SMTP,
+        # or a calibre server on a laptop that has gone to sleep. A button
+        # that does nothing visible for forty seconds reads as a broken
+        # button, so say what is happening while it happens. Same overlay the
+        # OCR tab uses, so "something is running" looks the same everywhere.
+        self._busy_overlay = BusyOverlay(self)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -435,6 +443,16 @@ class ExportTab(QWidget):
         except Exception:
             pass
         return "pdf"
+
+    def set_busy(self, caption: str = "") -> None:
+        """Show or hide the working overlay. Empty caption = hide."""
+        if caption:
+            self._busy_overlay.set_caption(caption)
+            self._busy_overlay.start()
+            self.btn_export.setEnabled(False)
+        else:
+            self._busy_overlay.stop()
+            self.btn_export.setEnabled(True)
 
     def current_format(self) -> Optional[str]:
         return self.format_group.current_key()

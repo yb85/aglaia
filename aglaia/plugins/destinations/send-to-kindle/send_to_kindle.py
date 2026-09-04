@@ -56,8 +56,8 @@ class KindleDestination(Destination):
     CONFIG_FIELDS = (
         Field("recipient", "Send to", "str", "", required=True,
               placeholder="your-device@kindle.com",
-              help="The device's Send-to-Kindle address. Any address works — "
-                   "this is just email."),
+              help="The device's Send-to-Kindle address. Any email "
+                   "address works."),
         Field("sender", "From", "str", "", required=True,
               placeholder="you@example.org",
               help="Must be on Amazon's approved sender list, or the mail is "
@@ -72,21 +72,21 @@ class KindleDestination(Destination):
               help="STARTTLS on 587 is the usual answer."),
         Field("subject_template", "Subject", "str", "{title}",
               help="{title} {author} {year} {filename} are substituted. "
-                   "Amazon ignores the subject; a human recipient will not."),
+                   "Amazon ignores the subject."),
         Field("body_template", "Message", "str",
               "Sent by Aglaïa.\n\n{title}\n{author}\n",
               help="Same substitutions."),
         Field("max_attachment_mb", "Size limit (MB)", "int", 45,
-              help="Refuse before uploading. Amazon's ceiling is around 50; "
-                   "45 leaves room for the MIME encoding overhead."),
+              help="Files over this are refused before uploading. "
+                   "Amazon's ceiling is about 50 MB, and attaching a file "
+                   "adds a few percent to its size."),
     )
     SECRET_FIELDS = (
         Field("smtp_user", "SMTP username", "secret", "", required=True,
               help="Usually the full email address."),
         Field("smtp_password", "SMTP password", "secret", "", required=True,
               help="For Gmail, iCloud or Outlook this must be an "
-                   "APP-SPECIFIC password, not your account password. Your "
-                   "normal password will be refused."),
+                   "APP-SPECIFIC password, not your account password."),
     )
 
     # ── plumbing ──────────────────────────────────────────────────────
@@ -153,10 +153,9 @@ class KindleDestination(Destination):
             pass
         sender = str(self.conf("sender") or "")
         return CheckResult(
-            True, f"Signed in to {self.conf('smtp_host')} as "
-                  f"{self.secret('smtp_user')}. Mail will be sent from "
-                  f"{sender} — make sure Amazon has it on the approved "
-                  f"sender list.")
+            True, f"Signed in to {self.conf('smtp_host')}. Mail is sent from "
+                  f"{sender}, which must be on Amazon's approved sender "
+                  f"list.")
 
     # ── send ──────────────────────────────────────────────────────────
     def send(self, path: Path, meta: BookMeta) -> SendResult:
@@ -172,9 +171,8 @@ class KindleDestination(Destination):
         if size_mb > limit_mb:
             return SendResult(
                 False, f"{path.name} is {size_mb:.0f} MB, over the "
-                       f"{limit_mb} MB limit. Export a smaller PDF (G4 "
-                       f"bitonal is much smaller than colour) or raise the "
-                       f"limit if your provider allows it.")
+                       f"{limit_mb} MB limit. A G4 bitonal PDF is much "
+                       f"smaller than a colour one.")
 
         maintype, subtype = _MIME.get(path.suffix.lower(),
                                       ("application", "octet-stream"))
@@ -207,7 +205,7 @@ class KindleDestination(Destination):
         # dropped is worse than one that claims nothing.
         return SendResult(
             True, f"Mailed {path.name} ({size_mb:.1f} MB) to "
-                  f"{self.conf('recipient')}. Amazon delivers only from "
-                  f"approved senders — if it does not appear, check that "
-                  f"{self.conf('sender')} is on the list.",
+                  f"{self.conf('recipient')}. If it does not arrive, check "
+                  f"that {self.conf('sender')} is on Amazon's approved "
+                  f"sender list.",
             detail={"bytes": path.stat().st_size})

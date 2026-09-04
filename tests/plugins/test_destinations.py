@@ -434,7 +434,7 @@ def test_kindle_success_does_not_promise_delivery(dests, monkeypatch, pdf):
                    {"smtp_user": "u", "smtp_password": "p"})
     monkeypatch.setattr(type(d), "_connect", lambda self: _SMTP())
     r = d.send(pdf, _meta())
-    assert r.ok and "approved senders" in r.message
+    assert r.ok and "approved sender list" in r.message
     assert "delivered" not in r.message.lower()
 
 
