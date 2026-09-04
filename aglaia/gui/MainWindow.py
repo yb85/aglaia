@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Optional
 from slugify import slugify
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QGroupBox, QMessageBox, QApplication, QTabWidget, QTabBar, QComboBox, QSlider, QDialog, QStackedWidget, QButtonGroup, QToolButton
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThreadPool, QRunnable
+from PySide6.QtCore import (Qt, QEvent, QTimer, Signal, QObject, QThreadPool,
+                            QRunnable)
 from PySide6.QtGui import QKeySequence, QPixmap
 
 from aglaia.gui.WebcamThread import WebcamThread
@@ -728,6 +729,15 @@ class MainWindow(QMainWindow):
         # an input field had focus, which is too easy to trigger by
         # accident. Modifier-gated shortcuts fix that.
         self._install_global_shortcuts()
+        # Capture bindings, taken before the focused widget sees them. Must
+        # be on the APPLICATION: a filter on the window is still downstream
+        # of its children, which is the whole problem (#119).
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+        except Exception:
+            pass
 
     def _install_global_shortcuts(self) -> None:
         """⌘Q quit · ⌘W close project → launcher · ⌘N new · ⌘O open ·
@@ -2239,16 +2249,67 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    #: What each bindable action does. One table, used by both the
+    #: application-level filter and the window's own fallback.
+    def _capture_actions(self) -> dict:
+        return {"scan": self.capture,
+                "trash": self.undo,
+                "rotate": self.rotate_camera}
+
+    def _capture_keys_have_priority(self) -> bool:
+        """Should a capture binding be taken BEFORE the focused widget?
+
+        Only while capture is genuinely in front. `keyPressEvent` is the last
+        stop in Qt's propagation, so a key any focused widget accepts never
+        reached the window at all: PgUp paged the list view's scroll area
+        instead of capturing, and the first press after a click was eaten by
+        whatever had just taken focus (#119)."""
+        if not self.isActiveWindow():
+            return False
+        # A dialog owns the keyboard — including the keybinding recorder,
+        # which must RECORD a bound key rather than fire it.
+        if QApplication.activeModalWidget() is not None:
+            return False
+        ct = getattr(self, "_capture_tab", None)
+        if ct is None or not ct.isVisible():
+            return False
+        from aglaia.gui import keybindings as _kb
+        return not _kb.is_text_entry(QApplication.focusWidget())
+
+    def eventFilter(self, obj, event):  # noqa: N802 — Qt API
+        """Application-level capture bindings (#119).
+
+        Installed on the QApplication, so it sees a key press before the
+        focused widget does. Everything that decides whether that is
+        appropriate lives in `_capture_keys_have_priority`; this only has to
+        stay cheap, because it runs on every event in the process."""
+        if event.type() == QEvent.Type.KeyPress:
+            # Held keys must not spray captures — a remote sends discrete
+            # presses, a stuck key does not.
+            if not event.isAutoRepeat() and self._capture_keys_have_priority():
+                from aglaia.gui import keybindings as _kb
+                action = _kb.action_for(event, self.key_bindings())
+                fn = self._capture_actions().get(action) if action else None
+                if fn is not None:
+                    fn()
+                    return True
+        return super().eventFilter(obj, event)
+
     def keyPressEvent(self, event):
         # Quit is bound to the platform-standard ⌘Q / Ctrl+Q via
         # `_install_global_shortcuts`. Don't accept a bare letter here:
         # it would fire whenever an input field briefly lost focus.
-        if self._match_key(event, "scan"):
-            self.capture()
-        elif self._match_key(event, "trash"):
-            self.undo()
-        elif self._match_key(event, "rotate"):
-            self.rotate_camera()
+        #
+        # The filter above normally gets here first; this stays as the path
+        # for a press that reached the window on its own (capture panel
+        # hidden, filter not installed).
+        if event.isAutoRepeat():
+            return
+        from aglaia.gui import keybindings as _kb
+        fn = self._capture_actions().get(
+            _kb.action_for(event, self.key_bindings()) or "")
+        if fn is not None:
+            fn()
             
     def handle_voice_command(self, cmd):
         if time.time() - self.last_voice_cmd_time < 1.0:
