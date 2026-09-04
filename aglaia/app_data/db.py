@@ -94,9 +94,6 @@ KEY_OCR_CONFIDENCE_GATE = "ocr_confidence_gate"  # float — per-line Vision
                                   # less. Range (0,1].
 KEY_SIDEBAR_TAB = "sidebar_active_tab"        # str | None — last active sidebar tab key
 KEY_SIDEBAR_COLLAPSED = "sidebar_collapsed"   # bool — sidebar content-pane hidden?
-KEY_DEBUG_OVERLAYS = "debug_overlays_shown"   # bool — Debug viewer's "Show
-                                  # debug overlays" toggle, remembered across
-                                  # sessions.
 KEY_WELCOME_SEEN = "welcome_seen"  # bool — first-run welcome/permissions
                                    # screen has been shown + dismissed.
 KEY_FILETYPE_ASSOC_DONE = "filetype_assoc_done"  # bool — auto-registered the
@@ -149,7 +146,6 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_OCR_DPI: 200,
     KEY_OCR_CONFIDENCE_GATE: 0.7,
     KEY_LIVE_OCR: False,
-    KEY_DEBUG_OVERLAYS: False,
     KEY_WELCOME_SEEN: False,
     KEY_FILETYPE_ASSOC_DONE: False,
     KEY_MISTRAL_BATCH: False,

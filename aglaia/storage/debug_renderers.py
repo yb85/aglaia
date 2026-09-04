@@ -98,6 +98,40 @@ def _label_bar(canvas: np.ndarray, text: str,
 # ── Per-processor renderers ───────────────────────────────────────
 
 
+def _bar_h(width: int) -> int:
+    """Height `_label_bar` prepends for a canvas of this width. The editable
+    geometry is expressed in the STAGE frame, but the picture it is drawn on
+    has the bar above it — so a handle layer needs the offset (see `_geom`'s
+    `origin`)."""
+    return max(48, int(width) // 36)
+
+
+def _geom(frame, *, origin=(0, 0), **fields) -> dict:
+    """Editable geometry to hand the GUI beside the rasterised diagnostics
+    (M9 #96).
+
+    The composite these renderers return is a picture — right for the rich
+    read-only diagnostics (span masks, baselines, the fitted grid), useless
+    for anything the user must grab. `geom` carries the same values as
+    NUMBERS, in the coordinates of the node's own stage frame, so the debug
+    view can paint draggable handles over them.
+
+    `frame_wh` is the size of that frame. It travels with every edit made on
+    it (`manual_overrides.frame_wh`), so a polygon can be validated against
+    the frame it was drawn on instead of being silently rescaled.
+
+    `origin` is where that frame sits inside the returned composite — the
+    label bar above it, the crop offset of a child drawn on its parent. A
+    handle layer adds it; without it the handles would sit a bar-height too
+    high, or a crop away, from the pixels they describe.
+    """
+    h, w = frame.shape[:2]
+    out = {"frame_wh": [int(w), int(h)],
+           "origin": [int(origin[0]), int(origin[1])]}
+    out.update({k: v for k, v in fields.items() if v is not None})
+    return out
+
+
 def _skew_renderer(img: np.ndarray, parent: Optional[np.ndarray],
                    meta: dict) -> list[dict]:
     angle = meta.get("skew_angle") or meta.get("skew")
@@ -124,7 +158,10 @@ def _skew_renderer(img: np.ndarray, parent: Optional[np.ndarray],
         f"SkewFinder | angle={float(angle):+.3f}°" if angle is not None
         else "SkewFinder | angle=?")
     return [{"url": _png_data_url(composite),
-             "label": "deskewed + profile"}]
+             "label": "deskewed + profile",
+             "geom": _geom(img, origin=(0, _bar_h(composite.shape[1])),
+                           skew_deg=(float(angle) if angle is not None
+                                     else None))}]
 
 
 def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
@@ -132,6 +169,11 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     crop = meta.get("parent_crop_xywh")
     roi = meta.get("roi")
     page_nums = meta.get("page_nums")
+    # THIS node's ROI, in THIS node's own frame — the child crop. The parent
+    # composite below shows every layout at once, which is the right picture
+    # to look at and the wrong one to edit on: the polygon the pipeline
+    # consumes is in child coordinates, so that is where the handles go.
+    _roi_pts = [[float(x), float(y)] for x, y in roi] if roi else None
 
     if parent is not None:
         canvas = _to_bgr(parent).copy()
@@ -198,8 +240,13 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
         if page_nums:
             txt += f" | page#={page_nums}"
         canvas = _label_bar(canvas, txt)
+        # Drawn on the PARENT: this node's polygon sits at its crop offset,
+        # under the label bar.
+        ox, oy = (int(crop[0]), int(crop[1])) if crop else (0, 0)
         return [{"url": _png_data_url(canvas),
-                 "label": "parent + layouts"}]
+                 "label": "parent + layouts",
+                 "geom": _geom(img, origin=(ox, oy + _bar_h(canvas.shape[1])),
+                               roi=_roi_pts)}]
 
     canvas = _to_bgr(img).copy()
     if roi:
@@ -209,7 +256,9 @@ def _page_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     if page_nums:
         txt += f" | page#={page_nums}"
     canvas = _label_bar(canvas, txt)
-    return [{"url": _png_data_url(canvas), "label": "child + ROI"}]
+    return [{"url": _png_data_url(canvas), "label": "child + ROI",
+             "geom": _geom(img, origin=(0, _bar_h(canvas.shape[1])),
+                           roi=_roi_pts)}]
 
 
 _SPAN_COLORS = [
@@ -633,8 +682,20 @@ def _dewarp_renderer(img: np.ndarray, parent: Optional[np.ndarray],
     sep = np.full((target_h, max(6, sep_w // 200), 3), 60, dtype=np.uint8)
     side_by_side = np.hstack([src_p, sep, out_p])
 
+    # The curl the fit landed on, in the frame the grid is drawn on — the
+    # step's INPUT image, un-padded. alpha/beta are pvec[6:8]; gamma lives in
+    # the stamped spine.
+    curl = None
+    if params is not None and len(params) > 7:
+        spine = rp.get("spine") or {}
+        curl = {"alpha": float(params[6]), "beta": float(params[7]),
+                "gamma": float(spine.get("gamma", 0.0) or 0.0)}
+    edit_frame = parent if parent is not None else img
     return [{"url": _png_data_url(side_by_side),
-             "label": "source <-> output"}]
+             "label": "source <-> output",
+             "geom": _geom(edit_frame,
+                           origin=(0, _bar_h(src_canvas.shape[1])),
+                           curl=curl)}]
 
 
 def _default_renderer(img: np.ndarray, parent: Optional[np.ndarray],

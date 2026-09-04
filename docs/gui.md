@@ -92,6 +92,56 @@ The three views surface it differently, all via `MainWindow.cell_disable_states`
 - **Gallery** (`ScansGalleryView`) — a toggle (replacing the star) on the
   current stage; left/right still walks stages.
 
+## Debug view / per-page editor (`DebugViewerTab`)
+
+Click a stage thumb and a closable tab walks that page's chain, root → leaf.
+Two panes: the stage strip on the left, the selected stage on the right.
+
+**The strip** lists one row per pipeline step: a small thumbnail, the step
+name, and a background that identifies the **processor**. It used to zebra on
+the row INDEX, which carries no information — two adjacent look-alike stages
+got two different shades and two unrelated stages got the same one, so
+scrolling had no visible effect. Keyed by processor it reads as bands, and the
+two DPIfixers and two SkewFinders of the default pipeline get a light/dark
+variant so a repeat is still a seam. Thumbnails are small on purpose: at the
+old 200-px portrait thumb a ten-step chain needed ~3700 px of strip, so the
+whole thing was a scroll with no landmarks; a default `book_curved_x2` chain
+now fits a normal window without scrolling.
+
+**The stage pane** shows the per-processor overlay composite — spans,
+baselines, the fitted quad and grid — rendered in the background by
+`storage/debug_renderers.py`. There is no "show overlays" toggle: this view
+exists to show the debug data.
+
+**Manual tuning** (M9). Three stages can be corrected by hand; the edit is
+stored per page-layout in `manual_overrides` and the page-branch is rerun.
+See [storage.md](storage.md#per-page-manual-overrides-manual_overrides) and
+[processors.md](processors.md).
+
+| Stage | Control |
+|---|---|
+| SkewFinder | a rotation handle on the image and a slider, both on the same angle |
+| PageDetector | the ROI polygon — drag a vertex, double-click an edge to add one |
+| PageDewarper | sliders for the curl α, β and the spine γ |
+
+Handles are vector, painted by `DebugEditCanvas.EditCanvas` over the raster.
+The renderers hand them the geometry as numbers (`geom`), in the coordinates
+of the **stage frame**, with `origin` saying where that frame sits inside the
+composite — the label bar above it, the crop offset of a child drawn on its
+parent. Every spatial edit stores the frame it was made on, so a polygon is
+validated rather than silently rescaled.
+
+**Auto-process** (on by default, remembered for the session) reruns the page
+as soon as a value changes. Turn it off to make several edits and run once —
+the **Reprocess** button lights up, and is dimmed while auto-process is on
+because there would be nothing for it to do. **Clear override** drops this
+layout's stored values and restores the automatic result.
+
+The slider ranges are chosen for manual tuning, not for the solver's freedom:
+curl is clamped at ±0.5 internally but a page past ±0.35 is already extreme,
+and a full-width slider over the solver's range would make every useful value
+a two-pixel move.
+
 ## Calibration buttons
 
 - **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `config/camera_params.json`. Restart capture to pick up the new calibration.

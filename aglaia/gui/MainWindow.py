@@ -1058,6 +1058,24 @@ class MainWindow(QMainWindow):
             return
         self._scans_scroll.verticalScrollBar().setValue(hi)
 
+    def _reprocess_for_editor(self, scan_id: int, branch_path: str) -> None:
+        """Rerun one page-branch after a manual-override edit.
+
+        Same fallback ladder as `set_step_disabled`: the branch rerun resumes
+        from the split point, and a scan that isn't split (or a missing branch
+        callback) falls back to the whole-scan rerun rather than silently
+        doing nothing."""
+        cb = self._reprocess_branch_callback
+        if cb is not None:
+            try:
+                cb(int(scan_id), str(branch_path or ""))
+                return
+            except Exception:
+                pass
+        snaps = self._reprocess_snaps_callback
+        if snaps is not None:
+            snaps({int(scan_id)})
+
     def _open_debug_viewer(self, node_id: int, label: str):
         """Open a debug viewer for `node_id` as a new closable tab.
 
@@ -1072,7 +1090,10 @@ class MainWindow(QMainWindow):
 
         from aglaia.gui.DebugViewerTab import DebugViewerWidget
         from aglaia.gui.theme import lucide as _lucide_tab
-        viewer = DebugViewerWidget(self.db_path, node_id, title_hint=label)
+        # The viewer is also the per-page editor (M9 #97): a manual override
+        # it stores has to rerun that page-branch to be visible.
+        viewer = DebugViewerWidget(self.db_path, node_id, title_hint=label,
+                                   reprocess_cb=self._reprocess_for_editor)
         tab_label = (self.tr("Inspect · {label}").format(label=label) if label
                      else self.tr("Inspect · node {nid}").format(nid=node_id))
         idx = self.tabs.addTab(viewer, _lucide_tab("image", size=14), tab_label)
