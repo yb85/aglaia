@@ -285,7 +285,9 @@ def test_corpus_sends_multipart_with_the_key_header(dests, monkeypatch, pdf):
 def test_corpus_never_sends_an_empty_field(dests, monkeypatch, pdf):
     """An empty field means "erase this" to the metadata route. Sending
     blanks would overwrite a harvested record with nothing."""
-    d = _configure(dests.get("send-to-corpus"), {}, {"api_key": "k"})
+    d = _configure(dests.get("send-to-corpus"),
+                   {"base_url": "https://corpus.example.org"},
+                   {"api_key": "k"})
     calls = []
     _patch_client(monkeypatch, d, calls, {"POST": _Resp(201, {"id": 1})})
     d.send(pdf, _meta(title="Only a title"))
@@ -295,7 +297,8 @@ def test_corpus_never_sends_an_empty_field(dests, monkeypatch, pdf):
 
 def test_corpus_defaults_fill_gaps_the_project_left(dests, monkeypatch, pdf):
     d = _configure(dests.get("send-to-corpus"),
-                   {"default_language": "French",
+                   {"base_url": "https://corpus.example.org",
+                    "default_language": "French",
                     "default_categories": "Ecclésiologie"},
                    {"api_key": "k"})
     calls = []
@@ -307,7 +310,8 @@ def test_corpus_defaults_fill_gaps_the_project_left(dests, monkeypatch, pdf):
 def test_corpus_prefers_the_projects_own_metadata_over_the_default(
         dests, monkeypatch, pdf):
     d = _configure(dests.get("send-to-corpus"),
-                   {"default_language": "French"}, {"api_key": "k"})
+                   {"base_url": "https://corpus.example.org",
+                    "default_language": "French"}, {"api_key": "k"})
     calls = []
     _patch_client(monkeypatch, d, calls, {"POST": _Resp(201, {"id": 1})})
     d.send(pdf, _meta(title="T", language="Latin"))
@@ -319,7 +323,9 @@ def test_corpus_prefers_the_projects_own_metadata_over_the_default(
     (400, False, "refused"), (413, False, "2 GiB"), (401, False, "API key")])
 def test_corpus_keeps_the_apis_four_outcomes_distinct(
         dests, monkeypatch, pdf, status, ok, needle):
-    d = _configure(dests.get("send-to-corpus"), {}, {"api_key": "k"})
+    d = _configure(dests.get("send-to-corpus"),
+                   {"base_url": "https://corpus.example.org"},
+                   {"api_key": "k"})
     _patch_client(monkeypatch, d, [],
                   {"POST": _Resp(status, {"id": 1, "detail": "bad ext"})})
     r = d.send(pdf, _meta())
@@ -330,7 +336,9 @@ def test_corpus_keeps_the_apis_four_outcomes_distinct(
 
 def test_corpus_refuses_an_inadmissible_extension_locally(dests, tmp_path):
     """A round trip to be told "no" is a round trip wasted."""
-    d = _configure(dests.get("send-to-corpus"), {}, {"api_key": "k"})
+    d = _configure(dests.get("send-to-corpus"),
+                   {"base_url": "https://corpus.example.org"},
+                   {"api_key": "k"})
     bad = tmp_path / "scan.tiff"
     bad.write_bytes(b"II*\x00")
     r = d.send(bad, _meta())
@@ -338,14 +346,18 @@ def test_corpus_refuses_an_inadmissible_extension_locally(dests, tmp_path):
 
 
 def test_corpus_refuses_an_empty_file(dests, tmp_path):
-    d = _configure(dests.get("send-to-corpus"), {}, {"api_key": "k"})
+    d = _configure(dests.get("send-to-corpus"),
+                   {"base_url": "https://corpus.example.org"},
+                   {"api_key": "k"})
     empty = tmp_path / "empty.pdf"
     empty.write_bytes(b"")
     assert d.send(empty, _meta()).ok is False
 
 
 def test_corpus_check_separates_down_from_key_rejected(dests, monkeypatch):
-    d = _configure(dests.get("send-to-corpus"), {}, {"api_key": "k"})
+    d = _configure(dests.get("send-to-corpus"),
+                   {"base_url": "https://corpus.example.org"},
+                   {"api_key": "k"})
     _patch_client(monkeypatch, d, [], {"GET": _Resp(503)})
     assert "unwell" in d.check().message
 
@@ -468,3 +480,35 @@ def test_a_credential_is_not_in_the_settings(dests):
                    {"api_key": "zk-super-secret"})
     assert "zk-super-secret" not in str(d.ctx.config.all())
     assert d.secret("api_key") == "zk-super-secret"
+
+
+# ── nobody's address ships in a public registry ──────────────────────
+
+def test_the_corpus_url_has_no_default(dests):
+    """A Corpus instance is a PRIVATE library. A default hostname in a plugin
+    that lives in a public registry publishes one person's server to everyone
+    who reads it — which is exactly what happened, and what this pins shut."""
+    d = dests.get("send-to-corpus")
+    field = next(f for f in d.CONFIG_FIELDS if f.key == "base_url")
+    assert field.default == ""
+    assert field.required is True
+    assert d.conf("base_url") in ("", None)
+
+
+def test_no_bundled_plugin_names_a_real_host(dests):
+    """Placeholders and help text too, not only defaults. `.example` and
+    `.example.org` are reserved by RFC 2606 precisely so that a sample cannot
+    accidentally be somebody's machine."""
+    import re as _re
+    from pathlib import Path as _P
+    root = _P("aglaia/plugins")
+    bad = []
+    for f in root.rglob("*.py"):
+        for host in _re.findall(r"https?://([A-Za-z0-9.-]+)", f.read_text("utf-8")):
+            h = host.lower()
+            if (h.endswith((".example", ".example.org", ".example.com"))
+                    or h in ("127.0.0.1", "localhost", "aglaia.bibli.cc",
+                             "manual.calibre-ebook.com", "smtp.gmail.com")):
+                continue
+            bad.append(f"{f.name}: {host}")
+    assert not bad, "a real hostname is being shipped: " + ", ".join(bad)
