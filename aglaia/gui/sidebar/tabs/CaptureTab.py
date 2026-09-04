@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QActionGroup, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -200,6 +200,7 @@ class CaptureTab(QWidget):
     is done by MainWindow so the chain logic stays in one place."""
 
     voice_engine_changed = Signal(str)  # engine key picked from the ▾ menu
+    edit_shortcuts_requested = Signal()  # pencil beside the shortcut legend
 
     PREVIEW_W = 280
     PREVIEW_H = 158   # 16:9
@@ -412,7 +413,32 @@ class CaptureTab(QWidget):
         outer.addStretch(1)
 
         # ── Keyboard shortcuts (bottom) — populated by MainWindow ────
-        outer.addWidget(self._field_label(self.tr("Keyboard shortcuts")))
+        _sc_head = QHBoxLayout()
+        _sc_head.setContentsMargins(0, 0, 0, 0)
+        _sc_head.addWidget(self._field_label(self.tr("Keyboard shortcuts")))
+        _sc_head.addStretch(1)
+        # Small pencil beside the legend: the legend is where a user looks to
+        # remember a key, so it is where they will look to change one (#103).
+        self.btn_edit_shortcuts = QToolButton()
+        self.btn_edit_shortcuts.setFixedSize(20, 20)
+        self.btn_edit_shortcuts.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_edit_shortcuts.setToolTip(self.tr("Edit capture shortcuts"))
+        self.btn_edit_shortcuts.setStyleSheet(
+            "QToolButton{background:transparent; border:none; padding:0;}"
+            f"QToolButton:hover{{background:{COLOR_OUTLINE_SUBTLE}; "
+            "border-radius:4px;}")
+        try:
+            from aglaia.gui.theme import lucide_pixmap as _lp
+            _pix = _lp("pencil", color=COLOR_FONT_DIM, size=13)
+            _pix.setDevicePixelRatio(2.0)
+            self.btn_edit_shortcuts.setIcon(_pix)
+            self.btn_edit_shortcuts.setIconSize(QSize(13, 13))
+        except Exception:
+            self.btn_edit_shortcuts.setText("…")
+        self.btn_edit_shortcuts.clicked.connect(
+            self.edit_shortcuts_requested.emit)
+        _sc_head.addWidget(self.btn_edit_shortcuts)
+        outer.addLayout(_sc_head)
         self.shortcut_legend = QLabel("—")
         self.shortcut_legend.setWordWrap(True)
         self.shortcut_legend.setStyleSheet(
@@ -559,16 +585,20 @@ class CaptureTab(QWidget):
     # ── Shortcut legend ───────────────────────────────────────────
 
     def set_shortcut_legend(self, mapping: dict) -> None:
-        """``mapping`` is ``{action_name: [keys]}`` (from
-        ``args.config['keycontrols']``). Renders ``scan: SPACE
-        ·  trash: BACKSPACE  ·  rotate: R``."""
+        """``mapping`` is ``{label: [sequence, …]}`` — already resolved and
+        labelled by `keybindings.legend`. Renders
+        ``Capture: Space / S  ·  Delete last scan: Backspace``.
+
+        Sequences are shown as `QKeySequence` prints them, NOT upper-cased:
+        "Shift+F5" upper-cased is "SHIFT+F5", which is not how any other
+        application in the user's session spells it."""
         if not mapping:
-            self.shortcut_legend.setText("—")
+            self.shortcut_legend.setText(self.tr("none set"))
             return
         bits = []
-        for action, keys in mapping.items():
+        for label, keys in mapping.items():
             if not keys:
                 continue
-            label = " / ".join(str(k).upper() for k in keys)
-            bits.append(f"<b>{action}</b>: {label}")
-        self.shortcut_legend.setText("  ·  ".join(bits) or "—")
+            bits.append(f"<b>{label}</b>: " + " / ".join(str(k) for k in keys))
+        self.shortcut_legend.setText(
+            "  ·  ".join(bits) or self.tr("none set"))

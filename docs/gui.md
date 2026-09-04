@@ -259,7 +259,28 @@ Quit (⌘Q / Ctrl+Q) and close-tab (⌘W / Ctrl+W) use platform-standard
 shortcuts wired via `QKeySequence.StandardKey`; they are **not** configurable
 in `keycontrols`.
 
-`_match_key` handles named keys (`Space`, `Backspace`, `Return`, `Enter`, `Escape`, `Tab`, `Delete`) and single-character keys.
+**Editable in the app.** The capture panel's shortcut legend carries a small
+pencil; it opens a modal with **two slots per action**. Clicking a slot *arms*
+it — the next key or combination pressed is what it becomes, and focus leaves.
+No record button, no timeout. Tab and Escape stay the dialog's, so an armed
+field cannot trap the user in it; bind Escape from the other slot.
+
+Two slots per action is not decoration. A **presentation remote**'s fullscreen
+button typically cycles between `Shift+F5` and `Esc`, so driving capture from
+one needs both bound to the same action — which is the case this was built
+for.
+
+Bindings are stored per user in the app-data config DB (`KEY_KEYBINDINGS`) as
+`QKeySequence` portable strings, and override the YAML `keycontrols` per
+action. An action the user **cleared** is stored as an empty list: that is a
+decision, not an absence, so it does not fall back to the YAML default.
+
+Matching goes through `QKeySequence` (`aglaia/gui/keybindings.py`). The
+hand-rolled matcher it replaced compared key NAMES against `event.text()` and
+a table of seven names, and never looked at `event.modifiers()` — so no
+combination was expressible at all. Every legacy default (`Space`, `S`,
+`Backspace`, `D`, `R`) parses as a `QKeySequence`, so a config written before
+the change keeps working untouched.
 
 ## Input transforms
 

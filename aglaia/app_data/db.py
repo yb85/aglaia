@@ -63,6 +63,11 @@ KEY_VOICE_CONTROL = "voice_control"    # bool
 KEY_INPUT_DPI = "input_dpi"            # float
 KEY_CAMERA_ID = "camera_id"            # int
 KEY_VIEW_MODE = "scans_view_mode"      # "list" | "grid" | "gallery"
+KEY_KEYBINDINGS = "keybindings"        # {action: [seq, …]} — QKeySequence
+                                  # portable strings ("Shift+F5", "Esc").
+                                  # Set = overrides the YAML `keycontrols`
+                                  # for that action; absent = YAML default.
+                                  # See `aglaia/gui/keybindings.py`.
 KEY_DISABLE_TIP_BUTTONS = "disable_tip_buttons"  # bool
 KEY_MODELS_DIR = "models_dir"          # str — relative → APP_DATA, absolute = override; "" = built-in cache
 KEY_LAYOUT_HEURISTIC_NO_WARN = "layout_heuristic_no_warn"  # bool
@@ -137,6 +142,7 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     KEY_INPUT_DPI: 100.0,
     KEY_CAMERA_ID: 0,
     KEY_VIEW_MODE: "grid",
+    KEY_KEYBINDINGS: {},
     KEY_DISABLE_TIP_BUTTONS: False,
     KEY_MODELS_DIR: "",
     KEY_LAYOUT_HEURISTIC_NO_WARN: False,
