@@ -29,6 +29,7 @@ import numpy as np
 
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors import erase as _erase
+from aglaia.processors import text_metrics as _tm
 from aglaia.Status import Status
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.geometry import (
@@ -330,25 +331,17 @@ class TrapezoidalCorrection(AbstractImageProcessor):
         ink = cv2.bitwise_not(bw) if bw.mean() > 127 else bw
 
         H_img, W_img = ink.shape
-        # Char-like CC filter bounds derived from page DPI so the
-        # estimator survives both very-low and very-high DPI inputs.
-        cc_h_min = max(3, int(round(dpi * 0.04)))
-        cc_h_max = max(cc_h_min + 1, int(round(dpi * 0.45)))
-        cc_w_min = max(2, int(round(dpi * 0.02)))
-        cc_w_max = max(cc_w_min + 1, int(round(dpi * 0.60)))
         n_cc, cc_labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=4)
-        char_h = [int(s[3]) for s in stats[1:]
-                  if cc_h_min <= s[3] <= cc_h_max
-                  and cc_w_min <= s[2] <= cc_w_max]
-        if len(char_h) >= 30:
-            h_med = float(np.median(char_h))
+        # The shared estimator (text_metrics) — the dewarper uses the same
+        # one, and reads the result from meta instead of recomputing it.
+        h_med = _tm.median_char_height(stats, dpi)
+        if h_med > 0:
             kw = max(9, int(round(self.opt.kernel_char_mult * h_med)))
         else:
-            h_med = 0.0
             kw = max(9, int(round(self.opt.line_join_mm * dpi / 25.4)))
         # Record the text scale relative to the analysis image so process()
         # can stamp it into the output meta (see _last_char_h_frac).
-        self._last_char_h_frac = (h_med / float(H_img)) if h_med > 0 else 0.0
+        self._last_char_h_frac = _tm.char_h_frac(h_med, H_img)
         # Strip oversized blobs (table-grid lines / borders) before span
         # detection: any CC whose bounding-box area exceeds (limit × char h)²
         # is wiped from the ink, so the span-builder never chains it into a

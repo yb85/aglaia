@@ -264,6 +264,19 @@ belt-and-braces wipe rather than the thing that removes the border artefact.
 
 BW inputs are a no-op (pass-through).
 
+## Shared text-scale estimate (`aglaia/processors/text_metrics.py`)
+
+Both `TrapezoidalCorrection` and `PageDewarper` size their line-joining
+morphology from the median height of character-like connected components. Each
+used to carry its own copy of that estimator; two copies of one estimate drift
+apart. Now there is one (`median_char_height`), and the rule is **meta is a
+cache, never the only source**: the keystone step writes `char_h_frac`
+(dimensionless — median glyph height over the analysis frame height, so it
+survives a resample), the dewarper reads it if it is there and computes it
+through the same function if it is not. The pipeline works with or without the
+keystone step; the two steps agree by construction; the only thing meta buys is
+skipping a recomputation. (#143)
+
 ## TrapezoidalCorrection (`aglaia/processors/TrapezoidalCorrection.py`)
 
 Keystone (pure perspective) rectification: text-line baselines → vanishing point (RANSAC + TLS) → column quadrilateral → Zhang-He metric aspect recovery → single `cv2.warpPerspective`.

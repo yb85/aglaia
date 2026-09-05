@@ -37,7 +37,7 @@ comments.
 | Key | Written by | Read by | What happens if the writer is removed or reordered |
 |---|---|---|---|
 | `page_side` | PageDetector | TrapezoidalCorrection, PageDewarper | reader gets `None`, silently changes behaviour |
-| `char_h_frac` | TrapezoidalCorrection | PageDewarper | dewarp loses its character-height prior, silently |
+| `char_h_frac` | TrapezoidalCorrection **and** PageDewarper, each from its own copy of the estimator | nobody, yet | not a dependency — a **duplication**: two implementations of one estimate that can disagree. The fix is the reverse of a dependency: one shared estimator, meta as its cache (§4.1b) |
 | `roi` | PageDetector, SkewFinder, DPIfixer… | Binarizer, everyone | fine — it is the one key everybody understands |
 | `parent_crop_xywh` | PageDetector | TrapezoidalCorrection | silently `None` |
 | `erase` | any erase producer (plugins) | Binarizer, Replay | designed for this; the only key with a written contract (`erase.py`) |
@@ -108,6 +108,7 @@ nothing breaks.**
 | 4 | `summary(meta) -> str` on the class | `oplog`'s name table | new |
 | 5 | colour by `REPLAY_TRAIT` | `_PROC_PALETTE` by name — the palette already *means* "what kind of step", so key it on the kind | new |
 | 6 | `PROVIDES_META` cleanup (drop the options) | — | folded into 1 |
+| 1b | **meta as cache, never as the only source.** A step that needs a page statistic (`char_h_frac`) reads it from meta if an earlier step left it, else computes it — through the **same shared function** the writer used. The pipeline works with or without the writer; the two steps agree by construction; the only thing meta buys is skipping a recomputation. | #143 |
 
 Order: 1 first (it is the one that turns invisible coupling into a build-time
 error), then 3 (largest deletion of host code), then #139, 4 and 5.

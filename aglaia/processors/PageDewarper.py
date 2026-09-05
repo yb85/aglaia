@@ -32,6 +32,7 @@ os.environ.setdefault("ENABLE_PJRT_COMPATIBILITY", "1")
 os.environ.setdefault("JAX_SKIP_CUDA_CONSTRAINTS_CHECK", "1")
 
 from aglaia.processors import erase as _erase
+from aglaia.processors import text_metrics as _tm
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.batching import BatchableTrait, BatchItem
@@ -207,7 +208,8 @@ def _text_mask_dpi(small_rgb: np.ndarray, pagemask: np.ndarray,
                    analysis_dpi: float, line_join_mm: float,
                    is_bw: bool = False,
                    kernel_char_mult: float = 1.5,
-                   large_blob_limit: float = 0.0
+                   large_blob_limit: float = 0.0,
+                   h_med_hint: Optional[float] = None,
                    ) -> tuple[np.ndarray, float]:
     """Build a text mask using mm-sized MORPH_CLOSE.
 
@@ -230,21 +232,19 @@ def _text_mask_dpi(small_rgb: np.ndarray, pagemask: np.ndarray,
 
     # Kernel width tracks observed text scale (median char-like CC height).
     # DPI alone is brittle: a wrong-DPI input grows row-wide stripes that
-    # vertically weld adjacent lines. CC filter bounds derive from analysis
-    # DPI to survive very-low and very-high DPI inputs.
-    cc_h_min = max(3, int(round(analysis_dpi * 0.04)))
-    cc_h_max = max(cc_h_min + 1, int(round(analysis_dpi * 0.45)))
-    cc_w_min = max(2, int(round(analysis_dpi * 0.02)))
-    cc_w_max = max(cc_w_min + 1, int(round(analysis_dpi * 0.60)))
+    # vertically weld adjacent lines.
+    #
+    # The estimate comes from meta when an upstream step (the keystone
+    # correction) already made it — `h_med_hint` — and from the SAME shared
+    # estimator otherwise. Meta is a cache, not the only source: the pipeline
+    # works without the keystone step, and the two steps cannot disagree
+    # because there is one function.
     n, cc_labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
-    char_h = [int(s[3]) for s in stats[1:]
-              if cc_h_min <= s[3] <= cc_h_max
-              and cc_w_min <= s[2] <= cc_w_max]
-    if len(char_h) >= 30:
-        h_med = float(np.median(char_h))
+    h_med = float(h_med_hint) if (h_med_hint or 0) > 0 \
+        else _tm.median_char_height(stats, analysis_dpi)
+    if h_med > 0:
         kw = max(9, int(round(kernel_char_mult * h_med)))
     else:
-        h_med = 0.0
         kw = max(9, int(round(line_join_mm * analysis_dpi / 25.4)))
     # Wipe oversized blobs (table-grid lines / borders) before the morphology
     # + span detection, so they don't get chained into spurious spans. Uses
@@ -1372,13 +1372,14 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
         page_outline = np.array([[mx, my], [mx, h-my], [w-mx, h-my], [w-mx, my]])
 
         # 2. Extract Contours and Spans (DPI-aware text mask).
-        text_mask, h_med = _text_mask_dpi(small, pagemask, analysis_dpi,
-                                          self.line_join_mm, is_bw=is_bw,
-                                          kernel_char_mult=self.kernel_char_mult,
-                                          large_blob_limit=self.large_blob_limit)
+        text_mask, h_med = _text_mask_dpi(
+            small, pagemask, analysis_dpi, self.line_join_mm, is_bw=is_bw,
+            kernel_char_mult=self.kernel_char_mult,
+            large_blob_limit=self.large_blob_limit,
+            h_med_hint=_tm.cached_char_height(img_buf.meta, small.shape[0]))
         # Text scale relative to the analysis image (dimensionless), stamped
         # into the output meta as "char_h_frac" for downstream steps.
-        char_h_frac = (h_med / float(small.shape[0])) if h_med > 0 else 0.0
+        char_h_frac = _tm.char_h_frac(h_med, small.shape[0])
 
         # Tie span-filter bounds to h_med (DPI fallback if char-scale unknown):
         # library defaults drop spans on warped lines or wide inter-word gaps.
