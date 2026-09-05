@@ -228,7 +228,39 @@ options:
   morpho_close: 2        # Morphological close (0–10) after threshold
 ```
 
-ROI masking (`_apply_roi_mask`): if the input buffer carries a `meta["roi"]` polygon (set by SkewFinder / PageDetector), pixels outside the polygon are forced to white after binarization. `roi_shrink` is the number of `cv2.erode` iterations applied to the mask first.
+### `wolf` vs `wolf++`
+
+**`wolf`** is doxapy's Wolf over the whole frame, with the page outline wiped
+white afterwards.
+
+**`wolf++` is Wolf that understands missing values**, and it is the same
+algorithm at both ends of the chain. A pixel inside an erase region — or
+outside the page outline — is not thresholded and then painted over: it is
+excluded from the local mean and variance *and* from Wolf's global minimum
+grey, then written white. `_wolfpp` runs `wolf_masked`; `Binarizer.apply_replay`
+runs the same function on the same parameters, and the two agree to the pixel
+(`tests/processors/test_erase_masks.py`).
+
+It did not, until #144. The constructor mapped `WOLF++` to `WOLF` for doxapy,
+so the forward pass ran **plain Wolf** and the `++` only engaged at replay: a
+user who selected `wolf++` got two different algorithms depending on which end
+of the chain they looked at. The pre-binarize paper fill existed to paper over
+an algorithm that had never been asked to handle the hole — which is why it
+grew the region by half a window, and why that halo ate the line of text
+beside a stamp (1625 px of real ink, to remove ~25 px of specks).
+
+`wolf++` falls through to plain Wolf when there is nothing to be mask-aware
+about — no ROI and no erase — because the answer is then identical and doxapy
+is three times faster (7 ms vs 23 ms on a 3 Mpx page).
+
+Non-Wolf methods have no notion of a missing value, so an erase region is
+still filled with the paper tone measured around it before thresholding — with
+no halo.
+
+ROI masking (`_apply_roi_mask`): pixels outside `meta["roi"]` are forced white
+after binarization, with `roi_shrink` erode iterations first. Under `wolf++`
+the outline is already excluded from the statistics, so this is a
+belt-and-braces wipe rather than the thing that removes the border artefact.
 
 BW inputs are a no-op (pass-through).
 

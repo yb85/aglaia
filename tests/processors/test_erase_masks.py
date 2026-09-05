@@ -18,7 +18,7 @@ import pytest
 
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors import erase
-from aglaia.processors.Binarizer import Binarizer, BinarizerOption
+from aglaia.processors.Binarizer import Binarizer, BinarizerOption, wolf_masked
 
 SQUARE = [[40, 40], [120, 40], [120, 120], [40, 120]]
 
@@ -267,3 +267,97 @@ def test_the_binarizer_stamps_what_it_erased():
     out = Binarizer(BinarizerOption(method="wolf")).process(buf)
     rp = out.meta["replay_params"]
     assert rp["erase"] and rp["erase_grow"] == 2
+
+
+# ── wolf++ means the same algorithm at both ends of the chain ────────
+
+def test_wolfpp_forward_pass_matches_replay_exactly():
+    """The point of `wolf++`, and it was not true.
+
+    The constructor mapped WOLF++ to WOLF for doxapy, so the forward pass ran
+    PLAIN Wolf and the `++` only engaged at replay: a user who selected wolf++
+    got two different algorithms depending on which end of the chain they
+    looked at. The paper fill existed to paper over an algorithm that had
+    never been asked to handle the hole — which is why it needed a halo, and
+    why the halo ate the text beside the stamp.
+
+    Replay is the forward pass with stored transforms, reordered by trait. The
+    binarize block has to be the same function in both, so the same pixels and
+    the same parameters must give the same answer to the pixel.
+    """
+    pytest.importorskip("doxapy")
+    img = _stamped_page()
+    poly = [[85, 95], [215, 95], [215, 185], [85, 185]]
+    opt = BinarizerOption(method="wolf++", window_px_wolf=30, k_wolf=0.25,
+                          erase_grow=2, morpho_close=0)
+
+    buf = ImageBuffer(img.copy(), ImageType.GRAY, dpi=300.0)
+    buf.filestem = "t"
+    erase.add(buf.meta, poly)
+    forward = Binarizer(opt).process(buf).buffer
+    params = buf.meta["replay_params"]
+
+    from aglaia.processors.replay_transform import ReplayContext
+    h, w = img.shape[:2]
+    mask = erase.punch(np.full((h, w), 255, np.uint8), [poly], (h, w))
+    replayed, _ = Binarizer.apply_replay(
+        img.copy(), mask, params,
+        ReplayContext(dpi=300.0, debug_dir=None, debug_tag=""))
+
+    assert params["method"] == "wolf++"
+    assert int((forward != replayed).sum()) == 0
+
+
+def test_wolfpp_without_a_mask_falls_through_to_plain_wolf():
+    """Nothing to be mask-aware about — no page outline, no erase — so the
+    mask-aware path would spend three times the work on the same answer."""
+    pytest.importorskip("doxapy")
+    img = _stamped_page()
+    plain = Binarizer(BinarizerOption(method="wolf", window_px_wolf=30,
+                                      k_wolf=0.25, morpho_close=0))
+    pp = Binarizer(BinarizerOption(method="wolf++", window_px_wolf=30,
+                                   k_wolf=0.25, morpho_close=0))
+
+    def run(b):
+        buf = ImageBuffer(img.copy(), ImageType.GRAY, dpi=300.0)
+        buf.filestem = "t"
+        return b.process(buf).buffer
+
+    assert int((run(plain) != run(pp)).sum()) == 0
+
+
+def test_the_erased_region_is_excluded_from_the_statistics():
+    """Not merely painted over afterwards.
+
+    The distinguishing evidence is OUTSIDE the polygon: post-hoc whitening
+    cannot change a single pixel there, so if excluding the stamp from the
+    mask changes the result beside it, the exclusion is real — a window
+    straddling the boundary no longer sees the stamp's darkness in its mean
+    and variance.
+
+    Deliberately not asserted: that the whole page moves. Wolf's global
+    minimum grey does drop from 20 to 150 here, and measurably nothing far
+    from the stamp flips — the local mean and variance dominate. The effect
+    is local, and claiming otherwise would be a test asserting a story rather
+    than a result.
+
+    The page is low contrast on purpose. On `_stamped_page` ink is 40 against
+    paper 235, and nothing the statistics do can flip a pixel; faint text is
+    where thresholding is decided, and faint text is what this feature is for.
+    """
+    img = np.full((300, 300), 200, np.uint8)         # pale paper
+    for y in range(30, 280, 20):
+        img[y:y + 6, 20:280] = 150                   # faint text
+    img[100:180, 90:210] = 20                        # a very dark stamp
+    poly = [[85, 95], [215, 95], [215, 185], [85, 185]]
+    h, w = img.shape[:2]
+    full = np.full((h, w), 255, np.uint8)
+    punched = erase.punch(full.copy(), [poly], (h, w))
+
+    counted = wolf_masked(img, full, 30, k=0.25)
+    excluded = wolf_masked(img, punched, 30, k=0.25)
+
+    outside = erase.as_mask([poly], (h, w)) == 0
+    changed = int(((counted != excluded) & outside).sum())
+    assert changed > 0, ("nothing outside the polygon changed, so the region "
+                         "is only being whitened, not excluded")
