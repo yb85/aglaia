@@ -171,11 +171,34 @@ class CheckResult:
     Separate from `send` so a user can prove a configuration without pushing a
     book into a library, and so "host unreachable", "credentials rejected" and
     "account cannot write" stay three different messages — they have three
-    different fixes, and one "failed" for all of them is useless."""
+    different fixes, and one "failed" for all of them is useless.
+
+    `message` is for the user, and only for the user: what happened and what to
+    do, in a sentence they can act on. `detail` is where the status code, the
+    exception and the server's own words go. The host shows the message and
+    logs the detail — a plugin that concatenates the two gets a dialog nobody
+    can read and a log line nobody can search.
+    """
 
     ok: bool
     message: str
     detail: dict = field(default_factory=dict)
+    #: Which KIND of failure, when the plugin can tell. The host uses it to
+    #: label the result; a plugin that cannot distinguish leaves it "".
+    #:
+    #: Modelled on Thunderbird's, because collapsing these loses the fix:
+    #: "network" and "auth" look identical to a user and share no remedy.
+    #: "unknown" is a real member, not a gap — a taxonomy without one gets
+    #: quietly widened until every failure is "network".
+    kind: str = ""
+
+    #: The kinds, and the one-word label the host shows for each.
+    NETWORK = "network"      # could not reach it at all
+    AUTH = "auth"            # reached it; it rejected the credentials
+    PERMISSION = "permission"  # signed in; not allowed to do this
+    SERVER = "server"        # reached it; it answered with a problem
+    CONFIG = "config"        # a setting is wrong or missing, before any I/O
+    UNKNOWN = "unknown"
 
 
 class Destination:

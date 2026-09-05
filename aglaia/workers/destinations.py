@@ -134,14 +134,32 @@ def _import_entry(found: Found):
 
 
 _loaded: dict[str, Destination] = {}
-#: slug -> why it did not load. A plugin that fails must be able to SAY so:
-#: "check the Log tab" is not a diagnosis when nothing routes there, and the
-#: user is left with a plugin that is installed, listed, and inert.
+#: slug -> why it did not load, for the LOG. A plugin that fails must be able
+#: to say so: "check the Log tab" is not a diagnosis when nothing routes there,
+#: and the user is left with a plugin that is installed, listed, and inert.
+#:
+#: These are diagnoses for whoever WROTE the plugin. They named the missing
+#: decorator, the exception type and the slug — to a reader who installed the
+#: plugin from the registry and can decorate nothing. `load_error` is the
+#: user's half; this is the author's.
 _errors: dict[str, str] = {}
 
 
 def load_error(slug: str) -> str:
-    """Why `slug` is not in `load_all()`, or "" if it is (or was never seen)."""
+    """One sentence for the person who installed `slug`, or "" if it loaded.
+
+    Deliberately says less than `load_detail`. Every failure here has the same
+    shape for a user — the plugin is broken and they did not break it — and the
+    same two options, which the caller offers: remove it, or report it. Which
+    Python name was missing changes neither."""
+    load_all()
+    if slug not in _errors:
+        return ""
+    return "This plugin is damaged and cannot be used."
+
+
+def load_detail(slug: str) -> str:
+    """Why it failed, for the log and for the plugin's author."""
     load_all()
     return _errors.get(slug, "")
 
@@ -198,7 +216,8 @@ def load_all(*, log: Optional[Callable[[str, str], None]] = None
         if slug not in _loaded and slug not in _errors:
             _errors[slug] = ("it imported but registered no destination — is "
                              "the class decorated with @register_destination, "
-                             "and does its `name` match the plugin slug?")
+                             "and does its `name` match the plugin slug? "
+                             "(see CONTRIBUTING.md in the plugins repo)")
     return dict(_loaded)
 
 

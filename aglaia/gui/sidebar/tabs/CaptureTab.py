@@ -294,7 +294,7 @@ class CaptureTab(QWidget):
         # ── Calibration buttons ─────────────────────────────────────
         cal_row = QHBoxLayout()
         cal_row.setSpacing(6)
-        self.btn_full_calibrate = QPushButton(self.tr("Full Calibration"))
+        self.btn_full_calibrate = QPushButton(self.tr("Full calibration"))
         self.btn_full_calibrate.setStyleSheet(_BTN_QSS)
         self.btn_full_calibrate.setToolTip(
             self.tr(
@@ -366,7 +366,7 @@ class CaptureTab(QWidget):
         )
         self.btn_voice.engine_changed.connect(self.voice_engine_changed)
 
-        self.btn_freehand = QPushButton(self.tr("Hands-free (SIFT)"))
+        self.btn_freehand = QPushButton(self.tr("Hands-free tracking"))
         self.btn_freehand.setCheckable(True)
         self.btn_freehand.setStyleSheet(_TOGGLE_QSS)
         self.btn_freehand.setToolTip(

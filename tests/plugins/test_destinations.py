@@ -355,11 +355,67 @@ def test_corpus_refuses_an_empty_file(dests, tmp_path):
 
 
 def test_corpus_check_separates_down_from_key_rejected(dests, monkeypatch):
+    """The two have nothing in common except the word "failed", and knowing
+    which one it is decides where the user spends the next hour.
+
+    Asserted on `kind` rather than on the wording: the taxonomy is the
+    contract, and a test that pins prose blocks every improvement to it."""
+    from aglaia.plugin_api import CheckResult
     d = _configure(dests.get("send-to-corpus"),
                    {"base_url": "https://corpus.example.org"},
                    {"api_key": "k"})
     _patch_client(monkeypatch, d, [], {"GET": _Resp(503)})
-    assert "unwell" in d.check().message
+    down = d.check()
+    assert down.ok is False and down.kind == CheckResult.SERVER
+    assert down.detail.get("status") == 503
+
+    # /healthz fine, then the authenticated call refused.
+    _patch_client(monkeypatch, d, [], {"GET": _Resp(401)})
+    d.ctx.config.set("base_url", "https://corpus.example.org")
+    rejected = d.check()
+    assert rejected.ok is False
+    assert rejected.kind in (CheckResult.AUTH, CheckResult.SERVER)
+
+
+def test_a_failed_check_never_puts_the_machine_detail_in_the_message(dests,
+                                                                    monkeypatch):
+    """The message is for the user; `detail` is for the log.
+
+    A plugin that concatenates them produces a dialog nobody can read and a
+    log line nobody can search. Status codes, exception type names and header
+    names must not appear in the sentence the user is shown."""
+    import re
+    from aglaia.plugin_api import CheckResult
+    banned = re.compile(r"\b(4\d\d|5\d\d)\b"           # bare status codes
+                        r"|[A-Za-z]*Error\b|[A-Za-z]*Exception\b"
+                        r"|\bX-[A-Za-z-]+\b|\bhttpx\b|\btraceback\b",
+                        re.I)
+    for slug, replies in (("send-to-corpus", {"GET": _Resp(503)}),
+                          ("send-to-calibre", {"GET": _Resp(401)}),
+                          ("send-to-calibre", {"GET": _Resp(403)})):
+        d = _configure(dests.get(slug),
+                       {"base_url": "https://example.org"},
+                       {"api_key": "k", "username": "u", "password": "p"})
+        _patch_client(monkeypatch, d, [], replies)
+        res = d.check()
+        assert res.ok is False
+        bad = banned.search(res.message)
+        assert not bad, f"{slug}: {bad.group(0)!r} in {res.message!r}"
+        # …and it is still recoverable from the log.
+        assert res.detail, f"{slug}: nothing logged for a failure"
+
+
+def test_every_bundled_check_names_its_failure_kind(dests, monkeypatch):
+    """An untagged failure shows as a bare "Failed", which is the state this
+    whole taxonomy exists to replace."""
+    from aglaia.plugin_api import CheckResult
+    kinds = {CheckResult.NETWORK, CheckResult.AUTH, CheckResult.PERMISSION,
+             CheckResult.SERVER, CheckResult.CONFIG, CheckResult.UNKNOWN}
+    for slug in ("send-to-calibre", "send-to-kindle", "send-to-corpus"):
+        d = dests.get(slug)                      # nothing configured
+        res = d.check()
+        assert res.ok is False
+        assert res.kind in kinds, f"{slug} reported kind={res.kind!r}"
 
 
 # ── kindle: SMTP, and the two rules Amazon enforces late ─────────────

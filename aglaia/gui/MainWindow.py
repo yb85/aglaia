@@ -807,7 +807,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QActionGroup
         view_menu = mb.addMenu(self.tr("View"))
         view_menu.addAction(_act(
-            self.tr("Show Downloader"), None,
+            self.tr("Show downloader"), None,
             lambda: self._open_model_downloader()))
         view_menu.addAction(_act(
             self.tr("Mistral OCR jobs…"), None,
@@ -913,7 +913,7 @@ class MainWindow(QMainWindow):
 
     def load_existing_scans(self):
         """Rebuild widgets from the project SQLite DB (M0 source of truth)."""
-        self.status_label.setText(self.tr("Loading existing scans..."))
+        self.status_label.setText(self.tr("Loading existing scans…"))
         n_spawned = 0
         completed_scan_ids: list[int] = []
         with db_session(self.db_path) as conn:
@@ -1239,7 +1239,7 @@ class MainWindow(QMainWindow):
         self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_frames)
         frame = self.spinner_frames[self.spinner_idx]
         progress = f"({self.workers_started}/{self.total_workers})"
-        self.loading_label.setText(self.tr("{frame} Workers loading {progress}...").format(
+        self.loading_label.setText(self.tr("{frame} Workers loading {progress}…").format(
             frame=frame, progress=progress,
         ))
 
@@ -1326,7 +1326,7 @@ class MainWindow(QMainWindow):
         v.addWidget(cam_combo)
         self._capture_cam_combo = cam_combo
 
-        btn = QPushButton(self.tr("Activate Capture"))
+        btn = QPushButton(self.tr("Activate capture"))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setMinimumHeight(36)
         btn.setStyleSheet(
@@ -1913,9 +1913,7 @@ class MainWindow(QMainWindow):
         from aglaia.workers import destinations as dest
         d = dest.load_all().get(name)
         if d is None:
-            QMessageBox.warning(
-                self, self.tr("{name} did not load").format(name=name),
-                dest.load_error(name) or self.tr("it is not loaded"))
+            self._warn_plugin_broken(name)
             return
         if d.missing_settings():
             self._on_destination_settings(name)
@@ -1926,15 +1924,30 @@ class MainWindow(QMainWindow):
         else:
             self.make_pdf("output")
 
+    def _warn_plugin_broken(self, name: str) -> None:
+        """Tell the user a plugin will not load, and log why.
+
+        The reason is not the same sentence for both audiences. The user
+        installed this from the registry and did not break it; every failure
+        here leaves them the same two options. The missing decorator, the
+        exception type and the slug are for whoever wrote it, and go to the
+        log."""
+        from aglaia.workers import destinations as dest
+        detail = dest.load_detail(name)
+        if detail:
+            self._on_log_line("error", f"[plugins] {name}: {detail}")
+        QMessageBox.warning(
+            self, self.tr("{name} cannot be used").format(name=name),
+            self.tr("This plugin is damaged. Remove it from the Plugins tab, "
+                    "or report it to whoever wrote it."))
+
     def _on_destination_settings(self, name: str) -> None:
         """Open one export plugin's settings from the Export tab."""
         from aglaia.gui.PluginsTab import PluginSettingsDialog
         from aglaia.workers import destinations as dest
         d = dest.load_all().get(name)
         if d is None:
-            QMessageBox.warning(
-                self, self.tr("{name} did not load").format(name=name),
-                dest.load_error(name) or self.tr("it is not loaded"))
+            self._warn_plugin_broken(name)
             return
         PluginSettingsDialog(d, self).exec()
         # Its "Needs: …" line is now stale.
@@ -2173,8 +2186,8 @@ class MainWindow(QMainWindow):
             HAS_VOSK, _model_dir = False, (lambda: None)
         if not HAS_VOSK:
             self._voice_unavailable(self.tr(
-                "Offline voice needs the 'voice' extra "
-                "(uv sync --extra voice)."), offer_download=False)
+                "Voice control is not available in this build."),
+                offer_download=False)
             return
         if _model_dir() is None:
             self._voice_unavailable(self.tr(
@@ -2934,9 +2947,10 @@ class MainWindow(QMainWindow):
             self._export_tab.set_busy("")
             self._pending_send = ""
             self._discard_if_staged(output_path)
-            self.toast(self.tr("Markdown export failed — {why}").format(
-                why=f"{type(e).__name__}: {e}"), 6000)
-            self._on_log_line("error", f"Markdown export failed: {e}")
+            self.toast(self.tr("Markdown export failed. See the Log tab."),
+                       6000)
+            self._on_log_line(
+                "error", f"Markdown export failed: {type(e).__name__}: {e}")
             self.status_label.setText(self.tr("Markdown export failed."))
             QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
             return
@@ -3054,7 +3068,7 @@ class MainWindow(QMainWindow):
         else:
             # We have enough samples, finalize
             self.status_label.setText(self.tr("Finalizing calibration... please wait."))
-            self.btn_full_calibrate.setText(self.tr("Processing..."))
+            self.btn_full_calibrate.setText(self.tr("Processing…"))
             self.btn_full_calibrate.setEnabled(False)
             QApplication.processEvents()
 
@@ -3080,7 +3094,7 @@ class MainWindow(QMainWindow):
 
             # Reset state
             self.is_calibrating = False
-            self.btn_full_calibrate.setText(self.tr("Full Calibration"))
+            self.btn_full_calibrate.setText(self.tr("Full calibration"))
             self.btn_full_calibrate.setEnabled(True)
 
     def calibrate_dpi(self):
@@ -3307,15 +3321,31 @@ class MainWindow(QMainWindow):
         Lines emitted by Qt-thread workers (OcrWorker.log_line) skip the
         multiprocessing log_queue, so we ALSO need to push them into the
         rolling buffer here — otherwise a later-opened Log tab seeds
-        from a buffer that's missing every OCR error / engine print."""
-        self.status_bar_widget.log.push(level, text)
+        from a buffer that's missing every OCR error / engine print.
+
+        Nothing in here may raise. Its callers are error paths: they log the
+        reason, then show the user a dialog. A log call that throws replaces a
+        handled failure with an unhandled one — the user loses the dialog that
+        was about to explain what happened, and gains a traceback. The status
+        bar is also not up during early startup and window teardown, which is
+        exactly when the interesting failures happen."""
+        try:
+            self.status_bar_widget.log.push(level, text)
+        except Exception:
+            pass
         try:
             buf = self.monitor_thread.log_buffer
             buf.append(f"[{level.upper()}] {text}")
         except Exception:
             pass
-        if self._log_tab is not None:
-            self._log_tab.append(level, text)
+        try:
+            if self._log_tab is not None:
+                self._log_tab.append(level, text)
+        except Exception:
+            pass
+        # Always reaches somewhere readable, even with no window left.
+        if str(level).lower() in ("error", "warning"):
+            print(f"[{level.upper()}] {text}", file=sys.stderr)
 
     def _on_status_scan_imported(self, _payload: dict):
         # Pipeline activity resumed — make sure the bar header reads
@@ -3959,11 +3989,14 @@ class MainWindow(QMainWindow):
                                                         f"[plugin:{s}] {m}"))
             widget = win.factory(ctx)
         except Exception as e:  # noqa: BLE001
+            self._on_log_line(
+                "error", f"[plugin:{slug}] {win.title} would not open: "
+                         f"{type(e).__name__}: {e}")
             QMessageBox.warning(
-                self, self.tr("Plugin window"),
-                self.tr("{slug} could not open {title}: {err}").format(
-                    slug=slug, title=win.title,
-                    err=f"{type(e).__name__}: {e}"))
+                self, self.tr("{title} cannot be opened").format(
+                    title=win.title),
+                self.tr("This plugin window failed to start. See the Log tab "
+                        "for the reason."))
             return
         held[key] = widget
         widget.setWindowTitle(f"{win.title} — {slug}")

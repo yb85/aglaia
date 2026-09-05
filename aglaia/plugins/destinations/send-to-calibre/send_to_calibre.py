@@ -111,28 +111,41 @@ class CalibreDestination(Destination):
         the account exists but cannot write, which is a calibre user setting
         and nothing this plugin can fix."""
         import httpx
+        # Settings first, network second. A round trip that can only fail
+        # costs the user the wait and then reports "could not connect", which
+        # sends them to look at the server instead of at the empty field.
+        missing = self.missing_settings()
+        if missing:
+            return CheckResult(False, "Still needed: " + ", ".join(missing),
+                               kind=CheckResult.CONFIG)
         root = self._root()
         if not root:
-            return CheckResult(False, "No server URL set.")
+            return CheckResult(False, "No server URL set.",
+                               kind=CheckResult.CONFIG)
         try:
             with self._client() as c:
                 r = c.get(f"{root}/ajax/library-info")
         except httpx.HTTPError as e:
             return CheckResult(
-                False, f"Cannot reach {root} — {type(e).__name__}. "
-                       f"Is the content server running?")
+                False, f"Could not reach {root}. Is the content server "
+                       f"running?",
+                {"error": f"{type(e).__name__}: {e}"},
+                kind=CheckResult.NETWORK)
         if r.status_code == 401:
             return CheckResult(
-                False, "Rejected (401). Either the username/password is wrong, "
-                       "or the server expects the other authentication mode — "
-                       f"this is set to {self.conf('auth_mode')}.")
+                False, "The username or password was rejected — or the server "
+                       "expects the other authentication mode.",
+                {"status": 401, "auth_mode": self.conf("auth_mode")},
+                kind=CheckResult.AUTH)
         if r.status_code == 403:
             return CheckResult(
-                False, "Authenticated, but this user may not write to the "
-                       "library. Give it write access in the calibre server's "
-                       "user manager.")
+                False, "Signed in, but this user cannot write to the library. "
+                       "Give it write access in calibre's user manager.",
+                {"status": 403}, kind=CheckResult.PERMISSION)
         if r.status_code >= 400:
-            return CheckResult(False, f"Server answered {r.status_code}.")
+            return CheckResult(False, "calibre could not answer.",
+                               {"status": r.status_code},
+                               kind=CheckResult.SERVER)
         libs, current = (), ""
         try:
             data = r.json()
@@ -143,9 +156,9 @@ class CalibreDestination(Destination):
         chosen = str(self.conf("library_id") or "") or current
         if libs and chosen and chosen not in libs:
             return CheckResult(
-                False, f"Connected, but no library called {chosen!r}. "
+                False, f"Connected, but there is no library called {chosen}. "
                        f"This server has: {', '.join(libs)}.",
-                {"libraries": list(libs)})
+                {"libraries": list(libs)}, kind=CheckResult.CONFIG)
         where = f" — library {chosen}" if chosen else ""
         return CheckResult(True, f"Connected to calibre{where}.",
                            {"libraries": list(libs)})

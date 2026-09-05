@@ -190,6 +190,37 @@ the Finder.
 There is also a **plug icon** in the right-hand rail, above Settings, that
 opens the Plugins tab.
 
+## Reporting a failure
+
+`CheckResult` carries a `kind` alongside its message, because "could not
+connect" and "wrong password" have nothing in common except the word *failed*,
+and a user who reads only the first two words should already be looking in the
+right place. Modelled on Thunderbird's taxonomy:
+
+| `kind` | Shown as | Means |
+|---|---|---|
+| `CheckResult.NETWORK` | Cannot connect | could not reach it at all |
+| `CheckResult.AUTH` | Wrong credentials | reached it; it rejected them |
+| `CheckResult.PERMISSION` | Not allowed | signed in; not permitted to do this |
+| `CheckResult.SERVER` | Server problem | reached it; it reported a problem |
+| `CheckResult.CONFIG` | Missing setting | a setting is wrong, before any I/O |
+| `CheckResult.UNKNOWN` | Failed | genuinely cannot tell |
+
+`UNKNOWN` is a real member, not a gap. A taxonomy without one gets quietly
+widened until every failure is `NETWORK`.
+
+**`message` is for the user; `detail` is for the log.** The host shows one and
+logs the other. A plugin that concatenates them produces a dialog nobody can
+read and a log line nobody can search — so the status code, the exception type
+and the server's own words go in `detail`. This is checked by
+`tests/plugins/test_destinations.py`.
+
+Check the settings before touching the network. A round trip that can only fail
+costs the user the wait and then reports "could not connect", which sends them
+to look at their server instead of at the empty field.
+
+See [ui-writing.md](ui-writing.md) for how to word any of it.
+
 ## Listing them
 
 ```bash

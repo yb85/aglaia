@@ -120,9 +120,12 @@ class ExportTab(QWidget):
         self.chk_jbig2.setToolTip(
             self.tr(
                 "1-bit pages: encode with JBIG2 (≈30% smaller than G4)."
+            # No build instructions: whoever installed the app cannot run
+            # maturin, and whoever can already knows how. Say what they get
+            # instead, since G4 is a perfectly good outcome.
             ) if _jbig2_ok else self.tr(
-                "JBIG2 encoder not installed — exports use CCITT G4. "
-                "Build it: cd aglaia_jbig2 && uv run maturin develop --release"
+                "The JBIG2 encoder is not available in this build. "
+                "1-bit pages use CCITT G4 instead, which is slightly larger."
             )
         )
         pdf_extras_l.addWidget(self.chk_jbig2)

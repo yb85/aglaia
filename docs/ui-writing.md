@@ -452,24 +452,32 @@ An English UI written in a French-speaking household needs these more than most.
 
 ## 12. Where Aglaïa stands
 
-Measured over 939 `tr()` strings, 21 plugin `Field(help=…)` strings and 41
-plugin result messages:
+Measured over 936 `tr()` strings, 21 plugin `Field(help=…)` strings and 41
+plugin result messages, after the #138 sweep:
 
-| | |
-|---|---|
-| Short labels in sentence case | 93.3 % ✅ |
-| Strings splicing a raw exception into the UI | 3 ⚠️ |
-| Strings shared between log and UI | 0 ✅ |
-| `…` vs `...` | 66 / 3 ⚠️ |
-| Straight vs smart apostrophes | 32 / 0 — pick one |
-| Median `tr()` length | 3 words ✅ |
-| Median plugin field help | 9 words ✅ |
-| Strings naming an env var, header, path or flag | 12 ❌ |
+| | Before | Now |
+|---|---|---|
+| Short labels in sentence case | 93.3 % | **95.6 %** |
+| Strings naming an env var, header, path or flag | 12 | **0** |
+| Raw exceptions spliced into the UI | 3 | **0** |
+| `…` vs `...` | 66 / 3 | **69 / 0** |
+| Strings shared between log and UI | 0 | 0 |
+| Median `tr()` length | 3 words | 3 words |
+| Median plugin field help | 9 words | 9 words |
 
-The sweep is tracked in **#138**. The catalogue is in better shape than it
-looked; the defect is concentrated in the failure paths and the advanced
-settings, which is exactly where the corpus says every project's defects
-concentrate.
+For comparison: Calibre, the most disciplined application measured, is at
+96.6 % sentence case; the corpus median is around 65 %.
+
+Four of these rules are enforced by `tests/test_ui_writing.py` — the
+do-not-write list, no spliced exceptions, the ellipsis character, and sentence
+case outside the menu bar. Style is normally a review matter, but these four
+are mechanical, a violation is invisible in review (the sentence reads fine; it
+is simply addressed to the wrong person), and the catalogue is about to be
+frozen for translation. Everything else in this guide stays a matter of
+judgement.
+
+Remaining, deliberately not automated: straight vs smart apostrophes (32 / 0 —
+a decision, not a defect), and the long tail of failure-path prose.
 
 ---
 

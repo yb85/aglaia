@@ -101,7 +101,7 @@ def _show_dialog(parent: Optional[QWidget]) -> str:
             "No page-detection model (EAST, DBNet or Apple Vision) is "
             "installed, so Aglaïa can't split or crop pages — spreads will "
             "pass through whole.\n\n"
-            "Open the Model Downloader to fetch a detector, or continue "
+            "Open the model downloader to fetch a detector, or continue "
             "without page detection for now."
         )
     )

@@ -423,7 +423,7 @@ class SettingsTab(QWidget):
             str(self._values.get(cfg.KEY_MODELS_DIR, "") or "")
         )
         self.models_dir_row.edit.setPlaceholderText(
-            self.tr("models  (relative → APP_DATA; absolute path also accepted)")
+            self.tr("models  (a relative path goes inside Aglaïa's data folder)")
         )
         form.addRow(self.tr("ML models directory:"), self.models_dir_row)
 
@@ -441,7 +441,7 @@ class SettingsTab(QWidget):
         self.models_dir_row.edit.textChanged.connect(self._refresh_models_effective)
         form.addRow(effective)
 
-        open_btn = QPushButton(self.tr("Open Model Downloader…"))
+        open_btn = QPushButton(self.tr("Open model downloader…"))
         open_btn.clicked.connect(self._open_downloader)
         form.addRow(open_btn)
         return w
@@ -498,9 +498,9 @@ class SettingsTab(QWidget):
         _db = _adp / "aglaia-config.db"
         info = QLabel(
             self.tr(
-                '<i>APP_DATA: <a href="{p}">{p}</a></i><br>'
-                '<i>config DB: <a href="{db}">aglaia-config.db</a> '
-                "(inside APP_DATA)</i>"
+                '<i>Data folder: <a href="{p}">{p}</a></i><br>'
+                '<i>Settings: <a href="{db}">aglaia-config.db</a>, '
+                "inside it</i>"
             ).format(p=_adp, db=_db)
         )
         info.setStyleSheet(f"color: {COLOR_FONT_SECTION_LABEL};")

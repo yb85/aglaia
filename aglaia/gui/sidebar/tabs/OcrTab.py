@@ -862,9 +862,11 @@ class OcrTab(QWidget):
         except Exception:
             where = ""
         msgs = {
-            "env": self.tr("Key set (from MISTRAL_API_KEY env var)."),
-            "keychain": self.tr("Key stored in your OS keychain."),
-            "env_file": self.tr("Key stored in APP_DATA/.env (less secure)."),
+            # Where the key came from, in terms of what the user did — not
+            # the name of the variable or the file it landed in.
+            "env": self.tr("Key set by your shell environment."),
+            "keychain": self.tr("Key stored in your keychain."),
+            "env_file": self.tr("Key stored as plain text. Less secure."),
         }
         if where:
             lbl.setText("✓ " + msgs.get(where, self.tr("API key set.")))
@@ -910,10 +912,13 @@ class OcrTab(QWidget):
         edit.setMinimumWidth(440)
         v.addWidget(edit)
         # Smaller, dimmed description — the supersede order.
+        # Which key wins, said as an outcome. The variable's name belongs in
+        # the log and the docs; a user who set one already knows it, and a
+        # user who did not cannot act on it.
         note = QLabel(self.tr(
-            "The keychain key is superseded by the MISTRAL_API_KEY "
-            "environment variable (shell), or by {env_path}."
-        ).format(env_path=env_path))
+            "A key set in your shell environment, or stored as plain text, "
+            "is used instead of this one."
+        ))
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
         v.addWidget(note)

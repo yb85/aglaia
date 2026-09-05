@@ -117,6 +117,21 @@ class KindleDestination(Destination):
             smtp.login(user, pwd)
         return smtp
 
+    def _kind(self, e: Exception) -> str:
+        """Which failure this is, so the host can label it in one word.
+
+        Told apart because the fixes have nothing in common: a rejected
+        password is a different afternoon from an unreachable host."""
+        if isinstance(e, smtplib.SMTPAuthenticationError):
+            return CheckResult.AUTH
+        if isinstance(e, (smtplib.SMTPConnectError, OSError)):
+            return CheckResult.NETWORK
+        if isinstance(e, smtplib.SMTPNotSupportedError):
+            return CheckResult.CONFIG
+        if isinstance(e, smtplib.SMTPException):
+            return CheckResult.SERVER
+        return CheckResult.UNKNOWN
+
     def _explain(self, e: Exception) -> str:
         """SMTP errors are precise; the point is to say what to change."""
         if isinstance(e, smtplib.SMTPAuthenticationError):
@@ -142,11 +157,14 @@ class KindleDestination(Destination):
         tidy from the desktop."""
         missing = self.missing_settings()
         if missing:
-            return CheckResult(False, "Still needed: " + ", ".join(missing))
+            return CheckResult(False, "Still needed: " + ", ".join(missing),
+                               kind=CheckResult.CONFIG)
         try:
             smtp = self._connect()
         except Exception as e:  # noqa: BLE001 — every failure is a message
-            return CheckResult(False, self._explain(e))
+            return CheckResult(False, self._explain(e),
+                               {"error": f"{type(e).__name__}: {e}"},
+                               kind=self._kind(e))
         try:
             smtp.quit()
         except Exception:

@@ -1000,7 +1000,7 @@ class ModelDownloaderDialog(QDialog):
     def __init__(self, parent: QWidget | None = None,
                  autostart_keys: list[str] | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(self.tr("Model Downloader"))
+        self.setWindowTitle(self.tr("Model downloader"))
         self.setModal(False)
         self.setMinimumSize(760, 460)
         # spec.key -> _ModelCard, so callers can autostart a specific model.

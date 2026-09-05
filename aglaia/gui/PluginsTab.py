@@ -106,6 +106,18 @@ KIND_LABEL = {
 }
 
 
+#: One word for each failure kind a plugin can report. Deliberately not the
+#: enum's own name: "auth" is our vocabulary, "Wrong credentials" is theirs.
+KIND_LABEL_UI = {
+    "network": "Cannot connect",
+    "auth": "Wrong credentials",
+    "permission": "Not allowed",
+    "server": "Server problem",
+    "config": "Missing setting",
+    "unknown": "Failed",
+}
+
+
 class _IndexJob(QThread):
     """Fetch the index off the GUI thread — it is a network call, and a tab
     that freezes while it opens is a tab people stop opening."""
@@ -309,11 +321,27 @@ class PluginSettingsDialog(QDialog):
             # nobody can catch.
             if not self._alive:
                 return
-            self._status.setText(outcome.message or self.tr("No answer."))
+            msg = outcome.message or self.tr("The server did not answer.")
+            # A one-word label for WHICH kind of failure, when the plugin can
+            # tell them apart. "Could not connect" and "wrong password" have
+            # nothing in common except the word "failed", and a user who reads
+            # only the first two words should already be looking in the right
+            # place.
+            label = KIND_LABEL_UI.get(getattr(outcome.result, "kind", ""), "")
+            if label and not outcome.ok:
+                msg = f"{self.tr(label)} — {msg}"
+            self._status.setText(msg)
             self._status.setStyleSheet(
                 f"color: {COLOR_SUCCESS if outcome.ok else COLOR_ERROR}; "
                 f"font-size: 11px;")
             self._test_btn.setEnabled(True)
+            # The machine detail never reaches the label. It is the thing that
+            # makes a bug report useful and the thing that makes a dialog
+            # unreadable.
+            detail = getattr(outcome.result, "detail", None)
+            if detail or outcome.error:
+                print(f"[plugins] {self.dest.name} check: "
+                      f"{outcome.error or detail}")
 
         job = DestinationJob(self.dest.check)
         job.done.connect(_done)
@@ -889,11 +917,15 @@ class PluginsTab(QWidget):
         from aglaia.workers import destinations as dest
         d = dest.load_all().get(slug)
         if d is None:
-            # Say WHY. "Check the Log tab" is not a diagnosis, and it leaves
-            # the user with a plugin that is installed, listed and inert.
-            why = dest.load_error(slug) or self.tr(
-                "it was not found among the loaded plugins")
+            # Two audiences, two sentences. The user gets what it means for
+            # them and what to do; the log gets the Python reason, which is
+            # for whoever wrote the plugin.
+            detail = dest.load_detail(slug)
+            if detail:
+                print(f"[plugins] {slug}: {detail}")
             QMessageBox.warning(
-                self, self.tr("{slug} did not load").format(slug=slug), why)
+                self, self.tr("{slug} cannot be used").format(slug=slug),
+                self.tr("This plugin is damaged. Remove it below, or report "
+                        "it to whoever wrote it."))
             return
         PluginSettingsDialog(d, self).exec()

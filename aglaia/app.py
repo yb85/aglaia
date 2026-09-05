@@ -1118,10 +1118,14 @@ def launch_gui(cfg: CliConfig) -> int:
                     slim_in_place(reopen_path)
                 except Exception as e:
                     from PySide6.QtWidgets import QMessageBox
+                    # The exception goes to the log; the dialog says what it
+                    # means for the project, which is that nothing was lost.
+                    print(f"[slim-down] {type(e).__name__}: {e}",
+                          file=sys.stderr)
                     QMessageBox.critical(
                         None, "Slim-down failed",
-                        f"Could not slim down the project:\n"
-                        f"{type(e).__name__}: {e}")
+                        "The project could not be slimmed down. It is "
+                        "unchanged, and safe to open.")
             choice = _choice_for_open_path(reopen_path)
         else:
             _trace("main: constructing StartupWindow")
