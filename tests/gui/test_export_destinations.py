@@ -37,6 +37,11 @@ def app():
 
 @pytest.fixture()
 def tab(app, tmp_path, monkeypatch):
+    """An Export tab against an APP_DATA with NO plugins installed.
+
+    Which is the honest starting point: nothing ships inside the app, so a
+    fresh install has no exporters beyond PDF, Markdown and the slim project.
+    Tests that need one install it (`_install_ready_destination`)."""
     monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path))
     import importlib
     import aglaia.app_data as ad
@@ -48,9 +53,10 @@ def tab(app, tmp_path, monkeypatch):
     tab = ExportTab()
     yield tab
     # This test file registers a destination in a process-global registry.
-    # Leaving it there made the bundled-destination tests see four where they
-    # expect three — which is how `forget()` came to exist.
+    # Leaving it there let it leak into every later test — which is how
+    # `forget()` came to exist.
     d.forget("ready-dest")
+    d.forget("needy-dest")
     d.reset_for_tests()
 
 
@@ -73,37 +79,50 @@ def _button(card):
     return card.findChildren(QPushButton)[0]
 
 
-def test_an_exporter_is_a_format_card_like_any_other(tab):
+def test_a_fresh_install_offers_no_exporters(tab):
+    """Nothing ships inside the app, so nothing appears until it is installed.
+
+    The defect this replaced: three destinations lived in `aglaia/plugins/` and
+    loaded unconditionally, so "Export to Calibre server" was in the Export tab
+    of every install whether or not anyone had asked for it."""
+    tab.refresh_destinations()
+    assert _send_keys(tab) == []
+    # …and the built-in formats are untouched.
+    assert {"pdf", "markdown", "slim"} <= set(tab.format_group.keys())
+
+
+def test_an_exporter_is_a_format_card_like_any_other(tab, tmp_path):
     """Same group as PDF and Markdown — that is the whole point."""
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
     keys = tab.format_group.keys()
     assert "pdf" in keys and "markdown" in keys
-    assert f"{P}send-to-calibre" in keys
-    assert f"{P}send-to-kindle" in keys
+    assert f"{P}ready-dest" in keys
 
 
-def test_selecting_one_is_selecting_a_format(tab):
+def test_selecting_one_is_selecting_a_format(tab, tmp_path):
     """No separate send button: the ordinary Export button runs it, so the
     destination has to be reachable as the current format."""
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
-    assert tab.format_group.set_current_key(f"{P}send-to-calibre")
-    assert tab.current_format() == f"{P}send-to-calibre"
+    assert tab.format_group.set_current_key(f"{P}ready-dest")
+    assert tab.current_format() == f"{P}ready-dest"
 
 
-def test_an_unconfigured_destination_says_so_on_the_card(tab):
+def test_an_unconfigured_destination_says_so_on_the_card(tab, tmp_path):
     """Before it is used, not after the export has already run."""
+    _install_needy_destination(tmp_path)
     tab.refresh_destinations()
-    card = _frame(tab, f"{P}send-to-calibre")
+    card = _frame(tab, f"{P}needy-dest")
     assert any("Not set up yet" in t for t in _texts(card))
 
 
-def test_the_card_resolves_to_a_format_aglaia_can_produce(tab):
-    """calibre takes pdf/md/txt; Aglaïa writes pdf and md. txt must not be
-    offered, and the default must be one of the two."""
+def test_the_card_resolves_to_a_format_aglaia_can_produce(tab, tmp_path):
+    """A destination that also accepts txt and epub must not offer them:
+    Aglaïa writes pdf and md, and nothing else."""
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
-    assert tab.destination_format("send-to-calibre") in ("pdf", "md")
-    # Kindle takes epub/docx too, and neither is something we can write.
-    assert tab.destination_format("send-to-kindle") in ("pdf", "md")
+    assert tab.destination_format("ready-dest") in ("pdf", "md")
 
 
 def _install_ready_destination(tmp_path):
@@ -128,7 +147,36 @@ def _install_ready_destination(tmp_path):
         "class R(Destination):\n"
         "    name = 'ready-dest'\n"
         "    display = 'Ready dest'\n"
-        "    accepts = ('pdf',)\n",
+        # txt and epub are here on purpose: the card must offer only the two
+        # formats Aglaïa can actually write.
+        "    accepts = ('pdf', 'md', 'txt', 'epub')\n",
+        encoding="utf-8")
+    d.reset_for_tests()
+    return slug
+
+
+def _install_needy_destination(tmp_path):
+    """One with a required setting, so "Not set up yet" is reachable."""
+    from aglaia.app_data import plugin_registry as reg
+    from aglaia.workers import destinations as d
+    slug = "needy-dest"
+    p = reg.installed_root("destinations") / slug
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "aglaia-plugin.toml").write_text(
+        '[plugin]\nslug = "needy-dest"\nname = "Needy dest"\n'
+        'version = "1.0.0"\nentry = "needy_dest.py"\nlicense = "MIT"\n'
+        '[requires]\napi = 1\n[capabilities]\nconfig = true\n',
+        encoding="utf-8")
+    (p / "needy_dest.py").write_text(
+        "from aglaia.plugin_api import (Destination, Field,\n"
+        "                               register_destination)\n"
+        "@register_destination\n"
+        "class N(Destination):\n"
+        "    name = 'needy-dest'\n"
+        "    display = 'Needy dest'\n"
+        "    accepts = ('pdf',)\n"
+        "    CONFIG_FIELDS = (Field('base_url', 'Server URL', 'str', '',\n"
+        "                           required=True),)\n",
         encoding="utf-8")
     d.reset_for_tests()
     return slug
@@ -141,13 +189,14 @@ def test_a_configured_destination_says_nothing_alarming(tab, tmp_path):
     assert not any("Not set up yet" in t for t in _texts(card))
 
 
-def test_the_settings_button_asks_the_host_by_name(tab):
+def test_the_settings_button_asks_the_host_by_name(tab, tmp_path):
     """The tab knows WHICH destination, not how to reach it."""
+    _install_ready_destination(tmp_path)
     tab.refresh_destinations()
     settings = []
     tab.destination_settings_requested.connect(settings.append)
-    _button(_frame(tab, f"{P}send-to-calibre")).click()
-    assert settings == ["send-to-calibre"]
+    _button(_frame(tab, f"{P}ready-dest")).click()
+    assert settings == ["ready-dest"]
 
 
 def test_refreshing_keeps_the_selection(tab, tmp_path):

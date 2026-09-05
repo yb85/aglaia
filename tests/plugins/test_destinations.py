@@ -22,18 +22,8 @@ import importlib
 
 import pytest
 
-
-@pytest.fixture()
-def dests(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path))
-    import aglaia.app_data as ad
-    import aglaia.app_data.plugin_ctx as pc
-    importlib.reload(ad)
-    importlib.reload(pc)
-    from aglaia.workers import destinations as D
-    D.reset_for_tests()
-    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self: None)
-    return D
+# `dests` — a fresh APP_DATA with the three first-party destinations installed
+# through the real installer — lives in conftest.py.
 
 
 @pytest.fixture()
@@ -58,11 +48,61 @@ def _configure(dest, conf=None, secrets=None):
 
 # ── what the KIND guarantees, for all three ──────────────────────────
 
-def test_all_three_are_discovered_as_bundled(dests):
-    found = {f.slug: f for f in dests.discover()}
-    assert set(found) == {"send-to-calibre", "send-to-kindle",
-                          "send-to-corpus"}
-    assert all(f.bundled for f in found.values())
+def test_nothing_is_a_destination_until_it_is_installed(tmp_path, monkeypatch):
+    """The defect this replaced: three destinations shipped inside the app and
+    loaded unconditionally, so "Export to Calibre server" was in the Export tab
+    of every install whether or not anyone had asked for it."""
+    monkeypatch.setenv("AGLAIA_APP_DATA_DIR", str(tmp_path / "empty"))
+    import aglaia.app_data as ad
+    import aglaia.app_data.plugin_ctx as pc
+    for m in (ad, pc):
+        importlib.reload(m)
+    from aglaia.workers import destinations as D
+    D.reset_for_tests()
+    try:
+        assert D.discover() == []
+        assert D.load_all() == {}
+    finally:
+        D.reset_for_tests()
+
+
+def test_installing_makes_all_three_appear(dests):
+    found = {f.slug for f in dests.discover()}
+    assert found == {"send-to-calibre", "send-to-kindle", "send-to-corpus"}
+
+
+def test_they_live_under_app_data_and_nowhere_in_the_app(dests):
+    """A plugin is self-contained. If any of its code were importable from the
+    application package, it would not be a plugin — it would be a feature with
+    a manifest."""
+    from pathlib import Path
+    import aglaia
+    app = Path(aglaia.__file__).parent
+    for f in dests.discover():
+        assert app not in f.dir.parents, f"{f.slug} lives inside the app"
+    assert not (app / "plugins").exists(), (
+        "aglaia/plugins is back — plugins must not ship inside the app")
+
+
+def test_a_plugin_touches_nothing_but_the_plugin_api(dests):
+    """`aglaia.plugin_api` is the whole contract. A plugin reaching past it
+    into `aglaia.workers` or `aglaia.processors` is coupled to internals that
+    carry no compatibility promise, and it would break on an upgrade that
+    breaks nothing else."""
+    import ast
+    bad = []
+    for f in dests.discover():
+        for py in sorted(f.dir.rglob("*.py")):
+            for n in ast.walk(ast.parse(py.read_text("utf-8"))):
+                mods = []
+                if isinstance(n, ast.Import):
+                    mods = [a.name for a in n.names]
+                elif isinstance(n, ast.ImportFrom) and n.module:
+                    mods = [n.module]
+                for mod in mods:
+                    if mod.split(".")[0] == "aglaia" and mod != "aglaia.plugin_api":
+                        bad.append(f"{f.slug}/{py.name}: {mod}")
+    assert not bad, "plugins reaching past the API:\n  " + "\n  ".join(bad)
 
 
 def test_each_gets_its_own_context(dests):

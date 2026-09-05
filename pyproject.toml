@@ -27,11 +27,10 @@ dependencies = [
     "page-dewarp>=0.2.7",
     "pikepdf>=10.0.0",
     "pillow>=10.0.0",
-    # The bundled `destinations` plugins (#133) speak HTTP — calibre wants
-    # digest auth, the corpus wants multipart with a header. Base, not an
-    # extra: the destinations ship inside the app, and a plain
-    # `pip install aglaia` whose bundled plugins raise ImportError the first
-    # time you click Send is worse than not shipping them.
+    # `destinations` plugins speak HTTP — calibre wants digest auth, the
+    # corpus wants multipart with a header. Base, not an extra: no plugin may
+    # declare a dependency of its own (see docs/plugin-store.md), so whatever
+    # a first-party plugin needs, the host has to already have.
     "httpx>=0.27",
     # Mistral Document AI — the Cloud OCR engine. Base, not an extra, for the
     # same reason as `keyring`: the card is in the OCR tab of every build, and
@@ -214,7 +213,7 @@ include = ["aglaia*"]
 # default.yml + pipeline YAMLs (resolved via aglaia.assets), the SQLite
 # schema migrations (db.py globs schema/*.sql at runtime — omitting these
 # means "no such table: project" on first open), the model catalogue, the
-# compiled Qt translations, and the bundled destination plugins' manifests
+# compiled Qt translations
 # (the .py files ship as package modules; the .toml beside each one does not
 # unless it is named here, and a destination without its manifest is skipped
 # by discovery — it would simply vanish from an installed build).
@@ -225,8 +224,6 @@ aglaia = [
     "app_data/*.json",
     "i18n/*.ts",
     "i18n/qm/*.qm",
-    "plugins/**/*.toml",
-    "plugins/**/*.md",
 ]
 
 [dependency-groups]

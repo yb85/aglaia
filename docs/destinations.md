@@ -5,10 +5,29 @@ Kindle mailbox, a private corpus. It is the third plugin kind, beside
 `processors` and `ocr`, and the first one built on the plugin API designed in
 [plugin-store.md](./plugin-store.md).
 
-Three ship with the app, in `aglaia/plugins/destinations/<slug>/`, in exactly
-the layout the plugin registry will use — a manifest, one top-level module, a
-README. They are working destinations and simultaneously the worked example
-every submitted plugin is measured against.
+**None ship inside the app.** Three do exist and are written by us, but they
+live in the registry — [github.com/yb85/aglaia-plugins](https://github.com/yb85/aglaia-plugins)
+— and install into `<APP_DATA>/plugins/destinations/<slug>/` like anything
+else. A fresh install has no exporters beyond PDF, Markdown and the slim
+project.
+
+They were bundled at first, under `aglaia/plugins/destinations/`, and loaded
+unconditionally. That was wrong twice over. "Export to Calibre server" appeared
+in the Export tab of every install whether or not the user had ever asked for
+it, and a Kindle plugin's SMTP settings existed in a build belonging to someone
+with no Kindle. **Code that ships in the application and always runs is a
+feature; a plugin is something the user chose.** Calling the first one the
+second gets the worst of both — a plugin's surface area with none of the
+consent.
+
+It also made the plugin path optional, which is how such a path rots. Now the
+first-party destinations install through exactly the code every third-party one
+does, so a broken installer is a broken calibre export and someone notices.
+
+Authorship is a separate axis from where the code came from: a registry entry
+written by Aglaïa is still labelled as ours in the install dialog
+(`RegistryEntry.first_party`), because who wrote it is what the user is being
+asked to judge.
 
 | Slug | Sends via | Accepts |
 |---|---|---|

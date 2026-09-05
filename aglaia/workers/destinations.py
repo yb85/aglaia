@@ -8,18 +8,25 @@
 """Discovery and wiring for `destinations` plugins (#133).
 
 A destination is somewhere a finished export goes: a calibre library, a Kindle
-mailbox, a corpus. Three ship with the app, under
-``aglaia/plugins/destinations/<slug>/``, in exactly the layout the plugin
-registry will use — same manifest, same one-module rule — so they are both
-working destinations and the reference every submitted plugin is measured
-against. A user's own destinations live in
-``<APP_DATA>/plugins/destinations/<slug>/`` and load the same way.
+mailbox, a corpus.
 
-The one asymmetry is trust, and it is deliberate: a bundled destination is
-first-party code that shipped inside the signed application, so it does not
-face the acknowledgement gate a dropped-in file does. The gate exists to stop
-a user running a file *he* was handed; it has nothing to say about the app's
-own contents.
+**None ship inside the app.** Three did, under ``aglaia/plugins/destinations/``,
+loaded unconditionally — which meant "Export to Calibre server" appeared in the
+Export tab of every install, whether or not the user had ever asked for it, and
+a Kindle plugin's SMTP settings existed in a build belonging to someone who has
+no Kindle. Code that ships in the application and always runs is a feature; a
+plugin is something the user chose. Calling the first one the second gets the
+worst of both: the surface area of a plugin with none of the consent.
+
+So they live in the registry (github.com/yb85/aglaia-plugins) and install like
+anything else, into ``<APP_DATA>/plugins/destinations/<slug>/``. That also
+makes the plugin path the only path: it cannot quietly rot, because the
+first-party destinations exercise it on every install.
+
+Authorship is a separate axis from where the code came from. A registry entry
+written by Aglaïa is still labelled as ours in the install dialog — see
+`RegistryEntry.first_party` — because who wrote it is what the user is being
+asked to judge.
 
 Each loaded destination gets a `PluginContext` — settings, secrets, a scratch
 dir, a log line — built by the host with the slug baked in, so a destination
@@ -40,9 +47,6 @@ from aglaia.plugin_api import DESTINATION_REGISTRY, API_VERSION, Destination
 
 KIND = "destinations"
 
-#: The three that ship with the app.
-BUNDLED_DIR = Path(__file__).resolve().parents[1] / "plugins" / KIND
-
 
 def user_dir() -> Path:
     d = app_data_dir() / "plugins" / KIND
@@ -56,7 +60,6 @@ class Found:
     dir: Path
     entry: Path
     manifest: dict
-    bundled: bool
 
 
 def _read_manifest(path: Path) -> dict:
@@ -68,8 +71,8 @@ def _read_manifest(path: Path) -> dict:
         return {}
 
 
-def discover(*, include_user: bool = True) -> list[Found]:
-    """Every destination plugin directory that looks well-formed.
+def discover() -> list[Found]:
+    """Every installed destination plugin that looks well-formed.
 
     Malformed ones are skipped rather than raised on: a broken plugin must not
     be able to stop the app from starting, and the ones that ARE well-formed
@@ -77,41 +80,36 @@ def discover(*, include_user: bool = True) -> list[Found]:
     so a bad manifest is a plugin that never appears rather than one that
     appears and then fails at the moment it is used."""
     out: list[Found] = []
-    seen: set[str] = set()
-    roots = [(BUNDLED_DIR, True)]
-    if include_user:
-        roots.append((user_dir(), False))
-    for root, bundled in roots:
-        if not root.is_dir():
+    root = user_dir()
+    if not root.is_dir():
+        return out
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.name.startswith((".", "_")):
             continue
-        for d in sorted(root.iterdir()):
-            if not d.is_dir() or d.name.startswith((".", "_")):
+        slug = d.name
+        if not SLUG_RE.match(slug):
+            continue
+        man = _read_manifest(d / "aglaia-plugin.toml")
+        plugin = man.get("plugin") or {}
+        entry_name = str(plugin.get("entry") or "")
+        if not entry_name or str(plugin.get("slug") or "") != slug:
+            # A manifest that disagrees with its own directory is the one
+            # thing that must never be guessed at: the directory decides
+            # the slug, which decides the keychain namespace.
+            continue
+        entry = d / entry_name
+        if not entry.is_file():
+            continue
+        want_api = (man.get("requires") or {}).get("api", 1)
+        try:
+            if int(want_api) != API_VERSION:
+                print(f"[destinations] {slug} wants plugin API "
+                      f"{want_api}; this build implements {API_VERSION} "
+                      f"— not loaded")
                 continue
-            slug = d.name
-            if not SLUG_RE.match(slug) or slug in seen:
-                continue
-            man = _read_manifest(d / "aglaia-plugin.toml")
-            plugin = man.get("plugin") or {}
-            entry_name = str(plugin.get("entry") or "")
-            if not entry_name or str(plugin.get("slug") or "") != slug:
-                # A manifest that disagrees with its own directory is the one
-                # thing that must never be guessed at: the directory decides
-                # the slug, which decides the keychain namespace.
-                continue
-            entry = d / entry_name
-            if not entry.is_file():
-                continue
-            want_api = (man.get("requires") or {}).get("api", 1)
-            try:
-                if int(want_api) != API_VERSION:
-                    print(f"[destinations] {slug} wants plugin API "
-                          f"{want_api}; this build implements {API_VERSION} "
-                          f"— not loaded")
-                    continue
-            except (TypeError, ValueError):
-                continue
-            seen.add(slug)
-            out.append(Found(slug, d, entry, man, bundled))
+        except (TypeError, ValueError):
+            continue
+        out.append(Found(slug, d, entry, man))
     return out
 
 
