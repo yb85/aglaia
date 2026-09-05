@@ -636,10 +636,17 @@ def uninstall(slug: str) -> InstallResult:
         PluginSecrets(slug, cfgdb).purge()
     except Exception:
         pass
-    data_dir = plugin_data_dir(slug)
+    data_dir = plugin_data_dir(slug, create=False)
     if data_dir.is_dir():
         shutil.rmtree(data_dir, ignore_errors=True)
         removed.append(str(data_dir))
+    # `ignore_errors` is what makes the loop above survive one stubborn file,
+    # and it is also what let uninstall report success over a directory that
+    # is still there. Check, and say so: settings the user asked to be gone,
+    # still on disk, is not a detail to swallow.
+    left = [d for d in ([data_dir] + [installed_root(k) / slug
+                                      for k in ([kind] if kind else KINDS)])
+            if d.exists()]
     from . import db as cfg
     try:
         with cfg.session() as conn:
@@ -651,6 +658,10 @@ def uninstall(slug: str) -> InstallResult:
         pass
     if not removed:
         return InstallResult(False, f"{slug} was not installed")
+    if left:
+        return InstallResult(False, f"{slug} could not be fully removed — "
+                                    f"some of its files are still in use.",
+                             slug=slug)
     return InstallResult(True, f"{slug} removed, with its settings and "
                                f"secrets.", slug=slug)
 

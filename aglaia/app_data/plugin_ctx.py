@@ -31,6 +31,7 @@ nothing but itself, and uninstalling is a directory removal.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -73,10 +74,15 @@ def _check_key(key: str) -> str:
     return key
 
 
-def plugin_data_dir(slug: str) -> Path:
-    """``<APP_DATA>/plugins/data/<slug>/`` — created on access."""
+def plugin_data_dir(slug: str, *, create: bool = True) -> Path:
+    """``<APP_DATA>/plugins/data/<slug>/`` — created on access.
+
+    `create=False` for the one caller that is about to DELETE the directory:
+    creating it there means uninstall removes a folder it just made, and on a
+    failure leaves a fresh empty one behind."""
     d = app_data_dir() / "plugins" / "data" / validate_slug(slug)
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -95,10 +101,22 @@ class PluginConfig:
             plugin_data_dir(self.slug) / "config.db")
         self._ensure()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _connect(self):
+        """A connection that is committed AND closed.
+
+        `with sqlite3.connect(...) as conn` commits the transaction and leaves
+        the connection open — so every get and set leaked a file handle, and
+        the handles kept the file alive until the garbage collector felt like
+        it. POSIX deletes an open file anyway; Windows does not, which is how
+        uninstalling a plugin came to leave its settings on disk."""
         conn = sqlite3.connect(str(self.path))
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _ensure(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -332,3 +332,38 @@ def test_the_index_falls_back_to_its_cache_when_the_network_is_gone(
     idx = reg.fetch_index()
     assert [e.slug for e in idx.entries] == ["cached-one"]
     assert "last copy" in idx.error
+
+
+def test_a_settings_connection_does_not_outlive_its_use(tmp_path):
+    """`with sqlite3.connect(...)` commits; it does not close.
+
+    Every get and set therefore leaked a handle onto the plugin's own
+    settings file. POSIX unlinks an open file happily, so the leak was
+    invisible here and removed a plugin's settings on Windows only in theory
+    — the real uninstall left them on disk."""
+    import sqlite3
+
+    import aglaia.app_data.plugin_ctx as pc
+    cfg = pc.PluginConfig("a-plugin", path=tmp_path / "config.db")
+    with cfg._connect() as conn:
+        conn.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
+
+
+def test_uninstall_says_so_when_the_files_survive(reg, tmp_path, monkeypatch):
+    """A removal that could not remove must not answer "removed".
+
+    `shutil.rmtree(..., ignore_errors=True)` is what lets one locked file not
+    abort the rest; on its own it also let uninstall report success over a
+    directory that is still there."""
+    import shutil
+
+    import aglaia.app_data.plugin_ctx as pc
+    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self: None)
+    reg.install_from_archive(_archive(tmp_path), "destinations")
+    pc.build_context("a-plugin", wants_secrets=True).config.set("k", "v")
+    monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)
+    res = reg.uninstall("a-plugin")
+    assert not res.ok
+    assert "still in use" in res.message

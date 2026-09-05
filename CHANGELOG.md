@@ -207,6 +207,13 @@ the code.
 - **The project name was slugified** for the `.agl` and the derived export
   names. It is kept exactly as typed.
 
+- **Uninstalling a plugin left its settings on Windows**, and said it had
+  not. `PluginConfig` connected with `with sqlite3.connect(...)`, which
+  commits but does not close, so every read and write leaked a handle onto
+  the plugin's own settings file; POSIX unlinks an open file, Windows
+  refuses, and `rmtree(ignore_errors=True)` swallowed the refusal. The
+  connection closes, and a removal that could not remove now says so.
+
 - **The margin you set was not the margin you got.** Measured over 40 pages of
   a real project asking for 5 mm: top and bottom exact, left and right never
   the requested value and varying 6.6 mm across pages (10.2–16.8 mm).
