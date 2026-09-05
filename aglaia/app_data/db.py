@@ -61,6 +61,7 @@ KEY_WORKERS_RAM_WARN_DISMISSED = "workers_ram_warn_dismissed"  # bool
 KEY_DEWARP_BATCH = "dewarp_batch"      # "auto" | "on" | "off" — GPU-batched dewarp
 KEY_VOICE_CONTROL = "voice_control"    # bool
 KEY_INPUT_DPI = "input_dpi"            # float
+KEY_CAMERA_TRANSFORMS = "camera_transforms"  # {camera name: "90+mirror+flip"} — the rig stays put between projects
 KEY_CAMERA_ID = "camera_id"            # int
 KEY_VIEW_MODE = "scans_view_mode"      # "list" | "grid" | "gallery"
 KEY_KEYBINDINGS = "keybindings"        # {action: [seq, …]} — QKeySequence

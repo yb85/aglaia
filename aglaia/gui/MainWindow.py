@@ -664,8 +664,7 @@ class MainWindow(QMainWindow):
         if is_capture:
             self._active_cam_id = getattr(args, "camera_id", 0)
             self.webcam_thread = WebcamThread(args.camera_id)
-            if hasattr(args, 'transform'):
-                self.webcam_thread.set_transform(args.transform)
+            self._apply_camera_transform(args.camera_id, getattr(args, 'transform', None))
             self.webcam_thread.change_pixmap_signal.connect(self.update_image)
             # Capture-flash overlay installed for the camera's lifetime
             # so voice / keyboard captures get the same visual cue SIFT
@@ -1265,17 +1264,43 @@ class MainWindow(QMainWindow):
             self.spinner_timer.stop()
             self.status_label.setText(self.tr("Ready. All workers active."))
 
+    def _apply_camera_transform(self, cam_id, cli_transform) -> None:
+        """Start the feed the way this camera was last left.
+
+        An explicit `--transform` on the command line wins. Otherwise the rig
+        has not moved since the last project, so neither should the
+        correction."""
+        from aglaia.gui import camera_memory as _cm
+        explicit = cli_transform is not None and str(cli_transform) not in ("", "0")
+        if explicit:
+            self.webcam_thread.set_transform(cli_transform)
+            return
+        remembered = _cm.load(_cm.camera_key(cam_id or 0))
+        if remembered:
+            self.webcam_thread.set_transform(remembered)
+
+    def _remember_camera_transform(self) -> None:
+        from aglaia.gui import camera_memory as _cm
+        w = self.webcam_thread
+        if w is None:
+            return
+        _cm.save(_cm.camera_key(getattr(self, "_active_cam_id", 0) or 0),
+                 int(w.rotation), bool(w.mirror), bool(w.flip))
+
     def rotate_camera(self, delta=90):
         self.webcam_thread.rotate(delta)
+        self._remember_camera_transform()
         self.status_label.setText(self.tr("Rotated to {deg}°").format(deg=self.webcam_thread.rotation))
 
     def toggle_mirror(self):
         self.webcam_thread.toggle_mirror()
+        self._remember_camera_transform()
         state = self.tr("ON") if self.webcam_thread.mirror else self.tr("OFF")
         self.status_label.setText(self.tr("Mirror: {state}").format(state=state))
 
     def toggle_flip(self):
         self.webcam_thread.toggle_flip()
+        self._remember_camera_transform()
         state = self.tr("ON") if self.webcam_thread.flip else self.tr("OFF")
         self.status_label.setText(self.tr("Flip: {state}").format(state=state))
 
@@ -1387,7 +1412,7 @@ class MainWindow(QMainWindow):
         # Apply any launch-time transform the user passed on the CLI.
         try:
             if getattr(self.args, "transform", None):
-                self.webcam_thread.set_transform(self.args.transform)
+                self._apply_camera_transform(getattr(self, '_active_cam_id', 0), getattr(self.args, 'transform', None))
         except Exception:
             pass
 
@@ -1808,7 +1833,7 @@ class MainWindow(QMainWindow):
             self.webcam_thread.change_pixmap_signal.connect(self.update_image)
             self.webcam_thread.set_overlay_fn(self._freehand_overlay)
             if getattr(self.args, "transform", None):
-                self.webcam_thread.set_transform(self.args.transform)
+                self._apply_camera_transform(getattr(self, '_active_cam_id', 0), getattr(self.args, 'transform', None))
             self.webcam_thread.start()
             self._active_cam_id = int(cam_id)
         except Exception as e:

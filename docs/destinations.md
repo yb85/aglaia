@@ -240,6 +240,17 @@ to look at their server instead of at the empty field.
 
 See [ui-writing.md](ui-writing.md) for how to word any of it.
 
+## From the command line
+
+```bash
+aglaia run ~/book.agl --ocr auto --export pdf:g4+md --send-to send-to-kindle+send-to-corpus
+aglaia ocr scan.pdf --export pdf --send-to send-to-calibre
+```
+
+`--send-to` runs after the exports and hands each plugin every written file
+whose format it accepts. Not installed, or not configured: the run fails and
+says which, with the command that fixes it.
+
 ## Listing them
 
 ```bash

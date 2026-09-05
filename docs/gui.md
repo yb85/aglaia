@@ -105,6 +105,17 @@ The three views surface it differently, all via `MainWindow.cell_disable_states`
   A jump carries the current stage across, exactly as a single step does —
   arriving at page 300 must not also discard the stage being examined.
 
+## Camera memory
+
+Rotation, mirror and flip are remembered **per camera**, in the app-data
+config DB (`camera_transforms`), and re-applied when that camera is opened
+in any later project. The rig does not move between books, so the correction
+that makes its feed upright is a property of the camera, not of the project.
+Keyed by the device's name (AVFoundation `localizedName`), not its index —
+indexes shift when devices come and go. An explicit `--transform` on the
+command line wins for that session; setting the transform back to identity
+forgets the entry. (`aglaia/gui/camera_memory.py`)
+
 ## Debug view / per-page editor (`DebugViewerTab`)
 
 Click a stage thumb and a closable tab walks that page's chain, root → leaf.

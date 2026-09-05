@@ -99,6 +99,7 @@ class CliConfig:
 
     exports: list[ExportTask] = field(default_factory=list)
     md_refine: Optional[str] = None       # on-device LLM backend for MD cleanup
+    send_to: list[str] = field(default_factory=list)  # destination plugin slugs, after the exports
 
     headless: bool = False
     project_name: Optional[str] = None    # only honoured for new projects
