@@ -103,3 +103,14 @@ class TestTheSignalAlwaysFires:
 def test_an_outcome_with_no_result_is_not_ok():
     assert Outcome(None, "boom").ok is False
     assert Outcome(None, "boom").message == "boom"
+
+
+def test_the_trust_sentence_is_one_source_of_truth(app):
+    """The label and the comparison must be the same string.
+
+    Two `tr()` calls with identical source text translate identically today,
+    and become a dialog that can never be completed the day one of them is
+    edited — with no error, because the button simply stays disabled."""
+    from aglaia.gui.PluginsTab import trust_sentence
+    a, b = trust_sentence(), trust_sentence()
+    assert a == b and a.strip() == a and len(a.split()) >= 4

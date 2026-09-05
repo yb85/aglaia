@@ -49,7 +49,22 @@ from aglaia.gui.colors import (
 from aglaia.gui.theme import lucide
 
 #: The sentence. Typed exactly, or the button stays dead.
+#: Fallback only. The dialog asks for `trust_sentence()`, which is
+#: translated: a French user made to transcribe an English sentence is not
+#: affirming anything, they are copying shapes, and the whole point of typing
+#: it is that it cannot be done absently.
 TRUST_SENTENCE = "I TRUST THE AUTHOR OF THIS PLUGIN"
+
+
+def trust_sentence() -> str:
+    """The sentence the user must type to install an unreviewed plugin.
+
+    Read through one function so the label and the comparison can never drift
+    apart — two `tr()` calls with the same source would translate identically
+    today and be a locked dialog the day one of them is edited."""
+    from PySide6.QtCore import QCoreApplication
+    return QCoreApplication.translate(
+        "ArchiveInstallDialog", "I TRUST THE AUTHOR OF THIS PLUGIN")
 
 
 def _hline() -> QFrame:
@@ -491,7 +506,7 @@ class ArchiveInstallDialog(QDialog):
         ask = QLabel(self.tr("Type the sentence below to install it."))
         ask.setStyleSheet(f"color: {COLOR_FONT_PRIMARY}; font-size: 12px;")
         v.addWidget(ask)
-        sentence = QLabel(TRUST_SENTENCE)
+        sentence = QLabel(trust_sentence())
         sentence.setStyleSheet(
             f"color: {COLOR_FONT_MUTED}; font-size: 12px; "
             f"font-family: monospace;")
@@ -537,7 +552,7 @@ class ArchiveInstallDialog(QDialog):
     def _sync(self, text: str) -> None:
         # Exact match. Not stripped, not case-folded: a ritual that accepts an
         # approximation is not a ritual.
-        self._ok.setEnabled(text == TRUST_SENTENCE)
+        self._ok.setEnabled(text == trust_sentence())
 
 
 class PluginsTab(QWidget):
