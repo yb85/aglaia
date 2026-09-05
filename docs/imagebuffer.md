@@ -18,16 +18,68 @@
 | `children` | `list[ImageBuffer]` | Set by branching processors (PageDetector). |
 | `meta` | `dict` | Per-buffer metadata. See below. |
 
-## meta keys in use
+## meta keys — the schema
 
-| Key | Set by | Used by |
+Every key has a declared **kind** (`aglaia/meta_schema.py`), and the kind decides what a warp does with it.
+Geometric kinds are moved by the transform machinery; records stay on the node that produced them;
+everything else is copied. **An undeclared key is dropped at the first warp, with a log line** — an
+undeclared coordinate list passing through untransformed is exactly the `DPIfixer` bug (155ab37), so
+"pass it along, it's probably fine" is the failure mode, not the safe default.
+
+Plugins declare theirs at import: `declare_meta("stamps_found", MetaKind.SCALAR)` from `aglaia.plugin_api`.
+Keys starting with `_` are a processor's private scratch and are OPAQUE by rule.
+
+`tests/test_meta_schema.py` scans the source for every `meta["…"]` literal and fails on an undeclared one,
+and checks this table lists every declared key — neither the code nor this page can drift from the schema.
+
+| Key | Kind | Set by |
 |---|---|---|
-| `roi` | PageDetector (child polygon), SkewFinder (full rect after rotation), DPIfixer (scaled) | Binarizer `_apply_roi_mask` |
-| `skew_angle` | SkewFinder | GUI display (`'skew'`) |
-| `oob_stats` | PageDewarper | GUI display (`'oob'`) |
-| `dewarp_success` | PageDewarper | GUI display (`'success'`) |
-| `status` | PageDewarper | (informational — `int(Status)`) |
-| `page_nums` | (not populated) | debug overlay |
+| `roi` | polygon — **transformed** by every warp | PageDetector (child outline); every COORDINATE step moves it |
+| `erase` | polygons — **transformed** | any erase producer (StampRemover); moved by every COORDINATE step |
+| `parent_crop_xywh` | rect [x,y,w,h] — transformed through an affine, **dropped** through a dewarp | PageDetector |
+| `column_quad` | geometric **record** in the producer's own input frame — kept for its debug view, never carried downstream | TrapezoidalCorrection |
+| `line_boxes` | geometric **record** in the producer's own input frame — kept for its debug view, never carried downstream | TrapezoidalCorrection |
+| `H` | geometric **record** in the producer's own input frame — kept for its debug view, never carried downstream | TrapezoidalCorrection |
+| `page_nums` | geometric **record** in the producer's own input frame — kept for its debug view, never carried downstream | (debug overlay) |
+| `page_side` | label — copied | PageDetector |
+| `erase_sources` | label — copied | erase.py |
+| `manual` | label — copied | manual.py (which fields were hand-edited) |
+| `manual_dropped` | label — copied | manual.py |
+| `replay_kind` | label — copied | every COORDINATE / PIXEL_VALUE step |
+| `fallback_reason` | label — copied | PageDewarper |
+| `column_edge_source` | label — copied | TrapezoidalCorrection |
+| `line_source` | label — copied | TrapezoidalCorrection |
+| `mode_used` | label — copied | TrapezoidalCorrection |
+| `skew_angle` | scalar — copied | SkewFinder |
+| `skew` | scalar — copied | SkewFinder (the GUI's name, written directly) |
+| `success` | scalar — copied | PageDewarper |
+| `oob` | scalar — copied | PageDewarper (out-of-bounds fraction) |
+| `char_h_frac` | scalar — copied | TrapezoidalCorrection, PageDewarper |
+| `recovered_aspect_w_h` | scalar — copied | TrapezoidalCorrection |
+| `dewarp_success` | scalar — copied | PageDewarper |
+| `trapezoid_success` | scalar — copied | TrapezoidalCorrection |
+| `oob_forced` | scalar — copied | PageDewarper |
+| `oob_pct` | scalar — copied | PageDewarper / manual quad path |
+| `status` | scalar — copied | chain / PageDewarper |
+| `elapsed_ms` | scalar — copied | chain |
+| `disabled` | scalar — copied | chain |
+| `gpu` | scalar — copied | chain |
+| `n_baselines` | scalar — copied | TrapezoidalCorrection |
+| `n_full_width` | scalar — copied | TrapezoidalCorrection |
+| `n_vblocks` | scalar — copied | TrapezoidalCorrection |
+| `n_vp_inliers` | scalar — copied | TrapezoidalCorrection |
+| `vp_inlier_frac` | scalar — copied | TrapezoidalCorrection |
+| `recovered_focal_px` | scalar — copied | TrapezoidalCorrection |
+| `stamps_found` | scalar — copied | StampRemover (plugin) |
+| `replay_params` | opaque — copied, never interpreted in transit | every replayable step — the replay engine owns its shape |
+| `oob_stats` | opaque — copied, never interpreted in transit | PageDewarper |
+| `manual_overrides` | opaque — copied, never interpreted in transit | chain (this branch's hand edits) |
+| `manual_overrides_all` | opaque — copied, never interpreted in transit | chain (every branch's) |
+| `frame_wh` | opaque — copied, never interpreted in transit | debug renderers |
+| `erase_frame_wh` | opaque — copied, never interpreted in transit | debug viewer (erase edits) |
+| `layouts_frame_wh` | opaque — copied, never interpreted in transit | debug viewer (layout edits) |
+
+Undeclared/private in the wild: `_dewarp_*` (PageDewarper solver state, OPAQUE by the `_` rule).
 
 When emitting `image_event`, `_emit_event` normalizes some keys for the GUI:
 

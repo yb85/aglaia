@@ -25,6 +25,7 @@ def run(
     ocr_lang: Annotated[str, typer.Option("--ocr-lang", help="'+'-joined BCP-47 codes (e.g. fr-FR+en-US) or 'auto'.")] = "auto",
     export: Annotated[Optional[str], typer.Option("--export", help="'+'-joined export specs, e.g. 'pdf:g4+md'.")] = None,
     md_refine: Annotated[Optional[str], typer.Option("--md-refine", help="On-device LLM backend for Markdown cleanup, e.g. 'apple_fm'.")] = None,
+    send_to: Annotated[Optional[str], typer.Option("--send-to", help="After exporting, hand the files to these export plugins: '+'-joined slugs, e.g. 'send-to-kindle+send-to-corpus'. `aglaia list destinations` shows what is installed.")] = None,
     project_name: Annotated[Optional[str], typer.Option("--project-name", help="Name for a new project (default: from the input filename).")] = None,
     parent_dir: Annotated[Optional[Path], typer.Option("--parent-dir", help="Parent folder for a new project.")] = None,
     input_dpi: Annotated[Optional[str], typer.Option("--input-dpi", metavar="[force:]N", help="Input DPI for imported images; 'force:N' overrides every input.")] = None,
@@ -35,6 +36,7 @@ def run(
     cfg = run_config(
         paths, pipeline, workers, force_proc, ocr, ocr_lang, export,
         md_refine, project_name, parent_dir, input_dpi, check_ocr,
+        send_to=send_to,
     )
     if not cfg.has_inputs():
         typer.echo("run: needs one .agl, or one or more PDFs / images.", err=True)

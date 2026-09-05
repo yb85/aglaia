@@ -57,37 +57,6 @@ from aglaia.gui.colors import (
 ThumbLoader = Callable[[int, int], Optional[bytes]]
 
 
-class ElidedLabel(QLabel):
-    def __init__(self, text="", parent=None):
-        super().__init__(text, parent)
-        self._full_text = text
-        # Ignore natural text width in sizeHint — long filenames would
-        # otherwise push the card off-screen.
-        from PySide6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.setMinimumWidth(0)
-
-    def sizeHint(self):  # noqa: N802 — Qt API
-        metrics = QFontMetrics(self.font())
-        return QSize(0, metrics.height())
-
-    def minimumSizeHint(self):  # noqa: N802 — Qt API
-        return self.sizeHint()
-
-    def setFullText(self, text):
-        self._full_text = text
-        self.update_elided_text()
-
-    def update_elided_text(self):
-        metrics = QFontMetrics(self.font())
-        elided = metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, self.width())
-        super().setText(elided)
-
-    def resizeEvent(self, event):
-        self.update_elided_text()
-        super().resizeEvent(event)
-
-
 class _ClickableLabel(QLabel):
     """QLabel that emits `clicked` on left mouse press. Used so a
     thumbnail can open the debug viewer without a separate button."""
@@ -307,6 +276,8 @@ class ScanItemWidget(QWidget):
     # Emits (scan_id, node_id) when the round stage-toggle is clicked —
     # host flips the step's per-page disable + reruns the page.
     step_toggle_requested = Signal(int, int)
+    #: Re-run this one scan from its raw capture.
+    rerun_requested = Signal(int)
 
     def __init__(self, *, scan_id: int, idx: int, raw_node_id: int, raw_image_id: int,
                  raw_filestem: str, pipeline_steps: list[str],
@@ -407,24 +378,61 @@ class ScanItemWidget(QWidget):
         from aglaia.gui.widgets import make_icon_button
         # Scan-level delete — keep the trash icon (this really removes the
         # scan). Layout-level hiding uses eye / eye-off elsewhere.
+        # Muted, not COLOR_ERROR. A trash icon on every card in a 300-card
+        # grid is a lot of red for something the user is not being warned
+        # about; it goes red on hover, where it is actually about to happen.
         self.del_btn = make_icon_button(
-            "trash-2", size=20, icon_size=14, color=COLOR_ERROR,
-            hover_bg=COLOR_ERROR_BG_SOFT,
+            "trash-2", size=20, icon_size=14, color=COLOR_FONT_MUTED,
+            hover_color=COLOR_ERROR, hover_bg=COLOR_ERROR_BG_SOFT,
         )
         self.del_btn.setToolTip(self.tr("Discard scan"))
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.scan_id))
 
-        self.name_label = ElidedLabel(self.tr("Scan #{idx}").format(idx=idx))
+        # A plain QLabel. This used to be an ElidedLabel, which had to
+        # predict the text's width with `QFontMetrics` — and every way of
+        # doing that was wrong in a different way: QSS applies its font after
+        # `setFont`, so the measurement used one font and the paint used
+        # another; and on a Retina display the fractional advances round the
+        # other way, so a label sized to a computed 65 px still lost its last
+        # character. Qt sizes a plain QLabel from the font it will actually
+        # paint with. "Scan 006" is eight characters — there was never
+        # anything to elide.
+        self.name_label = QLabel(
+            self.tr("Scan {idx}").format(idx=f"{idx:03d}"))
         self.name_label.setStyleSheet("font-weight: bold; font-size: 13px;")
 
-        self.path_label = ElidedLabel(raw_filestem)
-        self.path_label.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 9px;")
-        self.path_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # The filestem was the widest thing in the header and the least
+        # useful: it repeats the project name on every card and differs only
+        # in the number already shown to its left. Kept as an attribute
+        # because callers still read `path_label.text()`.
+        self.path_label = QLabel(raw_filestem)
+        self.path_label.setVisible(False)
+
+        # A second label rather than markup inside the first: a QLabel with
+        # rich text would need `setTextFormat` and re-lays out differently.
+        # Shown whole or not at all — `_fit_header` hides it when the card is
+        # too narrow for both. "139 dp" is worse than no tag.
+        self.dpi_label = QLabel("")
+        self.dpi_label.setStyleSheet(
+            f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+
+        self.rerun_btn = make_icon_button(
+            "refresh-cw", size=20, icon_size=13, color=COLOR_FONT_MUTED,
+            hover_color=COLOR_PRIMARY,
+        )
+        self.rerun_btn.setToolTip(self.tr("Re-run this scan"))
+        self.rerun_btn.clicked.connect(
+            lambda: self.rerun_requested.emit(self.scan_id))
 
         header_layout.addWidget(self.del_btn)
-        header_layout.addWidget(self.name_label, 1)
-        header_layout.addSpacing(10)
-        header_layout.addWidget(self.path_label, 1)
+        header_layout.addWidget(self.name_label)
+        header_layout.addWidget(self.dpi_label)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self.rerun_btn)
+        # The DPI tag disappears rather than clipping when the card is too
+        # narrow for both. A tag reading "139 dp" is worse than no tag, and
+        # the scan number is the card's identity — it wins every time.
+        self.header_widget.installEventFilter(self)
         self.layout.addWidget(self.header_widget)
 
         self.thumbs_container = QWidget()
@@ -1157,11 +1165,13 @@ class ScanItemWidget(QWidget):
         place_overlay(btn, container, width // 2 - 11, 4)
 
     def _add_manual_pip(self, container, width, stem: str) -> None:
-        """A quiet dot on a layout the user tuned by hand (M9 #102).
+        """The hand mark on a layout the user tuned (M9 #102).
 
-        Top-RIGHT, so it never collides with the disabled band's mini-map
-        (top edge, full width, 3 px) or the nav buttons. Absent when the page
-        carries no override, which is the common case."""
+        Bottom edge, CENTRED: the eye toggle owns the bottom left and the OCR
+        badge the bottom right, so the middle is the one place on this
+        thumbnail that is always free. It was top-right, which is where the
+        next-page chevron is — the two overlapped and the mark lost. Absent
+        when the page carries no override, which is the common case."""
         provider = self.manual_fields_provider
         if provider is None:
             return
@@ -1173,7 +1183,8 @@ class ScanItemWidget(QWidget):
             return
         from aglaia.gui.widgets import ManualPip, place_overlay
         pip = ManualPip(fields, parent=container)
-        place_overlay(pip, container, int(width) - ManualPip.SIZE - 5, 6)
+        place_overlay(pip, container, (int(width) - ManualPip.SIZE) // 2,
+                      int(container.height()) - ManualPip.SIZE - 4)
 
     def _add_disabled_band(self, container, width, data, states) -> None:
         """Top-edge mini-map of the layout's disabled steps. Hidden when
@@ -1273,8 +1284,32 @@ class ScanItemWidget(QWidget):
         item["trashed"] = bool(trashed)
         self.refresh_composite()
 
+    def eventFilter(self, obj, ev):  # noqa: N802 — Qt API
+        from PySide6.QtCore import QEvent
+        if obj is self.header_widget and ev.type() == QEvent.Type.Resize:
+            self._fit_header()
+        return False
+
+    def _fit_header(self) -> None:
+        """Show the DPI tag only when it fits beside everything else."""
+        lay = self.header_widget.layout()
+        if lay is None:
+            return
+        m = lay.contentsMargins()
+        # minimumWidth, not width() or sizeHint(). width() is still 0 the
+        # first time this runs — before the layout has placed anything — so
+        # everything looked like it fitted; and a QPushButton's sizeHint is
+        # its natural size (34 px), not the 20 px setFixedSize pinned it to,
+        # which over-counted by 28 px and hid the tag on cards with room.
+        needed = (self.del_btn.minimumWidth()
+                  + self.rerun_btn.minimumWidth()
+                  + self.name_label.sizeHint().width()
+                  + self.dpi_label.sizeHint().width()
+                  + m.left() + m.right() + lay.spacing() * 4)
+        self.dpi_label.setVisible(needed <= self.header_widget.width())
+
     def update_header(self):
-        status_text = self.tr("Scan #{idx}").format(idx=self.idx)
+        status_text = self.tr("Scan {idx}").format(idx=f"{self.idx:03d}")
         target_idx = self.current_history_idx
 
         root_data = self.items.get(self.raw_filestem)
@@ -1307,15 +1342,30 @@ class ScanItemWidget(QWidget):
             except (ValueError, IndexError):
                 suffix = self.tr(" ({step})").format(step=current_type)
 
-        # Source-DPI tag — surfaces inconsistencies between the
-        # importer's claim and what the chain receives (e.g. a PDF
-        # extracted at 72 dpi when the user expected 300).
-        dpi_tag = (self.tr(" · {dpi} dpi").format(dpi=int(round(self.raw_dpi)))
-                   if self.raw_dpi else "")
-        final_text = f"{status_text}{dpi_tag}{suffix}"
-        if self.dimmed:
-            final_text += self.tr(" (No page detected)")
-        self.name_label.setFullText(final_text)
+        # Source-DPI tag — surfaces inconsistencies between the importer's
+        # claim and what the chain receives (e.g. a PDF extracted at 72 dpi
+        # when the user expected 300). Smaller and grey: it is a reference
+        # value, not the card's identity, and at card density the two must
+        # not compete.
+        #
+        # The step counter goes with it. "[11/11]" was the same on every card
+        # of a finished scan, and the cards that are NOT finished already say
+        # so through the spinner and the dim.
+        self.dpi_label.setText(
+            self.tr("{dpi} dpi").format(dpi=int(round(self.raw_dpi)))
+            if self.raw_dpi else "")
+        # No stage suffix. "[11/11]" was identical on every finished card,
+        # "(Input)" said what the thumbnail underneath already shows, and both
+        # were wide enough to elide the scan number itself out of a narrow
+        # card — which is how the number went missing entirely.
+        # The "no page detected" note is a TOOLTIP, not appended text: it is
+        # three words longer than the card is wide, and appending it is what
+        # pushed the scan number out of the header in the first place. The
+        # card is already visually dimmed, which is the at-a-glance signal.
+        self.name_label.setText(status_text)
+        self.header_widget.setToolTip(
+            self.tr("No page detected in this scan") if self.dimmed else "")
+        self._fit_header()
 
         # The QSS below only changes when `dimmed` flips. setStyleSheet
         # re-parses the sheet and re-polishes this widget + every child, so

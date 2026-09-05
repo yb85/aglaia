@@ -55,17 +55,19 @@ aglaia run ~/scans/*.jpg --ocr auto --export pdf:g4+md   # headless batch
 See the [CLI reference](/docs/reference/cli) for every subcommand and flag,
 and the [Server](/docs/concepts/server) page for the job API.
 
-OCR engines: **`pip` can't install both** — `surya-ocr` pins
-`huggingface-hub<1`, `mlx-vlm` (paddle) needs `>=1.5`, so a loose pip
-resolve is unsatisfiable. Pick one. This limit is **pip-only**: `uv` (and
-the shipped `.app`) reconcile both via a resolver override.
+OCR engines need no extras of their own any more. Surya 2 is a Qwen3.5-VL
+model served through the shared local-VLM backend — `mlx-vlm` on Apple
+Silicon (`[macos]`), vLLM on CUDA — exactly like GLM-OCR, so the old
+`surya-ocr` / torch / `llama-server` stack and its dependency conflict are
+both gone. PaddleOCR-VL was dropped in 2026-07: weak on Greek,
+and it pulled in paddleocr + paddlepaddle + opencv-contrib for little gain.
 
 ```bash
-pip install "aglaia[surya]"         # Surya OCR (cross-platform)
-pip install "aglaia[paddle]"        # PaddleOCR-VL (MLX)
+pip install "aglaia[macos]"         # Apple Vision + Apple Document + MLX VLMs
+pip install "aglaia[cloud]"         # Mistral cloud OCR (+ OS-keychain storage)
 ```
 
-Apple Vision OCR needs no extra; it ships with `[macos]`.
+Apple Vision and Apple Document OCR need no extra; they ship with `[macos]`.
 
 ## Build from source
 

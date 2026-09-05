@@ -166,7 +166,7 @@ uv sync --extra gui                 # Windows / Linux GUI
 uv sync                             # headless: CLI pipeline, no Qt
 ```
 
-Optional extras: `--extra cloud` (Mistral OCR), `--extra macos` (Apple Silicon:
+Optional extras: `--extra macos` (Apple Silicon:
 MLX-served local VLM OCR — GLM-OCR / Unlimited-OCR / Surya), `--extra cuda`
 (NVIDIA: vLLM-served local VLM OCR), `--extra voice` (Vosk), `--extra server`
 (FastAPI + uvicorn HTTP job server).

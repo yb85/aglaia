@@ -58,6 +58,7 @@ def ocr(
             help="On-device LLM backend for Markdown cleanup, e.g. 'apple_fm'.",
         ),
     ] = None,
+    send_to: Annotated[Optional[str], typer.Option("--send-to", help="After exporting, hand the files to these export plugins: '+'-joined slugs, e.g. 'send-to-kindle+send-to-corpus'. `aglaia list destinations` shows what is installed.")] = None,
     project_name: Annotated[
         Optional[str],
         typer.Option(

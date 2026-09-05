@@ -37,6 +37,7 @@ from PIL import Image
 
 from aglaia.app_data import db as app_db
 from aglaia.workers.Initializer import (
+    MissingProcessorError,
     create_processing_chain,
     initialize,
     load_pipeline_def,
@@ -513,6 +514,62 @@ def _run_exports(
             if not ok:
                 print("  ! Markdown export: no OCR data.", file=sys.stderr)
                 fail += 1
+            else:
+                _run_exports.written.append(out)  # type: ignore[attr-defined]
+    return fail
+
+
+def _send_exports(slugs: list, written: list, *, project_file, slug: str) -> int:
+    """`--send-to`: hand the exported files to destination plugins.
+
+    Each slug gets every written file whose format it accepts — a Kindle takes
+    the PDF and the Markdown, calibre takes both, a plugin that only takes PDFs
+    is not handed a `.md` to refuse. Returns the number of failures; a plugin
+    that is not installed or not configured is a failure that says so and
+    names the fix, exactly as the GUI would, because a batch that "succeeded"
+    without sending is the expensive kind of success.
+    """
+    if not slugs:
+        return 0
+    from aglaia.plugin_api import BookMeta
+    from aglaia.workers import destinations as dest
+    fail = 0
+    loaded = dest.load_all()
+    for name in slugs:
+        d = loaded.get(name)
+        if d is None:
+            have = ", ".join(sorted(loaded)) or "none"
+            print(f"  ! --send-to {name}: not installed. Installed export "
+                  f"plugins: {have}. Install from the Plugins tab or with "
+                  f"`aglaia plugins install {name}`.", file=sys.stderr)
+            fail += 1
+            continue
+        missing = d.missing_settings()
+        if missing:
+            print(f"  ! --send-to {name}: not set up — still needs "
+                  f"{', '.join(missing)}. Configure it with "
+                  f"`aglaia plugins config {name}`.", file=sys.stderr)
+            fail += 1
+            continue
+        files = [f for f in written if f.suffix.lstrip(".").lower() in d.accepts]
+        if not files:
+            print(f"  ! --send-to {name}: none of the exported files is a "
+                  f"format it accepts ({', '.join(d.accepts)}).", file=sys.stderr)
+            fail += 1
+            continue
+        meta = BookMeta(title=slug, project_path=str(project_file))
+        for f in files:
+            try:
+                res = d.send(f, meta)
+            except Exception as e:  # noqa: BLE001 — someone else's code
+                print(f"  ! {d.display or name}: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+                fail += 1
+                continue
+            print(f"  {'✓' if res.ok else '!'} {d.display or name}: {res.message}",
+                  file=sys.stderr if not res.ok else sys.stdout)
+            if not res.ok:
+                fail += 1
     return fail
 
 
@@ -878,6 +935,10 @@ def run_ocr_only(cfg: CliConfig) -> int:
         )
         if rc:
             return rc
+        rc = _send_exports(cfg.send_to, list(getattr(_run_exports, "written", [])),
+                           project_file=project_file, slug=slug)
+        if rc:
+            return rc
     try:
         from aglaia.storage.db import compact_db
 
@@ -957,7 +1018,15 @@ def run(cfg: CliConfig) -> int:
 
     # Chain
     log_queue = multiprocessing.Queue()
-    chain = create_processing_chain(args, log_queue, db_path=str(project_file))
+    try:
+        chain = create_processing_chain(args, log_queue,
+                                        db_path=str(project_file))
+    except MissingProcessorError as e:
+        # Exit before touching the project. A batch that runs to completion
+        # with a step quietly missing is the expensive failure: the pages
+        # look processed and are not.
+        print(f"\n{e}", file=sys.stderr)
+        raise SystemExit(2)
     chain.start()
 
     # Start draining log_queue NOW, on its own thread — before any feeding —
@@ -1072,6 +1141,10 @@ def run(cfg: CliConfig) -> int:
             ocr_layer=ocr_layer,
             md_refine=cfg.md_refine,
         )
+        if rc:
+            return rc
+        rc = _send_exports(cfg.send_to, list(getattr(_run_exports, "written", [])),
+                           project_file=project_file, slug=slug)
         if rc:
             return rc
     # Fold the WAL back into the .agl + drop -wal/-shm sidecars at rest.

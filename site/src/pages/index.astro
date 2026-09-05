@@ -5,16 +5,19 @@ const GITHUB = 'https://github.com/yb85/aglaia';
 // macOS (the most mature build) first; client JS swaps in the visitor's OS.
 const REL = `${GITHUB}/releases/latest/download`;
 const DOWNLOADS = {
-  mac:        { url: `${REL}/Aglaia-macos-arm64.dmg`,        name: 'macOS',          sub: 'Apple Silicon · .dmg · Metal GPU' },
-  windows:    { url: `${REL}/Aglaia-windows-x64-setup.exe`,  name: 'Windows',        sub: 'x64 · installer · CPU' },
-  linux:      { url: `${REL}/Aglaia-x86_64.AppImage`,        name: 'Linux',          sub: 'x86_64 · AppImage · CPU' },
-  'linux-gpu':{ url: `${REL}/Aglaia-x86_64-cuda.AppImage`,   name: 'Linux (NVIDIA)', sub: 'x86_64 · AppImage · CUDA GPU' },
+  mac:        { url: `${REL}/Aglaia-macos-arm64.dmg`,        name: 'macOS',   sub: 'Apple Silicon · .dmg · signed & notarized' },
+  windows:    { url: `${REL}/Aglaia-windows-x64-setup.exe`,  name: 'Windows', sub: 'x64 · installer' },
+  linux:      { url: `${REL}/Aglaia-x86_64.AppImage`,        name: 'Linux',   sub: 'x86_64 · AppImage' },
 };
 const DOWNLOAD = DOWNLOADS.mac.url;   // default / fallback (nav button, no-JS)
 const KOFI = 'https://ko-fi.com/yb_85';
-// iOS: launching on the App Store — set the real product id once approved
-// (currently in TestFlight review). https://apps.apple.com/app/idXXXXXXXXXX
+// iOS: launching on the App Store. `id0000000000` is a PLACEHOLDER — set the
+// real product id here once approved, and the badge becomes a live link on
+// its own. Until then it renders inert rather than sending people to a dead
+// App Store page: a "Coming soon" badge that 404s is worse than one that
+// simply does not move. https://apps.apple.com/app/idXXXXXXXXXX
 const APPSTORE = 'https://apps.apple.com/app/id0000000000';
+const APPSTORE_LIVE = !APPSTORE.includes('id0000000000');
 // Comparison-table check / cross marks.
 const CHK = '<svg class="ic ic--ok" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="yes"><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
 const NO  = '<svg class="ic ic--no" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="no"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
@@ -26,7 +29,7 @@ const steps = [
     svg: '<path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/><circle cx="12" cy="13" r="3"/>' },
   { n: '02', t: 'Process', d: 'Isolate the text content, straighten it, and remove perspective and page-curvature distortion. Make your text pop with advanced binarization techniques.',
     svg: '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>' },
-  { n: '03', t: 'Read', d: 'Fast and coarse or slow and precise; local (Apple Vision, Surya, PaddleOCR-VL) or cloud-based (Mistral OCR) — use the OCR that suits your project.',
+  { n: '03', t: 'Read', d: 'Fast and coarse or slow and precise; local (Apple Vision, Apple Document AI, Surya, GLM-OCR) or cloud-based (Mistral OCR) — use the OCR that suits your project.',
     svg: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/>' },
   { n: '04', t: 'Export', d: 'A clean, searchable PDF for your digital archives or printouts? A well-structured Markdown file to feed your favorite LLM workflows? Aglaïa gives you what you need.',
     fill: true, svg: '<path d="m16.95 5.968l-1.414 1.414L13 4.846v12.196h-2V4.847L8.465 7.382L7.05 5.968L12 1.018z"/><path d="M5 20.982v-10h4v-2H3v14h18v-14h-6v2h4v10z"/>' },
@@ -90,19 +93,46 @@ const powers = [
             <span class="lede__l2">At your desk, in the library, or wherever you are.</span>
             <span class="lede__l3">No flatbed, no bulky rig: <span class="hl">just you and your phone.</span></span>
           </p>
-          <!-- iOS is the primary, phone-first CTA -->
-          <div class="cta cta--ios reveal">
-            <a class="appstore" href={APPSTORE} aria-label="Download Aglaïa on the App Store">
-              <svg class="appstore__logo" viewBox="0 0 384 512" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M318.7 268c-.3-40.5 18.1-71 55.3-93.4-20.8-29.8-52.2-46.2-93.7-49.4-39.3-3.1-82.2 23-98 23-16.7 0-54.7-21.9-84.6-21.9C39.3 127.2 0 165.1 0 240.4c0 22.2 4.1 45.1 12.2 68.7 10.9 31.6 50.2 108.9 91.2 107.6 21.4-.5 36.6-15.2 64.5-15.2 27 0 41.1 15.2 64.9 15.2 41.4-.6 77-70.9 87.4-102.6-55.6-26.2-52.7-76.8-52.5-79.1zM255.1 79.5c30.4-36.1 27.6-68.9 26.7-80.7-26.8 1.5-57.8 18.2-75.5 38.8-19.5 22-30.9 49.2-28.4 78.6 28.9 2.2 55.3-12.6 77.2-36.7z"/></svg>
-            <span class="appstore__txt"><small>Download on the</small><b>App Store</b></span>
-              <span class="appstore__soon">Coming soon</span>
+          <!-- The desktop app is the one you can install today: it leads. -->
+          <div class="cta reveal">
+            <div class="dl">
+              <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
+                <span class="dl__label">Download for {DOWNLOADS.mac.name}</span>
+                <span class="dl__sub">{DOWNLOADS.mac.sub}</span>
+              </a>
+              <button class="btn btn--lg dl__toggle" type="button"
+                      aria-haspopup="true" aria-expanded="false" aria-label="Choose another platform">▾</button>
+              <div class="dl__menu" role="menu" hidden>
+                <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
+                <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
+                <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
+              </div>
+            </div>
+            <a class="btn btn--ghost btn--lg btn--stack" href="#install" data-cli>
+              <span class="dl__label">CLI installation</span>
+              <span class="dl__sub">uv · pip · brew</span>
             </a>
           </div>
+          <p class="cta__note reveal">Every build runs the page-dewarp fit on the CPU — the LM solver needs no GPU. Prefer a package manager? <a href="#install">CLI install</a>.</p>
+          <p class="fineprint reveal">The <b>macOS · Windows · Linux desktop app</b> is free &amp; <a href={GITHUB}>source-available</a>. The iOS app is free too, but closed-source.</p>
           <!-- our single biggest advantage: genuinely, fully free -->
           <p class="freebadge reveal">
             <span class="freebadge__big">FREE</span>
             <span class="freebadge__sub">No paywall<br />no in-app purchase<br />no subscription</span>
           </p>
+          <!-- iOS below the desktop download: the app people can install TODAY comes first, the one they can look forward to second. -->
+          <p class="cta__alt reveal">Coming soon on your iPhone</p>
+          <div class="cta cta--ios reveal">
+            <a class="appstore" href={APPSTORE_LIVE ? APPSTORE : undefined}
+               aria-disabled={APPSTORE_LIVE ? undefined : 'true'}
+               aria-label={APPSTORE_LIVE
+                 ? 'Download Aglaïa on the App Store'
+                 : 'Aglaïa for iPhone — coming soon to the App Store'}>
+              <svg class="appstore__logo" viewBox="0 0 384 512" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M318.7 268c-.3-40.5 18.1-71 55.3-93.4-20.8-29.8-52.2-46.2-93.7-49.4-39.3-3.1-82.2 23-98 23-16.7 0-54.7-21.9-84.6-21.9C39.3 127.2 0 165.1 0 240.4c0 22.2 4.1 45.1 12.2 68.7 10.9 31.6 50.2 108.9 91.2 107.6 21.4-.5 36.6-15.2 64.5-15.2 27 0 41.1 15.2 64.9 15.2 41.4-.6 77-70.9 87.4-102.6-55.6-26.2-52.7-76.8-52.5-79.1zM255.1 79.5c30.4-36.1 27.6-68.9 26.7-80.7-26.8 1.5-57.8 18.2-75.5 38.8-19.5 22-30.9 49.2-28.4 78.6 28.9 2.2 55.3-12.6 77.2-36.7z"/></svg>
+            <span class="appstore__txt"><small>Download on the</small><b>App Store</b></span>
+              <span class="appstore__soon">Coming soon</span>
+            </a>
+          </div>
           <!-- iOS showcase: a horizontal gallery centred on an interactive
                before/after slider (real scan 8B), flanked by the Projects
                and Markdown screens. Drag the centre to see the pipeline. -->
@@ -159,29 +189,6 @@ const powers = [
             </span>
             <span class="tip__label">Tip the developer</span>
           </a>
-          <p class="cta__alt reveal">You can use your computer if you prefer</p>
-          <div class="cta reveal">
-            <div class="dl">
-              <a class="btn btn--lg dl__main" href={DOWNLOADS.mac.url} data-download data-download-os>
-                <span class="dl__label">Download for {DOWNLOADS.mac.name}</span>
-                <span class="dl__sub">{DOWNLOADS.mac.sub}</span>
-              </a>
-              <button class="btn btn--lg dl__toggle" type="button"
-                      aria-haspopup="true" aria-expanded="false" aria-label="Choose another platform">▾</button>
-              <div class="dl__menu" role="menu" hidden>
-                <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
-                <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
-                <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
-                <a role="menuitem" data-os="linux-gpu" href={DOWNLOADS['linux-gpu'].url}><b>Linux (NVIDIA&nbsp;GPU)</b><span>{DOWNLOADS['linux-gpu'].sub}</span></a>
-              </div>
-            </div>
-            <a class="btn btn--ghost btn--lg btn--stack" href="#install" data-cli>
-              <span class="dl__label">CLI installation</span>
-              <span class="dl__sub">uv · pip · brew</span>
-            </a>
-          </div>
-          <p class="cta__note reveal">Linux NVIDIA users get a ready-to-run CUDA AppImage. On Windows, CUDA acceleration is available only via <a href="#install">CLI install</a> on WSL2.</p>
-          <p class="fineprint reveal">The <b>macOS · Windows · Linux desktop app</b> is free &amp; <a href={GITHUB}>source-available</a>. The iOS app is free too, but closed-source.</p>
         </div>
       </section>
 
@@ -297,34 +304,34 @@ const powers = [
       <section class="speed">
         <div class="speed__copy reveal">
           <h2>Take full advantage of your <span>computing power</span></h2>
-          <p>Aglaïa uses the latest GPU acceleration where it matters. Automatic
-            batching delivers <span>2.5× speed on NVIDIA GPUs</span>.</p>
+          <p>Flattening a curved page is a fitting problem, and fitting is where
+            the time goes. Aglaïa solves it with a
+            <span>Levenberg–Marquardt optimizer</span> written for this problem
+            in particular: analytic Jacobians instead of finite differences, and
+            a Hessian whose <b>sparse arrowhead structure</b> is exploited
+            rather than ignored — so each iteration costs a fraction of the
+            general-purpose solve, and there are far fewer of them.</p>
+          <p class="speed__quip">No idea what I am talking about?
+            <b>IT&rsquo;S FAST</b> 🔥🔥🔥</p>
         </div>
         <div class="speed__chart reveal">
           <ul class="bars">
             <li class="bar">
               <div class="bar__head">
-                <span class="bar__name">Apple MacBook M4 base (4&nbsp;P-cores) · MLX (JAX/Metal)</span>
-                <span class="bar__val" data-to="1.0">1.0 p/s</span>
+                <span class="bar__name">Apple MacBook M4 base (4&nbsp;P-cores)</span>
+                <span class="bar__val" data-to="0.6">0.6 s/page</span>
               </div>
-              <div class="bar__track"><span class="bar__fill" style="--w:29%"></span></div>
-            </li>
-            <li class="bar">
-              <div class="bar__head">
-                <span class="bar__name">AMD Ryzen&nbsp;9 7900X · JAX/CPU</span>
-                <span class="bar__val" data-to="1.4">1.4 p/s</span>
-              </div>
-              <div class="bar__track"><span class="bar__fill" style="--w:41%"></span></div>
+              <div class="bar__track"><span class="bar__fill" style="--w:50%"></span></div>
             </li>
             <li class="bar bar--hot">
               <div class="bar__head">
-                <span class="bar__name">AMD Ryzen&nbsp;9 7900X + NVIDIA RTX&nbsp;3090 · Batched JAX/CUDA</span>
-                <span class="bar__val" data-to="3.4">3.4 p/s</span>
+                <span class="bar__name">AMD Ryzen&nbsp;9 7900X</span>
+                <span class="bar__val" data-to="0.3">0.3 s/page</span>
               </div>
               <div class="bar__track"><span class="bar__fill" style="--w:100%"></span></div>
             </li>
           </ul>
-          <p class="speed__foot">headless mode · 175 scans of a 2-pages/scan book</p>
+          <p class="speed__foot">headless mode · full chain, dewarp included · longer bar = more pages per minute</p>
         </div>
       </section>
 
@@ -408,11 +415,10 @@ uv sync --extra gui --extra macos   # macOS GUI: Vision, Speech, MLX dewarp
 uv sync --extra gui                 # Windows / Linux GUI (Qt only)
 uv sync                             # headless: CLI pipeline, no Qt
 # add any of:
-#   --extra macos    # Apple-Silicon local VLM OCR (GLM / Unlimited / Surya, MLX)
-#   --extra cuda     # NVIDIA local VLM OCR (vLLM) + GPU dewarp
+#   --extra macos    # Apple Vision + Apple Document AI OCR, MLX local VLM OCR
+#   --extra cuda     # NVIDIA local VLM OCR (vLLM, Linux)
 #   --extra voice    # offline voice control (Vosk, cross-platform)
-#   --extra cloud    # Mistral cloud OCR
-#   --extra cuda     # NVIDIA GPU dewarp (Linux)
+#   --extra cloud    # Mistral cloud OCR + OS-keychain key storage
 #   --extra server   # HTTP job API (`aglaia server`)
 
 uv run aglaia ~/scans/my-book       # GUI; `aglaia run …` to batch headlessly</code></pre>
@@ -421,7 +427,7 @@ pip install aglaia                  # lean base: headless pipeline, no Qt
 pip install "aglaia[gui]"           # Windows / Linux GUI (Qt)
 pip install "aglaia[gui,macos]"     # macOS GUI: Vision, Speech, MLX dewarp
 
-# Local VLM OCR (GLM / Unlimited / Surya) rides the platform backend:
+# Local VLM OCR (GLM / Surya) rides the platform backend:
 #   pip install "aglaia[macos]"     # Apple Silicon (MLX)
 #   pip install "aglaia[cuda]"      # NVIDIA (vLLM)
 # Apple Vision OCR needs no extra — it ships with [macos].
@@ -478,7 +484,7 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
               <tr>
                 <th>Speed</th>
                 <td>40&nbsp;pages/min</td>
-                <td class="cmp__hot">100–200&nbsp;pages/min <small>(with GPU)</small></td>
+                <td class="cmp__hot">100–200&nbsp;pages/min <small>(on a laptop CPU)</small></td>
               </tr>
               <tr>
                 <th>Extendable?</th>
@@ -508,7 +514,6 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
                 <a role="menuitem" data-os="mac"     href={DOWNLOADS.mac.url}><b>macOS</b><span>{DOWNLOADS.mac.sub}</span></a>
                 <a role="menuitem" data-os="windows" href={DOWNLOADS.windows.url}><b>Windows</b><span>{DOWNLOADS.windows.sub}</span></a>
                 <a role="menuitem" data-os="linux"   href={DOWNLOADS.linux.url}><b>Linux</b><span>{DOWNLOADS.linux.sub}</span></a>
-                <a role="menuitem" data-os="linux-gpu" href={DOWNLOADS['linux-gpu'].url}><b>Linux (NVIDIA&nbsp;GPU)</b><span>{DOWNLOADS['linux-gpu'].sub}</span></a>
               </div>
             </div>
             <a class="btn btn--ghost btn--lg btn--stack btn--star" href={GITHUB}>
@@ -519,7 +524,7 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
               </span>
             </a>
           </div>
-          <p class="cta__note">Linux NVIDIA users get a ready-to-run CUDA AppImage. On Windows, CUDA acceleration is available only via <a href="#install">CLI install</a> on WSL2.</p>
+          <p class="cta__note">Every build runs the page-dewarp fit on the CPU — the LM solver needs no GPU. Prefer a package manager? <a href="#install">CLI install</a>.</p>
           <p class="license">* <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield License 1.0.0</a></p>
         </div>
       </section>
@@ -581,23 +586,11 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
         return 'mac';   // default to the most mature build
       };
       const OS_NAME: Record<string, string> = {
-        mac: 'macOS', windows: 'Windows', linux: 'Linux', 'linux-gpu': 'Linux (NVIDIA GPU)' };
-      // Best-effort NVIDIA probe via the WebGL renderer string — so Linux
-      // visitors with an NVIDIA card default to the ready-to-run CUDA AppImage
-      // (others get the universal CPU build; the menu always lists both).
-      const hasNvidiaGpu = (): boolean => {
-        try {
-          const c = document.createElement('canvas');
-          const gl = (c.getContext('webgl') || c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
-          if (!gl) return false;
-          const ext = gl.getExtension('WEBGL_debug_renderer_info');
-          const r = ext ? gl.getParameter((ext as any).UNMASKED_RENDERER_WEBGL)
-                        : gl.getParameter(gl.RENDERER);
-          return /nvidia|geforce|\brtx\b|quadro/i.test(String(r || ''));
-        } catch { return false; }
-      };
-      let os: string = detectOS();
-      if (os === 'linux' && hasNvidiaGpu()) os = 'linux-gpu';
+        mac: 'macOS', windows: 'Windows', linux: 'Linux' };
+      // No GPU probe: there is one Linux build. The CUDA AppImage it used to
+      // steer NVIDIA visitors to is not built any more — the LM solver fits
+      // the same sheet on CPU faster than the GPU path it replaced.
+      const os: string = detectOS();
       const menuLink = document.querySelector<HTMLAnchorElement>(`.dl__menu [data-os="${os}"]`);
       if (menuLink) {
         const url = menuLink.getAttribute('href') || '';
@@ -942,8 +935,11 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
       .lede__l1, .lede__l3 { color: #cfddec; }
       .lede__l2 { color: #8ea2b7; }
       .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
-      /* iOS is the primary CTA — the App Store badge, phone-first. */
+      /* The App Store badge, phone-first. */
       .cta--ios { margin-top: 30px; }
+      /* No product id yet → no href. Keep the badge looking like itself, but
+         stop it behaving like a link that goes somewhere. */
+      .appstore[aria-disabled="true"] { cursor: default; }
       .appstore { position: relative; display: inline-flex; align-items: center; gap: 11px;
         padding: 12px 22px; border-radius: 13px; background: #000; color: #fff;
         border: 1px solid #2a2a2a; text-decoration: none;
@@ -1335,6 +1331,10 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
       @keyframes barPulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.18); } }
       .speed__foot { margin: 22px 0 0; color: #6fa8df; font-size: .78rem;
             text-transform: uppercase; letter-spacing: .12em; }
+      /* The punchline after the technical paragraph — bigger, not shouty. */
+      .speed__quip { font-size: 1.15rem !important; }
+      .speed__quip b { color: #8fd0ff; font-weight: 800; letter-spacing: .04em;
+            text-shadow: 0 0 14px rgba(143,208,255,.55), 0 0 34px rgba(143,208,255,.30); }
       @media (prefers-reduced-motion: reduce) {
             .bar__fill { transition: none; } .bar--hot .bar__fill { animation: none; } }
       @media (max-width: 760px) { .speed { grid-template-columns: 1fr; gap: 28px; } }

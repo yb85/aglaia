@@ -84,11 +84,13 @@ def latest_release_version(timeout: float = 3.0) -> Optional[str]:
     or None. The request carries `telemetry_user_agent()`."""
     import json
     import urllib.request
+
+    from aglaia import net as _net
     req = urllib.request.Request(
         UPDATE_ENDPOINT,
         headers={"Accept": "application/json",
                  "User-Agent": telemetry_user_agent()})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _net.urlopen(req, timeout=timeout) as resp:
         data = json.load(resp)
     tag = (data.get("version") or "").strip().lstrip("vV")
     return tag or None

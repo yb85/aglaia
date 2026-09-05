@@ -21,11 +21,13 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import (
-    QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Property,
+    QEasingCurve, QEvent, QObject, QPropertyAnimation, QRectF, QSize, Qt,
+    Property,
 )
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
-    QAbstractButton, QFrame, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QAbstractButton, QFrame, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget,
 )
 
 from aglaia.gui.colors import (
@@ -58,35 +60,36 @@ def manual_tooltip(fields) -> str:
     return "Hand-tuned: " + ", ".join(names)
 
 
-class ManualPip(QWidget):
-    """A small dot marking a page the user tuned by hand (M9 #102).
+class ManualPip(QLabel):
+    """A mark on a page the user tuned by hand (M9 #102).
 
-    Deliberately quiet. A hand-edited page is not a warning: it must read as a
-    MARK, not an alert, and it must not compete with the disable strike (red)
-    or the trashed state. So: the primary accent, one dot, no glyph, no text —
-    at a glance you see that a page differs from its neighbours, and the
-    tooltip says how.
+    A hand-edited page is not a warning: it reads as a MARK, not an alert, and
+    must not compete with the disable strike or the trashed state. So: the
+    primary accent, one glyph, no text — at a glance you see that a page
+    differs from its neighbours, and the tooltip says how.
+
+    It was a 7 px dot in the top-right corner, which was both too small to
+    notice and sitting exactly where the next-page chevron is: the two
+    overlapped, and the dot lost. Now it is a `hand` glyph on the bottom
+    edge, centred — the same treatment as the OCR badge on the bottom right,
+    which is the vocabulary for "state of this page" already established.
     """
 
-    SIZE = 7
+    SIZE = 18
 
     def __init__(self, fields, parent=None):
         super().__init__(parent)
         self._fields = list(fields or [])
         self.setFixedSize(self.SIZE, self.SIZE)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-                          False)
+        self.setScaledContents(True)
+        self.setStyleSheet("background: transparent; border: none;")
         self.setToolTip(manual_tooltip(self._fields))
-
-    def paintEvent(self, _ev):  # noqa: N802
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # A hairline of the page background keeps the dot readable on a busy
-        # thumbnail without turning it into a badge.
-        p.setPen(qcolor(COLOR_FONT_INVERSE))
-        p.setBrush(qcolor(COLOR_PRIMARY))
-        p.drawEllipse(0, 0, self.SIZE - 1, self.SIZE - 1)
-        p.end()
+        try:
+            from aglaia.gui.theme import lucide_pixmap
+            self.setPixmap(lucide_pixmap("hand", color=COLOR_PRIMARY,
+                                         size=self.SIZE))
+        except Exception:
+            pass
 
 
 def make_icon_button(
@@ -97,6 +100,7 @@ def make_icon_button(
     color: str = COLOR_OUTLINE_BUTTON_STRONG,
     bg: str = "transparent",
     hover_bg: Optional[str] = None,
+    hover_color: Optional[str] = None,
     border: str = "none",
     parent: Optional[QWidget] = None,
     tooltip: Optional[str] = None,
@@ -111,6 +115,14 @@ def make_icon_button(
     btn.setIconSize(QSize(icon_size, icon_size))
     btn.setFixedSize(size, size)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if hover_color:
+        # QSS cannot recolour an icon — it is a pixmap, not text — so the
+        # tint is swapped on enter/leave. Lets a destructive button sit
+        # quiet in a dense grid and go red only under the pointer, where it
+        # is actually about to happen.
+        rest = lucide(icon_name, color=color, size=icon_size)
+        hot = lucide(icon_name, color=hover_color, size=icon_size)
+        btn.installEventFilter(_IconHover(btn, rest, hot))
     radius = size // 2
     hover_rule = (
         f"QPushButton:hover {{ background-color: {hover_bg}; }}"
@@ -124,6 +136,23 @@ def make_icon_button(
     if tooltip:
         btn.setToolTip(tooltip)
     return btn
+
+
+class _IconHover(QObject):
+    """Swap a button's icon on hover. Parented to the button so it lives
+    exactly as long as it, and dies with it."""
+
+    def __init__(self, btn: QPushButton, rest, hot):
+        super().__init__(btn)
+        self._rest, self._hot = rest, hot
+
+    def eventFilter(self, obj, ev):  # noqa: N802 — Qt API
+        t = ev.type()
+        if t == QEvent.Type.Enter:
+            obj.setIcon(self._hot)
+        elif t == QEvent.Type.Leave:
+            obj.setIcon(self._rest)
+        return False
 
 
 def place_overlay(btn: QPushButton, container: QWidget, x: int, y: int) -> None:

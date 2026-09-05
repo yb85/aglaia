@@ -92,6 +92,30 @@ The three views surface it differently, all via `MainWindow.cell_disable_states`
 - **Gallery** (`ScansGalleryView`) — a toggle (replacing the star) on the
   current stage; left/right still walks stages.
 
+  **Navigation.** Arrows or WASD step: up/down between scans, left/right
+  between stages of the current scan. **Home / End** jump to the first / last
+  scan, and so do **⌘↑ / ⌘↓** — Home and End need Fn on most Mac keyboards,
+  and ⌘↑/⌘↓ is the native start/end-of-document idiom there. With the mouse,
+  **shift-click the up/down chevron**: the same "all the way" convention as a
+  shift-click in a list, reusing a control already on screen rather than
+  putting two more floating buttons over the page, which is the one part of
+  this view that should stay clear. The chevron tooltips name the shortcuts,
+  because a keyboard-only feature is an invisible one.
+
+  A jump carries the current stage across, exactly as a single step does —
+  arriving at page 300 must not also discard the stage being examined.
+
+## Camera memory
+
+Rotation, mirror and flip are remembered **per camera**, in the app-data
+config DB (`camera_transforms`), and re-applied when that camera is opened
+in any later project. The rig does not move between books, so the correction
+that makes its feed upright is a property of the camera, not of the project.
+Keyed by the device's name (AVFoundation `localizedName`), not its index —
+indexes shift when devices come and go. An explicit `--transform` on the
+command line wins for that session; setting the transform back to identity
+forgets the entry. (`aglaia/gui/camera_memory.py`)
+
 ## Debug view / per-page editor (`DebugViewerTab`)
 
 Click a stage thumb and a closable tab walks that page's chain, root → leaf.
@@ -373,6 +397,21 @@ The sidebar **OCR** tab (`aglaia/gui/sidebar/tabs/OcrTab.py`) picks an engine vi
 `RadioCardGroup` and fires `run_requested(engine, languages, mode, complement)`
 → `MainWindow._on_ocr_run_requested` → `OcrWorker`.
 
+**Only three cards are shown**, with the rest behind a *"N more engine(s)…"*
+handle. Six cards is a wall, and for almost everyone the answer is one of the
+first two — Apple Document and Cloud on a Mac, Cloud and GLM elsewhere, which
+is what the declared card order already lands on once `_platform_ok` has
+dropped the engines this OS cannot run.
+
+Which three: the first three that are **usable** (`_visible_engine_keys`). A
+card whose weights are not downloaded is an Install button, and that is not
+what someone opening this panel came for, so it waits with the rest. Two rules
+keep the fold honest: the **selected** engine is always shown — hiding the
+engine that is about to run would be a panel lying about what it will do, and
+it also means someone whose persisted choice is Surya opens the panel already
+unfolded — and when *nothing* is usable (a fresh install, no models, no key)
+the first three are shown anyway, or the Install buttons would be unreachable.
+
 Engine cards:
 
 - **Apple Document engine** (`apple_docs`) — **default on a capable Mac.**
@@ -403,7 +442,7 @@ Engine cards:
   `meta.truncated` → `OcrWorker` `fail()`s them); a Log-tab advisory tells
   the user to **run OCR again** to continue. Page mapping is positional
   (Mistral page *i* → the *i*-th selected scan). Needs the `cloud` extra
-  (`uv sync --extra cloud`) and an API key. See
+  and an API key. See
   `aglaia/workers/ocr/mistral_cloud.py`.
 
   *API key* — set via the card's **Set API key…** button (masked dialog).

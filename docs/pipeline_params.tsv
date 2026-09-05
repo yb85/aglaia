@@ -21,6 +21,7 @@ PageDetector	min_contrast	bounded_float	Reject layouts whose (p95−p5) range UN
 Binarizer	method	enum	Binarization algorithm (doxapy: wolf++/wolf/sauvola/niblack/nick/… plus otsu). gray keeps grayscale; none passes through.	false	wolf++
 Binarizer	window_mm_wolf	bounded_float	Wolf-family window in mm. Each doxa family has its own window_mm_<family> / window_px_<family> / k_<family> (e.g. window_mm_sauvola, k_sauvola).	false	3.2
 Binarizer	k_wolf	bounded_float	Wolf-family threshold bias. Higher = whiter. Per-family k_<family> exists for each algorithm.	false	0.5
+Binarizer	erase_grow	bounded_int	Erase masks (meta.erase): grow the polygon by N px when whitening it after binarisation. The mirror of roi_shrink — it takes with it any one-pixel rim the binariser produced at the boundary.	true	2
 Binarizer	roi_shrink	bounded_int	If meta.roi is set, erode the mask N iterations before applying.	false	0
 Binarizer	morpho_close	bounded_int	Morphological close (0–10) after thresholding.	false	0
 TrapezoidalCorrection	line_source	enum	Where to source text-line bboxes from.	false	connectivity

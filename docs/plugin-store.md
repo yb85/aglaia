@@ -1,0 +1,562 @@
+# Plugin store — design
+
+Status: **design, not built.** Tracked by milestone *M10 — Plugin store*.
+
+Aglaïa already takes drop-in plugins: a `.py` file in
+`<APP_DATA>/plugins/{processors,ocr}/`, gated by a trust popup
+(`aglaia/app_data/plugins.py`). That works for the author of the file. It does
+not work for *distribution*: there is no way to find a plugin, no way to know
+what it will do before it runs, no way to update or revoke one, and no way for
+a plugin to keep a secret or a setting of its own.
+
+This document designs the distribution layer: a curated registry
+(`aglaia-plugins`), a versioned API surface, per-plugin secrets and storage, an
+install flow for unreviewed archives, and the review checklist that makes the
+curation real.
+
+---
+
+## 1. Threat model — read this first
+
+**An imported Python module runs with every privilege the Aglaïa process has.**
+It can read any file the user can read, open sockets, and call
+`keyring.get_password` for any service on the machine. CPython offers no way to
+take that back from inside the same interpreter: `__import__` is reachable
+through `getattr(__builtins__, ...)`, through `eval`, through a C extension.
+
+So this design does **not** claim a sandbox in the security sense. Saying
+otherwise would be worse than saying nothing, because a user who believes there
+is a wall will install things he would otherwise think about.
+
+What it actually provides, in descending order of strength:
+
+| Measure | Stops | Does not stop |
+|---|---|---|
+| **Human review of every registry PR** | anything a reader would catch | a subtle, deliberate backdoor |
+| **No dependency installation, ever** | the entire supply-chain vector | misuse of libs already present |
+| **Signed, hash-pinned index** | tampering in transit or at rest | a malicious plugin that was reviewed |
+| **Declared capabilities, shown before install** | surprise — the user consents to *this* behaviour | a plugin that lies and does more |
+| **Namespaced secrets / storage API** | accidental cross-reads; makes intent auditable | deliberate direct `keyring` use |
+| **Static import scan** | accidents, lazy authors, obvious exfiltration | `__import__` built at runtime |
+| **Revocation list** | a bad plugin, once known | the window before it is known |
+
+The honest summary: **curation is the security boundary; everything else raises
+the cost of an accident and makes misbehaviour visible and attributable.** §12
+describes what real isolation would take, and why it is a later milestone.
+
+---
+
+## 1b. What exists today
+
+Built and shipping:
+
+* `aglaia.plugin_api` — the façade of §5, at `API_VERSION = 1`.
+* `PluginContext` — per-plugin settings, namespaced secrets, scratch dir (§7-8).
+* The `destinations` kind, and three first-party destinations in registry
+  layout under `aglaia/plugins/destinations/` (see `docs/destinations.md`).
+* The manifest reader and the import scan (§4, §6) —
+  `aglaia/app_data/plugin_manifest.py`.
+* The registry client, both install paths, uninstall/disable
+  (`aglaia/app_data/plugin_registry.py`) and the **Plugins** tab
+  (`aglaia/gui/PluginsTab.py`, *View → Plugins…*).
+* The registry itself: <https://github.com/yb85/aglaia-plugins>, with
+  `scripts/build_plugin_index.py` generating `index.json` and CI checking that
+  the committed copy is current.
+
+* Plugin-contributed **windows**: `PluginWindow` + `register_window`, gated on
+  a declared `ui` capability, listed under a *Plugins* menu grouped by slug
+  (`aglaia/workers/plugin_windows.py`). `PySide6` joins a plugin's allow-list
+  only with that capability — which does not widen what a plugin *could* do,
+  since it already runs in-process, but does put "adds a window" in the
+  install dialog and tells a reviewer to look harder: a plugin that can draw
+  can draw something that looks like Aglaïa asking for a password.
+
+### A note on speed
+
+`raw.githubusercontent.com` resolves to four IPv6 addresses before four IPv4
+ones. On a network that advertises IPv6 without routing it — a common
+home-router state — Python tries them **strictly in order** and spends the full
+connect timeout on each dead one. Measured: four IPv6 timeouts, then IPv4
+connecting in 0.05 s, for a 15 KB file. `curl` is fast on the same machine
+because it does Happy Eyeballs; httpx does not.
+
+`plugin_registry._client` binds the local address to IPv4 so the resolver hands
+back A records only, and falls back to a plain client if that fails — a
+genuinely IPv6-only machine must still work, and it is not this code's place to
+decide otherwise. Index fetch went 24.7 s → 0.7 s, a full install to 1.6 s.
+
+**Not built: the index signature.** It needs an offline signing key and a
+release step. Until then the index is fetched over HTTPS and every file is
+verified against the sha256 the index gives for it, and `IndexResult.signed`
+is `False` so the tab can say which guarantee the user is actually getting —
+a smaller promise honestly labelled, rather than a bigger one quietly unmet.
+Also not built: the update flow and the revocation refresh (§10).
+
+## 2. Trust tiers
+
+Three ways a plugin arrives, three levels of ceremony.
+
+| Tier | Source | Ceremony |
+|---|---|---|
+| **1 — Registry** | `aglaia-plugins`, PR-reviewed, hash-pinned, signed index | Capability sheet + a single **Install** confirm |
+| **2 — Archive** | a local `.aglplugin` zip, reviewed by nobody | **RED** warning, capability sheet, and the user must type `I TRUST THE AUTHOR OF THIS PLUGIN` |
+| **3 — Drop-in** | a `.py` dropped in `<APP_DATA>/plugins/…` | The existing startup gate (unchanged) |
+
+Tier 3 stays exactly as it is — it is the developer's own loop, and adding
+ceremony to it would only train people to click through. Tiers 1 and 2 are new.
+
+---
+
+## 3. The registry repository
+
+```
+aglaia-plugins/
+├── README.md                  what a plugin is, how to submit, the rules
+├── CONTRIBUTING.md            the checklist a PR must satisfy
+├── index.json                 GENERATED by CI — never hand-edited
+├── index.json.minisig         detached signature over index.json
+├── processors/
+│   └── <slug>/
+│       ├── aglaia-plugin.toml manifest (§4)
+│       ├── <entry>.py         the ONE top-level module
+│       ├── _support/          optional private modules
+│       ├── README.md          what it does, with a before/after image
+│       ├── LICENSE
+│       └── tests/test_<slug>.py
+└── ocr/
+    └── <slug>/…
+```
+
+One directory per plugin, named by slug. The kind is the parent directory —
+not a manifest field to get wrong, and it makes `git log processors/` a
+per-kind history.
+
+`index.json` is built by CI from the manifests on every merge to `main`:
+
+```jsonc
+{
+  "schema": 1,
+  "generated_at": "2026-09-04T18:00:00Z",
+  "api": 1,                       // the plugin API version this index targets
+  "plugins": [
+    {
+      "slug": "deskew-hough", "kind": "processors", "version": "1.2.0",
+      "name": "Hough deskew", "summary": "…",
+      "author": "Jane Doe",           // shown in the install disclaimer
+      "source_url": "https://github.com/yb85/aglaia-plugins/tree/<sha>/processors/deskew-hough",
+      "license": "MIT", "homepage": "…",
+      "requires": { "aglaia": ">=0.1.0rc5,<0.2", "python": ">=3.12" },
+      "capabilities": { "secrets": false, "network": false, "config": true },
+      "imports": ["numpy", "cv2"],
+      "files": { "deskew_hough.py": "sha256:…", "aglaia-plugin.toml": "sha256:…" },
+      "sha256": "…"             // over the canonical file list
+    }
+  ],
+  "revoked": [ { "slug": "…", "version": "1.0.1", "reason": "…" } ]
+}
+```
+
+The client fetches `index.json` + `index.json.minisig`, verifies the signature
+against a public key **compiled into the app**, and refuses the index outright
+on mismatch. A compromised CDN or a hijacked repo cannot inject a plugin
+without the signing key. The key lives offline; CI does not hold it — signing
+is a release step, like notarization.
+
+`source_url` is pinned to the **merged commit**, not to `main`: the install
+dialog links to the code that was actually reviewed, and it keeps pointing
+there after the plugin is updated.
+
+`revoked` is the kill switch: an entry there disables that plugin at next
+index refresh, with the reason shown to the user.
+
+---
+
+## 4. Manifest — `aglaia-plugin.toml`
+
+```toml
+[plugin]
+slug     = "deskew-hough"      # [a-z0-9-]{3,40}, unique, == directory name
+name     = "Hough deskew"
+version  = "1.2.0"             # semver
+summary  = "Deskew from Hough lines instead of a projection profile."
+author   = "Jane Doe <jane@example.org>"
+homepage = "https://github.com/janedoe/aglaia-deskew-hough"
+license  = "MIT"               # SPDX id; must match LICENSE
+entry    = "deskew_hough.py"   # the only top-level .py
+
+[requires]
+aglaia = ">=0.1.0rc5,<0.2"     # host version range
+python = ">=3.12"
+api    = 1                     # aglaia.plugin_api major version
+imports = ["numpy", "cv2"]     # third-party modules it will import (§6)
+
+[capabilities]                 # each one appears in the install dialog
+config  = true                 # wants its own settings store
+secrets = false                # wants the namespaced keychain
+network = false                # will open network connections
+files   = false                # will read/write outside its own directory
+```
+
+`kind` is deliberately absent: the directory decides. A manifest that
+contradicts its location is a CI failure.
+
+Declaring a capability does not grant power the plugin could not take anyway
+(§1). It is a **statement of intent**, and it is what the user is shown before
+consenting. A plugin that does something it did not declare is in breach of
+the registry rules and gets revoked — which is a policy boundary enforced by
+people, and is stated as such.
+
+---
+
+## 5. The API surface — `aglaia.plugin_api`
+
+Today a plugin imports anything under `aglaia.*`. That is an unbounded surface:
+every internal rename breaks plugins, and a reviewer cannot reason about what a
+plugin may touch. So there is exactly one public module.
+
+```python
+from aglaia.plugin_api import (
+    API_VERSION,                 # 1
+    ImageBuffer, ImageType, Status,        # the data types
+    AbstractImageProcessor, AbstractProcessorOption, ReplayTrait,
+    OcrEngine, OcrResult, OcrLine, register_ocr_engine,
+    option_bool, option_int, option_float, option_enum, option_str,
+    to_gray, to_rgb, to_bw, is_binary,     # the utils worth sharing
+    PluginContext,               # handed to the plugin, see below
+)
+```
+
+Rules:
+
+* `aglaia.plugin_api` is **semver-versioned independently of the app.** A
+  plugin declares `api = 1`; the host refuses to load one that declares a major
+  it does not implement, with a message naming the plugin and the versions.
+* Everything re-exported is covered by that promise. Anything else under
+  `aglaia.*` is internal and may move without notice — the guidelines say so,
+  and the import scan (§6) flags it.
+* Adding to the façade is a minor bump. Removing or changing a signature is a
+  major bump, and majors are expected to be rare and loud.
+
+### `PluginContext`
+
+Constructed by the host at load time, with the slug **baked in by the host** —
+a plugin cannot ask for another plugin's context through the API.
+
+```python
+class PluginContext:
+    slug: str
+    version: str
+    data_dir: Path        # <APP_DATA>/plugins/data/<slug>/files/  (created)
+    config: PluginConfig  # key/value store, §8
+    secrets: PluginSecrets | None   # None unless `secrets = true` was declared
+    log: Callable[[str], None]      # prefixed "[plugin:<slug>]", goes to the Log tab
+```
+
+A processor receives it as `self.ctx`, set by the registry after construction;
+an OCR engine likewise. Neither has to accept it in `__init__`, so a plugin
+written against the current drop-in contract keeps working.
+
+---
+
+## 5b. Metadata a plugin writes
+
+Every key a plugin puts in `buf.meta` must be declared at import time so a warp knows what to do with it:
+
+```python
+from aglaia.plugin_api import MetaKind, declare_meta
+declare_meta("stamps_found", MetaKind.SCALAR)
+```
+
+`POLYGON` / `POLYGONS` / `POINTS` are carried through every geometric step by the host; `SCALAR` / `LABEL` / `OPAQUE` are copied;
+an **undeclared key is dropped at the first warp** with a log line. `add_erase` writes the pre-declared `erase` key, so a
+plugin that only erases declares nothing. Schema and rationale: [imagebuffer.md](imagebuffer.md).
+
+## 6. Allowed imports
+
+A plugin may import:
+
+1. `aglaia.plugin_api` — nothing else from `aglaia`;
+2. a **stdlib allow-list**: `math`, `statistics`, `dataclasses`, `typing`,
+   `enum`, `json`, `re`, `pathlib`, `collections`, `itertools`, `functools`,
+   `abc`, `warnings`, `logging`, `time`, `datetime`, `hashlib`, `base64`,
+   `uuid`, `io`, `contextlib`, `textwrap`, `unicodedata`;
+3. any module in `[requires].imports`, which must be a subset of what Aglaïa
+   already ships: `numpy`, `cv2`, `scipy`, `PIL`, `yaml`, and — only with
+   `network = true` — `httpx` / `requests`.
+
+Notably **not** allowed: `os`, `sys`, `subprocess`, `socket`, `shutil`,
+`ctypes`, `importlib`, `pickle`, `multiprocessing`, `keyring`, `sqlite3`. The
+things a plugin legitimately needs from those it gets through `PluginContext`
+instead — a data dir, a config store, secrets — which is the point of having a
+context at all.
+
+**No plugin ever installs a dependency.** Not at review, not at install, not at
+runtime. If a plugin needs a library Aglaïa does not ship, the answer is
+"propose it as a host dependency in a separate PR", not "let the installer run
+pip". This single rule removes the entire supply-chain attack surface, and it
+is why the import allow-list can be closed rather than open.
+
+Enforcement is a two-stage AST scan (`aglaia/app_data/plugin_scan.py`):
+
+* **CI, on every registry PR** — the same scanner runs as a required check, so
+  a violation never reaches a human reviewer's patience.
+* **Install time, in the app** — for Tier 2 archives, which no CI ever saw.
+
+It walks `Import`, `ImportFrom`, and flags `__import__`, `eval`, `exec`,
+`compile`, `getattr(__builtins__…)` as *review-required* rather than blocking:
+they have legitimate uses and a blanket ban would be both leaky and annoying.
+The scan cannot see a runtime-built import. It is a lint, and the guidelines
+say so plainly.
+
+---
+
+## 7. Secrets — namespaced, never raw
+
+An OCR plugin that talks to a paid API needs a key. It must not be able to
+read Aglaïa's Mistral key, or another plugin's.
+
+```python
+ctx.secrets.set("api_key", value)
+ctx.secrets.get("api_key")      # -> str | None
+ctx.secrets.delete("api_key")
+ctx.secrets.keys()              # -> list[str]  (names only, never values)
+```
+
+Backed by the same `keyring` the host uses, under a namespace the plugin never
+supplies:
+
+```
+service  = "aglaia.plugin"
+username = f"{slug}\x1f{key}"        # \x1f = unit separator, not slug-legal
+```
+
+`slug` is validated `[a-z0-9-]{3,40}` at install, and `\x1f` cannot occur in a
+key that the API accepts — so no plugin can construct a username that lands in
+another's namespace. `PluginSecrets` is created **by the host** with the slug
+already bound; there is no argument the plugin could pass to change it.
+
+`ctx.secrets` is `None` unless the manifest declared `secrets = true`, so a
+plugin that never asked for secrets has no object to misuse, and the user saw
+"stores secrets" in the install dialog for one that did.
+
+**The caveat, stated in the guidelines and in this file:** an in-process plugin
+can `import keyring` directly and read anything. The namespacing prevents
+accidents and makes intent auditable at review; it is not an access-control
+boundary. `keyring` being off the import allow-list means doing so is a
+*visible* violation — which is what turns it into a policy the reviewer can
+enforce and a user can trust.
+
+Uninstalling a plugin purges its namespace (`keys()` then `delete()` each).
+
+---
+
+## 8. Per-plugin storage
+
+```
+<APP_DATA>/plugins/
+├── processors/<slug>/          the installed plugin (code)
+├── ocr/<slug>/
+└── data/<slug>/
+    ├── config.db               SQLite, created and owned by the host
+    └── files/                  scratch; ctx.data_dir
+```
+
+`config.db` is a single `kv(key TEXT PRIMARY KEY, value TEXT)` table with the
+same JSON round-trip as the app's own config, reached through:
+
+```python
+ctx.config.get("threshold", 0.5)
+ctx.config.set("threshold", 0.7)
+ctx.config.all()                # -> dict
+```
+
+One file per plugin, so a corrupt or bloated plugin store cannot damage the
+app's config DB, and uninstalling is `rm -rf data/<slug>/`. The plugin gets no
+`sqlite3` import and no path to the app's DB; it gets this.
+
+`ctx.data_dir` exists for plugins that need real files — a cached model, a
+temp render. It is created on access and removed on uninstall. `files = true`
+in the manifest means "I will also touch paths outside this directory", which
+is a thing a reviewer should ask about.
+
+---
+
+## 9. Install flows
+
+### Tier 1 — from the registry
+
+1. **Browse.** A *Plugins* tab lists the index: name, summary, author, version,
+   kind, and a capability row. Cached locally; refreshed on demand and on a
+   configurable interval.
+2. **Verify.** Signature over `index.json`; per-file sha256 on download;
+   `requires.aglaia` and `requires.api` checked against the running host.
+3. **Consent.** A capability sheet — what it declares, what it imports, which
+   version — above a disclaimer that names the person it actually came from:
+
+   > Reviewed and merged into the Aglaïa plugin registry. It was **written and
+   > submitted by Jane Doe**, not by Aglaïa, and it runs with the same access
+   > to your files as Aglaïa itself.
+   >
+   > [Read the source](https://github.com/yb85/aglaia-plugins/tree/main/processors/deskew-hough) · deskew-hough 1.2.0 · MIT
+
+   The source link is built from the index entry (`kind/slug` at the merged
+   commit), so it points at the exact code that was reviewed, not at whatever
+   `main` holds today. Reviewing something does not make it ours, and a user
+   who is going to run a stranger's code should be told whose it is and be one
+   click from reading it.
+
+   The button says **I trust the code and/or its author** — not "Install".
+   "and/or" is doing real work: a reader who checked the diff and a reader who
+   knows Jane are both consenting truthfully, and neither has to pretend to
+   the other's grounds.
+
+   Still no typed sentence here. The registry tier already has a human review
+   behind it; reserving the ritual for the unreviewed tier is what keeps the
+   ritual meaningful.
+4. **Install.** Extract to `<APP_DATA>/plugins/<kind>/<slug>/`, record
+   `source="registry"`, version, per-file hashes, and the manifest in the
+   `plugins` table. Load without restart where the kind allows it; OCR engines
+   and processors both re-register cleanly.
+
+### Tier 2 — from a local archive
+
+A `.aglplugin` is a zip of exactly the registry directory layout.
+
+1. **Validate before anything is written.** Manifest parses; slug matches
+   `[a-z0-9-]{3,40}`; exactly one top-level `.py` and it is `entry`; no path
+   escapes (`..`, absolute, symlink); no file over 2 MB and no archive over
+   20 MB; no `.so`/`.dylib`/`.pyd` — a compiled extension is not reviewable and
+   is refused outright.
+2. **Scan.** The same AST scan as CI. Undeclared imports are listed *in the
+   dialog*, not silently accepted.
+3. **Consent — the red gate.**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  ⚠  UNREVIEWED PLUGIN                                       │
+│                                                             │
+│  This plugin did not come from the Aglaïa registry. Nobody  │
+│  has reviewed it. Once installed it runs with the same      │
+│  access to your files as Aglaïa itself.                     │
+│                                                             │
+│  deskew-hough 1.2.0 — “Jane Doe <jane@example.org>”         │
+│  sha256 4f1a…c7                                             │
+│                                                             │
+│  It declares:   ● its own settings   ● network access       │
+│  It imports:    numpy, cv2, httpx                           │
+│  Undeclared:    socket          ← not in its manifest       │
+│                                                             │
+│  Type the sentence below to install it.                     │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │ I TRUST THE AUTHOR OF THIS PLUGIN                     │ │
+│  └───────────────────────────────────────────────────────┘ │
+│                                        [ Cancel ] [Install]│
+└────────────────────────────────────────────────────────────┘
+```
+
+The frame, the heading and the Install button are `COLOR_ERROR`. **Install is
+disabled** until the typed text matches exactly — no paste shortcut, no
+case-insensitive match. Cancel is the default button, so Return dismisses.
+
+4. **Install.** As Tier 1, with `source="zip"` and the archive's sha256 kept.
+   The Plugins tab marks it **UNREVIEWED** for as long as it is installed —
+   a one-time warning that vanishes is a warning the user forgets they
+   accepted.
+
+### Tier 3 — drop-in
+
+Unchanged. The existing gate keeps its wording; it is a different, smaller
+promise ("you or something put this here — did you mean to?"), and it stays
+that.
+
+---
+
+## 9b. From the command line
+
+`aglaia plugins list | search | install | update | toggle | remove | config` — see [cli.md](cli.md).
+Same code paths as the tab. An unreviewed archive needs `--trust`, the terminal's form of the typed sentence.
+
+## 10. Lifecycle
+
+* **Disable** — a checkbox in the Plugins tab. Keeps the files, stops importing
+  it. The first thing to try when a plugin is suspected of breaking a run.
+  Enforced in `plugins.accepted_for_load` and `destinations.discover`, which is
+  where loading actually happens; it existed as a label and a stored flag for a
+  while with nothing reading either, so a switched-off plugin kept running.
+* **Update** — an `UPDATE` pill and an **Update to X** button appear on an
+  installed card when the index carries a **strictly newer** version. Not
+  merely different: a registry that has gone backwards must not offer a
+  downgrade, and re-offering the same version forever is how an update badge
+  becomes wallpaper. Versions compare numerically, so 1.10.0 beats 1.9.0.
+
+  **An update is not uninstall-then-install.** Uninstall deletes the plugin's
+  data directory, its settings and its secrets — for the stamp remover that is
+  every hand-traced stamp, for an export plugin the stored SMTP password.
+  `update_from_registry` writes the code directory over the top (the same
+  atomic swap an install uses) and touches nothing else.
+
+  Consent is not re-asked — the user is updating something they already chose,
+  from the same reviewed registry — but the manifest is re-scanned and a
+  version declaring **new capabilities is refused**, naming them. "I trusted it
+  when it only read files" is not consent to a version that has learned to use
+  the network; installing it deliberately is still available.
+
+  The old module stays imported for the session, so the tab says to restart.
+* **Uninstall** — removes the code directory, `data/<slug>/`, its keychain
+  namespace, and its `plugins` rows. It leaves nothing behind, and the dialog
+  says exactly what it is about to delete.
+* **Revoked** — an index refresh that finds an installed slug+version in
+  `revoked` disables it immediately and shows the reason. It is not deleted:
+  the user's own data may be behind it, and silently destroying things is not
+  how a security measure should introduce itself.
+
+---
+
+## 11. Review checklist (registry PRs)
+
+CI enforces the mechanical half so the human half stays sharp:
+
+- [ ] Manifest parses; slug matches the directory; version is a new semver.
+- [ ] `LICENSE` present and matching the SPDX id.
+- [ ] Exactly one top-level `.py`, named by `entry`.
+- [ ] No compiled artefacts, no vendored dependencies, no `pip`/`uv` calls.
+- [ ] Import scan clean against the declared allow-list.
+- [ ] `tests/` exists and passes against the pinned host version.
+- [ ] The processor/engine registers under a name no built-in uses.
+
+Then a person reads the code, and asks:
+
+- [ ] Does what it does match what the README and the manifest say?
+- [ ] Does every declared capability get used? Does anything *undeclared* happen?
+- [ ] Any network call — to where, carrying what?
+- [ ] Any path outside `ctx.data_dir`?
+- [ ] Any dynamic import, `eval`, `exec`, `getattr` on builtins, base64 blob,
+      or long opaque literal?
+- [ ] Would this be embarrassing if it turned out to be malicious? That is the
+      real question, and the reason the registry is small on purpose.
+
+---
+
+## 12. What this does not do, and what would
+
+Everything above is defence in depth around a curated list. It does not
+*contain* a plugin. Containing one means not running it in the host
+interpreter:
+
+**Out-of-process plugins (a later milestone).** Run each plugin in a
+subprocess, talk to it over a pipe with a narrow message protocol
+(`process(buffer) -> buffer`, `recognize(image) -> result`), and restrict the
+child with the OS: `sandbox-exec`/App Sandbox on macOS, seccomp + namespaces on
+Linux, an AppContainer on Windows. Then a plugin genuinely cannot read
+`~/Documents`, cannot open a socket unless granted, and cannot see the
+keychain — the capabilities in §4 become enforced rather than declared.
+
+The cost is real: a serialisation hop per page for processors (which run inside
+worker processes already), a second process per plugin, and three
+platform-specific sandbox profiles to maintain. That is why it is not v1. But
+the API in §5 is designed so it *can* be v2 without breaking plugins:
+`PluginContext` is already the only channel to the host, and everything it
+exposes is already message-shaped.
+
+Until then, the registry stays small, every PR gets read, and the app says
+plainly which tier a plugin came from.

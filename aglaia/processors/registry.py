@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from pathlib import Path
 import pkgutil
 import sys
 from dataclasses import dataclass, field, make_dataclass
@@ -185,6 +186,57 @@ def _discover_once() -> None:
     _DISCOVERED = True
 
 
+def _plugin_slug_of(module) -> str:
+    """The slug of the plugin a module came from, or "" for a core processor.
+
+    A store-installed plugin lives at ``<APP_DATA>/plugins/<kind>/<slug>/``, so
+    the directory holding the module IS the slug. A hand-dropped loose ``.py``
+    sits directly in the kind directory and has no slug — it gets no context,
+    which is correct: it never declared a manifest, so it never declared that
+    it wanted settings, secrets or a data directory."""
+    try:
+        from aglaia.app_data import plugins_dir
+        f = Path(getattr(module, "__file__", "") or "").resolve()
+        for kind in ("processors", "ocr"):
+            root = plugins_dir(kind).resolve()
+            if root in f.parents and f.parent != root:
+                return f.parent.name
+    except Exception:
+        pass
+    return ""
+
+
+def _attach_context(cls, slug: str) -> None:
+    """Give a plugin-provided processor its `PluginContext`.
+
+    Processors were the one plugin kind the host never handed a context to.
+    Destinations got one in `destinations.load_all`, plugin windows got one at
+    open time, and a processor got `ctx = None` — the class attribute its own
+    source comments as "set by the host after construction". So StampRemover
+    could not reach its stamp library, found nothing, and returned the page
+    untouched in 0.014 ms with no error anywhere (#141).
+
+    Attached to the CLASS, not the instance, and wrapped in a property that
+    builds on first use: processors are instantiated inside spawned workers
+    from a pickled `ChainElement`, so a context created in the parent would
+    never reach them. Building it lazily in whichever process asks means each
+    worker opens its own handle to the plugin's settings DB — which is what
+    SQLite wants anyway."""
+    if not slug:
+        return
+    cached = f"_ctx_{slug.replace('-', '_')}"
+
+    def _get(self):
+        got = getattr(type(self), cached, None)
+        if got is None:
+            from aglaia.app_data.plugin_ctx import build_context
+            got = build_context(slug, wants_secrets=True)
+            setattr(type(self), cached, got)
+        return got
+
+    cls.ctx = property(_get)
+
+
 def _register_from_module(module) -> None:
     """Register every concrete `AbstractImageProcessor` subclass *defined
     in* ``module`` that declares `OPTIONS`."""
@@ -205,6 +257,7 @@ def _register_from_module(module) -> None:
         name = getattr(obj, "REGISTRY_NAME", None) or obj.__name__
         if name in _REGISTRY:
             continue
+        _attach_context(obj, _plugin_slug_of(module))
         option_cls = getattr(obj, "OPTION_CLASS", None) \
             or _synthesize_option_class(name, obj.OPTIONS)
         _REGISTRY[name] = ProcessorInfo(

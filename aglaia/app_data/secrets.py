@@ -21,9 +21,10 @@ The only secret today is the **Mistral Cloud OCR** API key.
 
 **Write** prefers the most secure store: the OS keychain, falling back to
 the plaintext ``.env`` (0600) only when no keychain is reachable — either
-because the `keyring` package isn't installed (it ships in the **cloud**
-extra) or because no backend answered (headless Linux / bare Windows).
-`keychain_backend` tells those two apart so the UI can say which it is.
+because the `keyring` package is missing (a base dependency, so this means
+a damaged install) or because no backend answered (headless Linux / bare
+Windows). `keychain_backend` tells those two apart so the UI can say which
+it is.
 Whichever store wins, the other's copy is cleared so there's a single
 source of truth.
 
@@ -172,9 +173,10 @@ def keychain_backend() -> tuple[bool, str]:
     ``(True, "")`` when `keyring` resolves to a real store. Otherwise
     ``(False, reason)``:
 
-    * ``"not_installed"`` — the `keyring` package is absent. It ships in the
-      **cloud** extra (``uv sync --extra cloud``), which the usual dev sync
-      leaves out, so this is the common case on a source checkout.
+    * ``"not_installed"`` — the `keyring` package is absent. It is a BASE
+      dependency (#139), so this now means a damaged environment rather than
+      a missing extra; it was in the `cloud` extra until then, which is how
+      a plain dev sync ended up writing passwords as plain text.
     * ``"no_backend"`` — keyring is installed but found no store: a headless
       Linux box with no Secret Service running, a bare Windows.
 

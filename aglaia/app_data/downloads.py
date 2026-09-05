@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from aglaia import net as _net
+
 from aglaia.app_data import models_dir
 
 _USER_AGENT = "Aglaia/1.0 (+https://aglaia.bibli.cc)"
@@ -200,7 +202,7 @@ def _hf_list_files(repo: str, revision: str = "main") -> list[tuple[str, int]]:
     req = urllib.request.Request(url)
     req.add_header("User-Agent", _USER_AGENT)
     req.add_header("Accept", "application/json")
-    with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310 (https only)
+    with _net.urlopen(req, timeout=30) as r:
         data = json.load(r)
     out: list[tuple[str, int]] = []
     for s in data or []:
@@ -239,7 +241,7 @@ def _stream_to(url: str, dest: Path, on_chunk: Callable[[int], None]) -> int:
         if already > 0:
             req.add_header("Range", f"bytes={already}-")
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310 (https)
+            with _net.urlopen(req, timeout=60) as r:
                 # If we asked to resume but the server ignored Range (200, not
                 # 206), restart from scratch so we don't append onto a partial.
                 resuming = already > 0 and getattr(r, "status", 200) == 206

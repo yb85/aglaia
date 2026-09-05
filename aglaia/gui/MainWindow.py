@@ -311,6 +311,10 @@ class MainWindow(QMainWindow):
         self.processing_queue = processing_queue
         self.log_queue = log_queue
         self.slug_name = slug_name
+        #: Directories holding an export made only to hand to a plugin.
+        self._send_staging: set[str] = set()
+        #: The in-flight `DestinationJob`, if any.
+        self._send_job = None
         self.current_idx = start_idx
 
         # M0 DB context
@@ -660,8 +664,7 @@ class MainWindow(QMainWindow):
         if is_capture:
             self._active_cam_id = getattr(args, "camera_id", 0)
             self.webcam_thread = WebcamThread(args.camera_id)
-            if hasattr(args, 'transform'):
-                self.webcam_thread.set_transform(args.transform)
+            self._apply_camera_transform(args.camera_id, getattr(args, 'transform', None))
             self.webcam_thread.change_pixmap_signal.connect(self.update_image)
             # Capture-flash overlay installed for the camera's lifetime
             # so voice / keyboard captures get the same visual cue SIFT
@@ -803,7 +806,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QActionGroup
         view_menu = mb.addMenu(self.tr("View"))
         view_menu.addAction(_act(
-            self.tr("Show Downloader"), None,
+            self.tr("Show downloader"), None,
             lambda: self._open_model_downloader()))
         view_menu.addAction(_act(
             self.tr("Mistral OCR jobs…"), None,
@@ -826,7 +829,12 @@ class MainWindow(QMainWindow):
             view_menu.addAction(a)
             self._view_mode_actions[_mode] = a
 
-        # Help menu — docs link, diagnostics, bug report, about.
+        # Plugins menu — contributed windows grouped under the owning plugin's
+        # name (so two plugins cannot collide even with the same window title),
+        # plus the single way into the Plugins tab. It used to be reachable
+        # from View as well, which put two identical entries in the menu bar.
+        self._build_plugin_menu(mb, _act)
+
         help_menu = mb.addMenu(self.tr("Help"))
         help_menu.addAction(_act(
             self.tr("Aglaïa Documentation"), None, self._open_docs))
@@ -902,7 +910,7 @@ class MainWindow(QMainWindow):
 
     def load_existing_scans(self):
         """Rebuild widgets from the project SQLite DB (M0 source of truth)."""
-        self.status_label.setText(self.tr("Loading existing scans..."))
+        self.status_label.setText(self.tr("Loading existing scans…"))
         n_spawned = 0
         completed_scan_ids: list[int] = []
         with db_session(self.db_path) as conn:
@@ -1024,6 +1032,7 @@ class MainWindow(QMainWindow):
         widget.step_states_provider = self.cell_disable_states
         widget.manual_fields_provider = self.manual_fields_for_layout
         widget.step_toggle_requested.connect(self.toggle_step_disabled)
+        widget.rerun_requested.connect(self._on_rerun_scan)
         # Visibility (eye) still writes branches.trashed_at so gallery +
         # table see the same hide state. (selection_changed is vestigial.)
         widget.visibility_changed.connect(self._on_card_visibility_changed)
@@ -1069,6 +1078,22 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_scans_pin_bottom", False):
             return
         self._scans_scroll.verticalScrollBar().setValue(hi)
+
+    def _on_rerun_scan(self, scan_id: int) -> None:
+        """Re-run one scan from its raw capture.
+
+        The reprocess controls act on the whole project, which is the wrong
+        granularity for the common case: one page came out wrong, and rerunning
+        three hundred to fix it is a coffee break. Manual per-page tuning
+        survives the rerun — that is the point of storing it — so this replays
+        the chain with the user's corrections in place."""
+        try:
+            self._rerun_scans_from_raw({int(scan_id)})
+        except Exception as e:  # noqa: BLE001
+            self._on_log_line("error", f"rerun of scan {scan_id} failed: "
+                                       f"{type(e).__name__}: {e}")
+            self.toast(self.tr("Could not re-run this scan. See the Log tab."),
+                       6000)
 
     def _rerun_scans_from_raw(self, scan_ids) -> None:
         """Reprocess these scans from their raw image.
@@ -1228,7 +1253,7 @@ class MainWindow(QMainWindow):
         self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_frames)
         frame = self.spinner_frames[self.spinner_idx]
         progress = f"({self.workers_started}/{self.total_workers})"
-        self.loading_label.setText(self.tr("{frame} Workers loading {progress}...").format(
+        self.loading_label.setText(self.tr("{frame} Workers loading {progress}…").format(
             frame=frame, progress=progress,
         ))
 
@@ -1239,17 +1264,43 @@ class MainWindow(QMainWindow):
             self.spinner_timer.stop()
             self.status_label.setText(self.tr("Ready. All workers active."))
 
+    def _apply_camera_transform(self, cam_id, cli_transform) -> None:
+        """Start the feed the way this camera was last left.
+
+        An explicit `--transform` on the command line wins. Otherwise the rig
+        has not moved since the last project, so neither should the
+        correction."""
+        from aglaia.gui import camera_memory as _cm
+        explicit = cli_transform is not None and str(cli_transform) not in ("", "0")
+        if explicit:
+            self.webcam_thread.set_transform(cli_transform)
+            return
+        remembered = _cm.load(_cm.camera_key(cam_id or 0))
+        if remembered:
+            self.webcam_thread.set_transform(remembered)
+
+    def _remember_camera_transform(self) -> None:
+        from aglaia.gui import camera_memory as _cm
+        w = self.webcam_thread
+        if w is None:
+            return
+        _cm.save(_cm.camera_key(getattr(self, "_active_cam_id", 0) or 0),
+                 int(w.rotation), bool(w.mirror), bool(w.flip))
+
     def rotate_camera(self, delta=90):
         self.webcam_thread.rotate(delta)
+        self._remember_camera_transform()
         self.status_label.setText(self.tr("Rotated to {deg}°").format(deg=self.webcam_thread.rotation))
 
     def toggle_mirror(self):
         self.webcam_thread.toggle_mirror()
+        self._remember_camera_transform()
         state = self.tr("ON") if self.webcam_thread.mirror else self.tr("OFF")
         self.status_label.setText(self.tr("Mirror: {state}").format(state=state))
 
     def toggle_flip(self):
         self.webcam_thread.toggle_flip()
+        self._remember_camera_transform()
         state = self.tr("ON") if self.webcam_thread.flip else self.tr("OFF")
         self.status_label.setText(self.tr("Flip: {state}").format(state=state))
 
@@ -1315,7 +1366,7 @@ class MainWindow(QMainWindow):
         v.addWidget(cam_combo)
         self._capture_cam_combo = cam_combo
 
-        btn = QPushButton(self.tr("Activate Capture"))
+        btn = QPushButton(self.tr("Activate capture"))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setMinimumHeight(36)
         btn.setStyleSheet(
@@ -1361,7 +1412,7 @@ class MainWindow(QMainWindow):
         # Apply any launch-time transform the user passed on the CLI.
         try:
             if getattr(self.args, "transform", None):
-                self.webcam_thread.set_transform(self.args.transform)
+                self._apply_camera_transform(getattr(self, '_active_cam_id', 0), getattr(self.args, 'transform', None))
         except Exception:
             pass
 
@@ -1482,6 +1533,8 @@ class MainWindow(QMainWindow):
 
         # ── Export-tab wiring ──────────────────────────────────────
         self._export_tab.btn_export.clicked.connect(self._on_export_clicked)
+        self._export_tab.destination_settings_requested.connect(
+            self._on_destination_settings)
         self._export_tab.chk_norm_widths.stateChanged.connect(
             self._on_norm_widths_toggled
         )
@@ -1515,6 +1568,10 @@ class MainWindow(QMainWindow):
         self.sidebar.add_bottom_action(
             "report_bug", "bug", self.tr("Report a bug"),
             lambda: self._on_report_bug(),
+        )
+        self.sidebar.add_bottom_action(
+            "plugins", "unplug", self.tr("Plugins"),
+            lambda: self.open_plugins_tab(),
         )
         self.sidebar.add_bottom_action(
             "settings", "settings", self.tr("Settings"),
@@ -1776,7 +1833,7 @@ class MainWindow(QMainWindow):
             self.webcam_thread.change_pixmap_signal.connect(self.update_image)
             self.webcam_thread.set_overlay_fn(self._freehand_overlay)
             if getattr(self.args, "transform", None):
-                self.webcam_thread.set_transform(self.args.transform)
+                self._apply_camera_transform(getattr(self, '_active_cam_id', 0), getattr(self.args, 'transform', None))
             self.webcam_thread.start()
             self._active_cam_id = int(cam_id)
         except Exception as e:
@@ -1823,7 +1880,7 @@ class MainWindow(QMainWindow):
         )
         images = [p for p, k in items if k == "image"]
         pdfs = [p for p, k in items if k == "pdf"]
-        slug = slugify(_P(self.db_path).stem) or "scan"
+        slug = _P(self.db_path).stem or "scan"
         try:
             if images:
                 enqueue_image_files(
@@ -1856,7 +1913,7 @@ class MainWindow(QMainWindow):
         def ingest(zip_path: str) -> int:
             tmp = _P(zip_path)
             bundle = read_bundle(tmp, extract_dir=tmp.parent / "extract")
-            slug = slugify(_P(self.db_path).stem) or "scan"
+            slug = _P(self.db_path).stem or "scan"
             enqueue_image_files(
                 db_path=self.db_path,
                 pipeline_version_id=self.pipeline_version_id,
@@ -1873,13 +1930,174 @@ class MainWindow(QMainWindow):
     def _on_export_clicked(self):
         """Single Export button — dispatch by currently selected format
         card."""
-        fmt = self._export_tab.current_format()
-        if fmt == "pdf":
+        fmt = self._export_tab.current_format() or ""
+        prefix = self._export_tab.SEND_PREFIX
+        if fmt.startswith(prefix):
+            self._export_to_destination(fmt[len(prefix):])
+        elif fmt == "pdf":
             self.make_pdf("output")
         elif fmt == "markdown":
             self._export_markdown()
         elif fmt == "slim":
             self._export_slim_project()
+
+    def _export_to_destination(self, name: str) -> None:
+        """Export in the format the destination card asks for, then hand the
+        file over.
+
+        Sending is not a different kind of export — it is an export whose
+        destination happens to be a plugin rather than a folder. So this runs
+        the ordinary export routine; the only difference is that
+        `_pending_send` is armed, which sends the file to a private staging
+        directory instead of asking the user to name it."""
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            self._warn_plugin_broken(name)
+            return
+        if d.missing_settings():
+            self._on_destination_settings(name)
+            return
+        self._pending_send = name
+        if self._export_tab.destination_format(name) == "md":
+            self._export_markdown()
+        else:
+            self.make_pdf("output")
+
+    def _warn_plugin_broken(self, name: str) -> None:
+        """Tell the user a plugin will not load, and log why.
+
+        The reason is not the same sentence for both audiences. The user
+        installed this from the registry and did not break it; every failure
+        here leaves them the same two options. The missing decorator, the
+        exception type and the slug are for whoever wrote it, and go to the
+        log."""
+        from aglaia.workers import destinations as dest
+        detail = dest.load_detail(name)
+        if detail:
+            self._on_log_line("error", f"[plugins] {name}: {detail}")
+        QMessageBox.warning(
+            self, self.tr("{name} cannot be used").format(name=name),
+            self.tr("This plugin is damaged. Remove it from the Plugins tab, "
+                    "or report it to whoever wrote it."))
+
+    def _on_destination_settings(self, name: str) -> None:
+        """Open one export plugin's settings from the Export tab."""
+        from aglaia.gui.PluginsTab import PluginSettingsDialog
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            self._warn_plugin_broken(name)
+            return
+        PluginSettingsDialog(d, self).exec()
+        # Its "Needs: …" line is now stale.
+        self._export_tab.refresh_destinations()
+
+    def _export_destination(self, default_name: str, title: str,
+                            filt: str):
+        """Where this export should be written.
+
+        Normally: ask, because the user wants the file. But when the export
+        exists only to be handed to a plugin — "Send to Calibre" — the file is
+        a courier, not a deliverable. Asking for a name and a folder to put a
+        file the user will never open is a dialog for nothing, and it invites
+        the one failure a courier must not have: overwriting last week's
+        export because both were called `Book.pdf`.
+
+        So a send goes to a fresh private directory. The FILENAME is kept
+        exactly as the save dialog would have proposed it, because it is not
+        incidental — Kindle attaches it under that name and calibre reads a
+        book title out of it.
+
+        Returns None if the user cancelled the dialog.
+        """
+        from pathlib import Path as _P
+        if not getattr(self, "_pending_send", ""):
+            from PySide6.QtWidgets import QFileDialog
+            default = self.args.workspace_dir / default_name
+            dest, _ = QFileDialog.getSaveFileName(
+                self, title, str(default), filt)
+            return _P(dest) if dest else None
+        import tempfile
+        staged = _P(tempfile.mkdtemp(prefix="aglaia-send-")) / default_name
+        self._send_staging.add(str(staged.parent))
+        return staged
+
+    def _discard_if_staged(self, path) -> bool:
+        """Remove a courier file and its directory. True if it was one."""
+        from pathlib import Path as _P
+        import shutil
+        parent = str(_P(path).parent)
+        if parent not in getattr(self, "_send_staging", ()):
+            return False
+        self._send_staging.discard(parent)
+        shutil.rmtree(parent, ignore_errors=True)
+        return True
+
+    def send_export_to_pending(self, path) -> None:
+        """Called by an export path once it has written a file.
+
+        Named rather than wired to a signal because the three export routines
+        finish in three different places; each one that knows its output path
+        can call this, and the ones that do not simply never send.
+
+        The send itself runs on a worker thread. Its duration is unbounded and
+        not ours: mailing a 45 MB PDF opens an SMTP session with a 60 s timeout
+        and then uploads over the user's link, and a calibre server on a
+        sleeping laptop answers when it answers. On the GUI thread that is a
+        beach ball for as long as the far end takes."""
+        name = getattr(self, "_pending_send", "")
+        self._pending_send = ""
+        if not name or not path:
+            return
+        from pathlib import Path as _P
+        from aglaia.gui.plugin_jobs import DestinationJob
+        from aglaia.plugin_api import BookMeta
+        from aglaia.workers import destinations as dest
+        d = dest.load_all().get(name)
+        if d is None:
+            return
+        label = d.display or name
+        meta = BookMeta(title=self._project_title(),
+                        project_path=str(self.db_path))
+        self.toast(self.tr("Sending to {name}…").format(name=label))
+        self.status_label.setText(
+            self.tr("Sending to {name}…").format(name=label))
+        # Two sends at once would be two plugin calls sharing one settings
+        # object and one progress line. The overlay both says so and enforces
+        # it; it comes down in `_done`, which runs whichever way the send
+        # ends.
+        self._export_tab.set_busy(
+            self.tr("Sending to {name}…").format(name=label))
+
+        src = _P(path)
+
+        def _done(outcome) -> None:
+            self._export_tab.set_busy("")
+            # The courier copy goes whether the send worked or not: keeping it
+            # helps nobody, since the user cannot find it and would not know
+            # it was there.
+            self._discard_if_staged(src)
+            msg = outcome.message or (
+                self.tr("{name}: done.").format(name=label))
+            self.toast(f"{label}: {msg}" if outcome.error else msg,
+                       6000 if not outcome.ok else 4000)
+            self.status_label.setText(self.tr("Ready."))
+
+        job = DestinationJob(lambda: d.send(src, meta), self)
+        job.done.connect(_done)
+        self._send_job = job
+        self._track_worker(job, attr="_send_job")
+        job.start()
+
+    def _project_title(self) -> str:
+        """A title for a destination, from the project file's name — the one
+        piece of metadata Aglaïa always has."""
+        try:
+            from pathlib import Path as _P
+            return _P(str(self.db_path)).stem.strip()
+        except Exception:
+            return ""
 
     def _init_zoom_range(self):
         """Pull the device max_zoom from WebcamThread once it has resolved."""
@@ -2008,8 +2226,8 @@ class MainWindow(QMainWindow):
             HAS_VOSK, _model_dir = False, (lambda: None)
         if not HAS_VOSK:
             self._voice_unavailable(self.tr(
-                "Offline voice needs the 'voice' extra "
-                "(uv sync --extra voice)."), offer_download=False)
+                "Voice control is not available in this build."),
+                offer_download=False)
             return
         if _model_dir() is None:
             self._voice_unavailable(self.tr(
@@ -2563,32 +2781,47 @@ class MainWindow(QMainWindow):
             except Exception:
                 ocr_suffix = ""
         output_filename = f"{self.slug_name}{suffix}{ocr_suffix}.pdf"
-        from PySide6.QtWidgets import QFileDialog
-        default = self.args.workspace_dir / output_filename
-        dest, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Export PDF"), str(default), self.tr("PDF (*.pdf)"))
-        if not dest:
+        output_path = self._export_destination(
+            output_filename, self.tr("Export PDF"), self.tr("PDF (*.pdf)"))
+        if output_path is None:
+            self._pending_send = ""
             return
-        output_path = Path(dest)
         self.status_label.setText(
             self.tr("Generating PDF ({src}, {comp})…").format(src=source_type, comp=compression)
         )
+        # The build itself still runs on the GUI thread, so the overlay is
+        # painted by the singleShot's turn of the event loop and then stays
+        # up, frozen, until the PDF is written. Frozen-with-a-caption beats
+        # frozen-with-nothing: the window at least says what it is doing.
+        self._export_tab.set_busy(self.tr("Generating PDF…"))
         QTimer.singleShot(100, lambda: self._run_pdf_maker(
             step_filter, output_path, compression, add_ocr_layer, ocr_engine))
 
     def _run_pdf_maker(self, step_name: Optional[str], output_path: Path,
                        compression: str = "auto", add_ocr_layer: bool = False,
                        ocr_engine: Optional[str] = None):
-        with db_session(self.db_path) as conn:
-            success = create_pdf_from_db(
-                conn, output_path, step_name=step_name, compression=compression,
-                add_ocr_layer=add_ocr_layer, engine=ocr_engine,
-            )
+        try:
+            with db_session(self.db_path) as conn:
+                success = create_pdf_from_db(
+                    conn, output_path, step_name=step_name,
+                    compression=compression,
+                    add_ocr_layer=add_ocr_layer, engine=ocr_engine,
+                )
+        finally:
+            # Down before the send, which puts its own caption up. Nothing
+            # repaints in between, so there is no flicker — and an exception
+            # here must not leave the tab locked behind a spinner.
+            self._export_tab.set_busy("")
         if success:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
-            self.toast(self.tr("PDF saved — {name}").format(name=output_path.name))
-            self._reveal_in_finder(output_path)
+            if not getattr(self, "_pending_send", ""):
+                self.toast(self.tr("PDF saved — {name}").format(
+                    name=output_path.name))
+                self._reveal_in_finder(output_path)
+            self.send_export_to_pending(output_path)
         else:
+            self._pending_send = ""
+            self._discard_if_staged(output_path)
             self.status_label.setText(self.tr("Failed to create PDF (no images)."))
             self.toast(self.tr("PDF export failed."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
@@ -2722,42 +2955,56 @@ class MainWindow(QMainWindow):
 
     def _export_markdown(self):
         from aglaia.workers.md_export import write_markdown, ocr_engine_suffix
-        from PySide6.QtWidgets import QFileDialog
         ocr_engine = self._export_tab.selected_ocr_engine()
         try:
             with db_session(self.db_path) as conn:
                 suffix = ocr_engine_suffix(conn, ocr_engine)
         except Exception:
             suffix = ""
-        default = self.args.workspace_dir / f"{self.slug_name}{suffix}.md"
-        dest, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Export Markdown"), str(default),
+        output_path = self._export_destination(
+            f"{self.slug_name}{suffix}.md", self.tr("Export Markdown"),
             self.tr("Markdown (*.md)"))
-        if not dest:
+        if output_path is None:
+            self._pending_send = ""
             return
-        output_path = Path(dest)
         use_llm = bool(
             getattr(self._export_tab, "chk_llm_refine", None)
             and self._export_tab.chk_llm_refine.isEnabled()
             and self._export_tab.chk_llm_refine.isChecked()
         )
         refine = "apple_fm" if use_llm else None
-        self.status_label.setText(
-            self.tr("Polishing with Apple Intelligence…") if use_llm
-            else self.tr("Writing Markdown…"))
+        caption = (self.tr("Polishing with Apple Intelligence…") if use_llm
+                   else self.tr("Writing Markdown…"))
+        self.status_label.setText(caption)
+        self._export_tab.set_busy(caption)
+        # No deferral here as there is for the PDF, so nothing would paint the
+        # overlay before the write blocks the thread.
+        QApplication.processEvents()
         try:
             with db_session(self.db_path) as conn:
                 ok = write_markdown(conn, output_path, refine=refine, engine=ocr_engine)
         except Exception as e:
-            self._on_log_line("error", f"Markdown export failed: {e}")
+            self._export_tab.set_busy("")
+            self._pending_send = ""
+            self._discard_if_staged(output_path)
+            self.toast(self.tr("Markdown export failed. See the Log tab."),
+                       6000)
+            self._on_log_line(
+                "error", f"Markdown export failed: {type(e).__name__}: {e}")
             self.status_label.setText(self.tr("Markdown export failed."))
             QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
             return
+        self._export_tab.set_busy("")
         if ok:
             self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
-            self.toast(self.tr("Markdown saved — {name}").format(name=output_path.name))
-            self._reveal_in_finder(output_path)
+            if not getattr(self, "_pending_send", ""):
+                self.toast(self.tr("Markdown saved — {name}").format(
+                    name=output_path.name))
+                self._reveal_in_finder(output_path)
+            self.send_export_to_pending(output_path)
         else:
+            self._pending_send = ""
+            self._discard_if_staged(output_path)
             self.status_label.setText(self.tr("No OCR text to export."))
             self.toast(self.tr("Markdown export skipped — no OCR text."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
@@ -2861,7 +3108,7 @@ class MainWindow(QMainWindow):
         else:
             # We have enough samples, finalize
             self.status_label.setText(self.tr("Finalizing calibration... please wait."))
-            self.btn_full_calibrate.setText(self.tr("Processing..."))
+            self.btn_full_calibrate.setText(self.tr("Processing…"))
             self.btn_full_calibrate.setEnabled(False)
             QApplication.processEvents()
 
@@ -2887,7 +3134,7 @@ class MainWindow(QMainWindow):
 
             # Reset state
             self.is_calibrating = False
-            self.btn_full_calibrate.setText(self.tr("Full Calibration"))
+            self.btn_full_calibrate.setText(self.tr("Full calibration"))
             self.btn_full_calibrate.setEnabled(True)
 
     def calibrate_dpi(self):
@@ -3114,15 +3361,31 @@ class MainWindow(QMainWindow):
         Lines emitted by Qt-thread workers (OcrWorker.log_line) skip the
         multiprocessing log_queue, so we ALSO need to push them into the
         rolling buffer here — otherwise a later-opened Log tab seeds
-        from a buffer that's missing every OCR error / engine print."""
-        self.status_bar_widget.log.push(level, text)
+        from a buffer that's missing every OCR error / engine print.
+
+        Nothing in here may raise. Its callers are error paths: they log the
+        reason, then show the user a dialog. A log call that throws replaces a
+        handled failure with an unhandled one — the user loses the dialog that
+        was about to explain what happened, and gains a traceback. The status
+        bar is also not up during early startup and window teardown, which is
+        exactly when the interesting failures happen."""
+        try:
+            self.status_bar_widget.log.push(level, text)
+        except Exception:
+            pass
         try:
             buf = self.monitor_thread.log_buffer
             buf.append(f"[{level.upper()}] {text}")
         except Exception:
             pass
-        if self._log_tab is not None:
-            self._log_tab.append(level, text)
+        try:
+            if self._log_tab is not None:
+                self._log_tab.append(level, text)
+        except Exception:
+            pass
+        # Always reaches somewhere readable, even with no window left.
+        if str(level).lower() in ("error", "warning"):
+            print(f"[{level.upper()}] {text}", file=sys.stderr)
 
     def _on_status_scan_imported(self, _payload: dict):
         # Pipeline activity resumed — make sure the bar header reads
@@ -3711,6 +3974,93 @@ class MainWindow(QMainWindow):
         self._mistral_jobs_tab = tab
         idx = self.tabs.addTab(tab, _lucide_tab("cloud", size=14),
                                self.tr("Mistral jobs"))
+        self.tabs.setCurrentIndex(idx)
+
+    def _build_plugin_menu(self, mb, _act) -> None:
+        """A *Plugins* menu, if any plugin contributes a window.
+
+        Built once at startup from whatever is loaded then; a plugin installed
+        afterwards appears at the next launch. Rebuilding a native menu bar
+        live is possible and is not worth the failure modes for something that
+        happens once."""
+        WINDOW_REGISTRY: dict = {}
+        try:
+            from aglaia.plugin_api import WINDOW_REGISTRY
+            from aglaia.workers import plugin_windows
+            plugin_windows.load_all()
+        except Exception as e:  # noqa: BLE001 — a plugin must not cost the menu
+            print(f"[plugin-windows] not loaded: {type(e).__name__}: {e}")
+        # Built unconditionally: it always carries "Manage plugins…", and a
+        # menu that exists only once a plugin happens to contribute a window
+        # is a menu the user cannot learn. Plugin windows appear above it.
+        menu = mb.addMenu(self.tr("Plugins"))
+        for slug, windows in sorted(WINDOW_REGISTRY.items()):
+            sub = menu.addMenu(slug)
+            for win in windows:
+                sub.addAction(_act(
+                    win.title, None,
+                    lambda _=False, s=slug, w=win:
+                        self._open_plugin_window(s, w)))
+        if WINDOW_REGISTRY:
+            menu.addSeparator()
+        menu.addAction(_act(self.tr("Manage plugins…"), None,
+                            lambda: self.open_plugins_tab()))
+
+    def _open_plugin_window(self, slug: str, win) -> None:
+        """Build and show one plugin window, keeping a reference.
+
+        A plugin's factory is someone else's code, so a failure here reports
+        itself rather than taking the menu — or the app — with it."""
+        held = getattr(self, "_plugin_windows", None)
+        if held is None:
+            held = self._plugin_windows = {}
+        key = f"{slug}:{win.key}"
+        existing = held.get(key)
+        if existing is not None:
+            try:
+                existing.show()
+                existing.raise_()
+                return
+            except RuntimeError:
+                held.pop(key, None)
+        from aglaia.app_data.plugin_ctx import build_context
+        try:
+            ctx = build_context(
+                slug,
+                log=lambda m, s=slug: self._on_log_line("INFO",
+                                                        f"[plugin:{s}] {m}"))
+            widget = win.factory(ctx)
+        except Exception as e:  # noqa: BLE001
+            self._on_log_line(
+                "error", f"[plugin:{slug}] {win.title} would not open: "
+                         f"{type(e).__name__}: {e}")
+            QMessageBox.warning(
+                self, self.tr("{title} cannot be opened").format(
+                    title=win.title),
+                self.tr("This plugin window failed to start. See the Log tab "
+                        "for the reason."))
+            return
+        held[key] = widget
+        widget.setWindowTitle(f"{win.title} — {slug}")
+        widget.resize(1000, 640)
+        widget.show()
+
+    def open_plugins_tab(self) -> None:
+        """Browse the registry, install, configure, remove (#130)."""
+        existing = getattr(self, "_plugins_tab", None)
+        if existing is not None:
+            try:
+                self.tabs.setCurrentWidget(existing)
+                existing.refresh()
+                return
+            except Exception:
+                pass
+        from aglaia.gui.PluginsTab import PluginsTab
+        from aglaia.gui.theme import lucide as _lucide_tab
+        tab = PluginsTab()
+        self._plugins_tab = tab
+        idx = self.tabs.addTab(tab, _lucide_tab("package", size=14),
+                               self.tr("Plugins"))
         self.tabs.setCurrentIndex(idx)
 
     def _on_jobs_open_project(self, path: str) -> None:
@@ -4677,6 +5027,7 @@ class MainWindow(QMainWindow):
             t.debug_requested.connect(self._open_debug_viewer)
             t.trash_requested.connect(self._on_table_trash_requested)
             t.step_toggle_requested.connect(self.toggle_step_disabled)
+            t.rerun_requested.connect(self._on_rerun_scan)
             # Drag-grip reorder reuses the grid card-drop handler.
             t.card_dropped.connect(self._on_card_dropped)
             # Seed the thumb-row height from the current zoom slider so a

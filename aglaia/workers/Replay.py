@@ -35,6 +35,7 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
+from aglaia.processors import erase as _erase
 from aglaia.processors.replay_transform import (
     AffineTransform, ReplayContext, interp_for, remap_by_coords,
 )
@@ -66,6 +67,86 @@ def _trait_rank(processor_name: Optional[str]) -> int:
     """Replay-order rank from a processor's REPLAY_TRAIT: COORDINATE (0) →
     PIXEL_VALUE (1) → ROI (2). Unknown/untagged → 0 (ordered by step_idx)."""
     return _TRAIT_RANK.get(_node_trait(processor_name), 0)
+
+
+def _anchor_erase(source_node: dict, nodes: list[dict],
+                  anchor_shape) -> tuple[list, str]:
+    """Erase polygons mapped into the ANCHOR's frame, or nothing.
+
+    The producer almost never works in the anchor's frame. The anchor is the
+    ROI barrier — the layout split — and a stamp finder runs after the DPI
+    normalise that follows it, so its polygons are in a resampled frame that
+    can be twice the anchor's size. Punching them into the anchor mask
+    unmapped puts the hole somewhere else on the page, or off it entirely.
+
+    That is what shipped: the guard here looked for `meta["frame_wh"]` or a
+    node key `image_wh`, and NEITHER IS EVER WRITTEN. `if wh:` was always
+    false, so the check never ran, `replay_erase: 1` reported success, and the
+    stamp came back at the end of the replay (#142).
+
+    So map instead of guard. Every coordinate step between the anchor and the
+    producer already describes itself through `replay_transform`, which is the
+    same machinery the replay engine uses; composing them and inverting takes
+    the polygons back to the anchor exactly. A step that cannot be inverted —
+    a dewarp's nonlinear sample map — makes the polygons unusable, and THAT is
+    when to skip with a note.
+
+    Returns `(polygons, note)`; the note travels into the replay summary so a
+    skipped erase is visible rather than silent."""
+    src_erase = _erase.get(source_node.get("meta") or {})
+    if src_erase:
+        return src_erase, ""
+    h_a, w_a = int(anchor_shape[0]), int(anchor_shape[1])
+    ordered = sorted(nodes, key=lambda d: int(d.get("step_idx") or 0))
+    for i, n in enumerate(ordered):
+        polys = _erase.get(n.get("meta") or {})
+        if not polys:
+            continue
+        # Everything that moved pixels between the anchor and this producer.
+        between = [m for m in ordered[:i]
+                   if _node_trait(m.get("processor_name")) == "coordinate"
+                   and (m.get("meta") or {}).get("replay_kind")]
+        H, note = _compose_to_anchor(between, (w_a, h_a), n.get("step_name"))
+        if note:
+            return [], note
+        if H is None:
+            return polys, ""
+        return _erase.transform_perspective(polys, np.linalg.inv(H)), ""
+    return [], ""
+
+
+def _compose_to_anchor(steps: list[dict], anchor_wh,
+                       producer_name) -> tuple[Optional[np.ndarray], str]:
+    """The forward 3x3 from the anchor frame to `steps`' output frame.
+
+    `None` when there is nothing between (the producer already works in the
+    anchor's frame). A note when a step is nonlinear, which is the real
+    "cannot be mapped" case — a producer sitting after the dewarp."""
+    if not steps:
+        return None, ""
+    H = np.eye(3, dtype=np.float64)
+    cur_w, cur_h = int(anchor_wh[0]), int(anchor_wh[1])
+    for m in steps:
+        cls = _node_cls(m.get("processor_name"))
+        if cls is None:
+            continue
+        try:
+            warp = cls.replay_transform(m["meta"]["replay_params"],
+                                        (cur_w, cur_h))
+        except Exception as e:  # noqa: BLE001
+            return None, (f"erase regions from {producer_name} could not be "
+                          f"mapped back through {m.get('step_name')} "
+                          f"({type(e).__name__}); skipped rather than applied "
+                          f"to the wrong pixels")
+        if not isinstance(warp, AffineTransform):
+            return None, (f"erase regions from {producer_name} sit after "
+                          f"{m.get('step_name')}, which warps non-linearly "
+                          f"and cannot be inverted; skipped rather than "
+                          f"applied to the wrong pixels. Put the producer "
+                          f"before the dewarp.")
+        H = warp.H @ H
+        cur_w, cur_h = warp.out_wh
+    return H, ""
 
 
 def _ordered_replay_steps(nodes: list[dict]) -> list[dict]:
@@ -265,6 +346,22 @@ def replay_branch(conn: sqlite3.Connection, scan_id: int,
     else:
         mask[:] = 255
 
+    # Erase regions (meta["erase"]) are punched OUT of that mask here, at the
+    # anchor, so they ride every coordinate transform with it and the final
+    # `wolf_masked` both excludes them from its local statistics and whitens
+    # them. That is a truer exclusion than the forward pass's paper fill.
+    #
+    # Here and not as a step: erase-producing processors are PIXEL_VALUE, and
+    # `_ordered_replay_steps` sorts those AFTER the coordinate fusion — their
+    # polygons would be in the pre-warp frame by then and would erase the
+    # wrong part of the page. The frame is checked rather than assumed: a
+    # producer that sits after a geometric step is skipped with a note, not
+    # applied blind.
+    erase_polys, erase_note = _anchor_erase(source_node, candidate_nodes,
+                                            (h_src, w_src))
+    if erase_polys:
+        mask = _erase.punch(mask, erase_polys, (h_src, w_src))
+
     steps = _ordered_replay_steps(candidate_nodes)
     if not steps:
         raise ValueError("No replay-participating nodes")
@@ -311,6 +408,8 @@ def replay_branch(conn: sqlite3.Connection, scan_id: int,
 
     return buf, {
         "replay_applied": applied,
+        "replay_erase": len(erase_polys),
+        "replay_erase_note": erase_note,
         "n_steps_total": len(nodes),
         "n_replay_steps": len(steps),
     }

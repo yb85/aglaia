@@ -22,6 +22,7 @@ Commands: [`gui`](#gui), [`run`](#run), [`ocr`](#ocr), [`setup`](#setup),
 > `uv run aglaia …`. Entry path: `aglaia/__main__.py:run` → `aglaia/cli:run`
 > (a Typer app); the commands live in `aglaia/cli/commands/`. The internal
 > config layer they build (`CliConfig`, the `--ocr`/`--export` spec parsers) is
+- `--send-to SLUG[+SLUG…]` — after the exports, hand the written files to these export plugins (`aglaia list destinations` shows what is installed). Each plugin gets every file whose format it accepts; a plugin that is not installed or not configured fails the run and names the fix (`aglaia plugins install …` / `aglaia plugins config …`) — a batch that "succeeded" without sending is the expensive kind of success.
 > documented in [configuration.md](configuration.md); the implementation plan is
 > [subcommand-cli.md](subcommand-cli.md).
 
@@ -181,6 +182,22 @@ aglaia version       # or: aglaia --version
 ```
 
 Print the Aglaïa version and exit.
+
+## `skill`
+
+```
+aglaia skill
+```
+
+Prints the **agent skill** — `aglaia/assets/SKILL.md` — to stdout: what each
+command is for, which to use in which circumstance, the questions to ask a user
+before running anything, DPI arithmetic, engines, exports, plugins, recipes and
+gotchas. It is written for an AI agent driving the CLI (Claude Code, etc.), and
+printing it from the installed binary means the agent gets the version that
+matches the commands it will run. For this repository's own Claude Code
+sessions, `.claude/skills/aglaia-cli/SKILL.md` is a symlink to the asset — one
+file, nothing to keep in sync. A test walks the Typer app and fails if any
+command or long option is missing from the document.
 
 ## What changed from the old flat CLI
 

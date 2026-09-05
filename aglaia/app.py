@@ -452,7 +452,7 @@ def _choice_from_cfg(cfg: CliConfig) -> Optional["StartupChoice"]:
         name = default_project_name(cfg)
         parent = default_parent_dir(cfg)
         parent.mkdir(parents=True, exist_ok=True)
-        from slugify import slugify
+        from aglaia.storage import safe_project_name
         pipeline_path = resolve_pipeline_path(cfg.pipeline)
         yaml_text = pipeline_path.read_text(encoding="utf-8") if pipeline_path else ""
         mode = (StartupWindow.MODE_PDF if cfg.source == "pdfs"
@@ -462,7 +462,7 @@ def _choice_from_cfg(cfg: CliConfig) -> Optional["StartupChoice"]:
             project_dir=parent,
             parent_dir=parent,
             project_name=name,
-            project_slug=slugify(name) or "project",
+            project_slug=safe_project_name(name),
             input_files=list(cfg.inputs),
             pipeline_yaml=yaml_text,
         )
@@ -495,7 +495,6 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     Mirrors the legacy `main()` flow but skips the StartupWindow.
     """
     import threading as _threading
-    from slugify import slugify
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QPixmap
     from PySide6.QtWidgets import QSplashScreen
@@ -507,7 +506,8 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         reprocess_active_scans,
     )
     from aglaia.workers.Initializer import (
-        create_processing_chain, initialize, load_pipeline_def,
+        MissingProcessorError, create_processing_chain, initialize,
+        load_pipeline_def,
     )
     from aglaia.workers.PDFprocessor import create_pdf_from_images
     from aglaia.storage.db import open_db
@@ -558,7 +558,8 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
     finally:
         sys.argv = saved_argv
 
-    slug = choice.project_slug or slugify(
+    from aglaia.storage import safe_project_name
+    slug = choice.project_slug or safe_project_name(
         choice.project_name or choice.project_dir.name
     )
     if slug:
@@ -637,7 +638,17 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
 
     # ── chain ────────────────────────────────────────────────────
     log_queue = multiprocessing.Queue()
-    chain = create_processing_chain(args, log_queue, db_path=str(db_path))
+    try:
+        chain = create_processing_chain(args, log_queue, db_path=str(db_path))
+    except MissingProcessorError as e:
+        # A traceback at the splash screen tells the user nothing they can
+        # act on. Name what is missing and where to get it.
+        from PySide6.QtWidgets import QMessageBox
+        splash.close()
+        QMessageBox.critical(
+            None, "Cannot start this pipeline",
+            f"{e}\n\nMissing: {', '.join(e.processors)}")
+        return 1
     chain.start()
     state = {"chain": chain, "log_queue": log_queue,
              "pipeline_version_id": pipeline_version_id, "args": args}
@@ -659,9 +670,15 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
                 state["chain"].stop()
             except Exception:
                 pass
-            new_chain = create_processing_chain(
-                state["args"], state["log_queue"], db_path=str(db_path),
-            )
+            try:
+                new_chain = create_processing_chain(
+                    state["args"], state["log_queue"], db_path=str(db_path),
+                )
+            except MissingProcessorError as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(window, "Cannot apply this pipeline",
+                                    str(e))
+                return
             new_chain.start()
             state["chain"] = new_chain
             state["pipeline_version_id"] = new_pvid
@@ -757,9 +774,14 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
             dropped = old.hard_stop()
         except Exception:
             dropped = 0
-        new_chain = create_processing_chain(
-            state["args"], state["log_queue"], db_path=str(db_path),
-        )
+        try:
+            new_chain = create_processing_chain(
+                state["args"], state["log_queue"], db_path=str(db_path),
+            )
+        except MissingProcessorError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(window, "Cannot restart the pipeline", str(e))
+            return dropped
         new_chain.start()
         state["chain"] = new_chain
         def _swap():
@@ -1118,10 +1140,14 @@ def launch_gui(cfg: CliConfig) -> int:
                     slim_in_place(reopen_path)
                 except Exception as e:
                     from PySide6.QtWidgets import QMessageBox
+                    # The exception goes to the log; the dialog says what it
+                    # means for the project, which is that nothing was lost.
+                    print(f"[slim-down] {type(e).__name__}: {e}",
+                          file=sys.stderr)
                     QMessageBox.critical(
                         None, "Slim-down failed",
-                        f"Could not slim down the project:\n"
-                        f"{type(e).__name__}: {e}")
+                        "The project could not be slimmed down. It is "
+                        "unchanged, and safe to open.")
             choice = _choice_for_open_path(reopen_path)
         else:
             _trace("main: constructing StartupWindow")

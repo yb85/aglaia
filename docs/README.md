@@ -9,15 +9,19 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | [server.md](./server.md) | `aglaia server` HTTP job API — endpoints, auth, job lifecycle, Mistral-batch backoff, capability download URLs, completion email, admin panel, storage layout |
 | [architecture.md](./architecture.md) | Process tree, IntegratedProcessingChain, log_queue protocol |
 | [pipeline.md](./pipeline.md) | YAML pipeline schema, template substitution, default pipeline annotated |
+| [processors-review.md](./processors-review.md) | **Architecture review** — where processors bleed into each other, what the pipeline still keys on a processor's NAME, and the processor-protocol plan (REQUIRES/PROVIDES, EDITABLE, render_debug, summary) |
 | [processors.md](./processors.md) | DPIfixer, SkewFinder, PageDetector, Binarizer, PageDewarper — options, behavior, extension points, **drop-in user plugins** |
 | [imagebuffer.md](./imagebuffer.md) | Standard image envelope, meta keys, write logic |
 | [gui.md](./gui.md) | Capture GUI (aglaia), threads, key/voice bindings, calibration buttons |
 | [calibration.md](./calibration.md) | Camera calibration workflow, DPI calibration, camera_params.json |
 | [configuration.md](./configuration.md) | Config layers (defaults / YAML / CLI), `args.options` shape, path resolution |
+| [ui-writing.md](./ui-writing.md) | **Writing for the user** — the UI/log register split, measured length budgets, error slots, case & punctuation, the do-not-write list |
 | [development.md](./development.md) | Env setup, module map, multiprocessing constraints, adding processors, conventions |
 | [storage.md](./storage.md) | M0 SQLite schema: tables, branches, query cookbook |
 | [ocr.md](./ocr.md) | OCR engine interface + registry, bundled engines (Apple Vision/Document, Surya, PaddleOCR-VL, Mistral cloud), shared DPI / confidence knobs, cloud key storage |
 | [export.md](./export.md) | PDF export (JBIG2 / G4 bitonal, JPEG colour, invisible OCR text layer) + Markdown pointer; visibility filtering |
+| [destinations.md](./destinations.md) | Sending an export somewhere — the `destinations` plugin kind, the `Destination` contract, and the three bundled ones (calibre, Kindle, corpus) |
+| [plugin-store.md](./plugin-store.md) | **Design** — curated plugin registry, versioned `plugin_api`, namespaced secrets, install flows, review checklist, threat model (M10, not built) |
 | [app_data.md](./app_data.md) | Per-user dirs via platformdirs (data/cache/log/models/pipelines/plugins), env overrides, config DB schema |
 | [markdown_export.md](./markdown_export.md) | `write_markdown` — OCR text → free-flowing Markdown; Apple Vision line-geometry heuristics (headings, paragraphs, dehyphenation, running-head removal, footnotes, lists, cross-page merge) |
 | [lessons.md](./lessons.md) | Hard-won lessons: pitfalls (DPI-vulnerable constants, morphology line-bridging, multi-line bbox poisoning, input-polarity assumptions, MLX cache hygiene), implementation guidelines (new processor checklist, debug visualisation, span+baseline recipe), and a reference table of h_med-scaled constants. |

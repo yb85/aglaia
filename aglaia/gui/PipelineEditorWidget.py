@@ -543,7 +543,7 @@ class StepParamsForm(QWidget):
         btn = QToolButton()
         btn.setIcon(_lucide("download", color=COLOR_SECONDARY, size=16))
         btn.setToolTip(self.tr(
-            "No model installed for this backend — open the Model Downloader."
+            "No model installed for this backend — open the model downloader."
         ))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"QToolButton{{border:0;padding:2px;}}"

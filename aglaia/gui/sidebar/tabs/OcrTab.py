@@ -57,86 +57,9 @@ from aglaia.gui.colors import (
     COLOR_SECONDARY_BORDER,
     qcolor,
 )
-from aglaia.gui.sidebar.widgets import RadioCardGroup
-
-
-class _BusyOverlay(QWidget):
-    """Scrim + spinner + caption painted on top of OcrTab while a long
-    op (OCR run / pipeline run) is in flight. Blocks input — the
-    underlying controls are also ``setEnabled(False)`` for keyboard
-    focus + a11y, but the overlay communicates the lock visually."""
-
-    _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-
-    def __init__(self, parent: QWidget):
-        super().__init__(parent)
-        # Eats clicks (no WA_TransparentForMouseEvents) — disabled
-        # widgets underneath wouldn't react anyway, but blocking here
-        # avoids misleading hover cues.
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self._idx = 0
-        self._caption = self.tr("Working…")
-        self._timer = QTimer(self)
-        self._timer.setInterval(80)
-        self._timer.timeout.connect(self._tick)
-        self.hide()
-        if parent is not None:
-            parent.installEventFilter(self)
-
-    def set_caption(self, text: str) -> None:
-        self._caption = text
-        self.update()
-
-    def start(self) -> None:
-        if not self._timer.isActive():
-            self._timer.start()
-        self.show()
-        self.raise_()
-        self._resize_to_parent()
-
-    def stop(self) -> None:
-        self._timer.stop()
-        self.hide()
-
-    def _tick(self) -> None:
-        self._idx = (self._idx + 1) % len(self._FRAMES)
-        self.update()
-
-    def _resize_to_parent(self) -> None:
-        p = self.parentWidget()
-        if p is not None:
-            self.setGeometry(0, 0, p.width(), p.height())
-
-    def eventFilter(self, obj, ev):  # noqa: N802 — Qt API
-        if obj is self.parentWidget() and ev.type() in (
-            ev.Type.Resize, ev.Type.Show, ev.Type.Move,
-        ):
-            self._resize_to_parent()
-        return False
-
-    def paintEvent(self, _ev):  # noqa: N802
-        self._resize_to_parent()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # Match `_SpinnerOverlay` (ScanItemWidget): same scrim alpha so
-        # the busy state reads identically across the app.
-        p.fillRect(self.rect(), QColor(0, 0, 0, 90))
-        font = QFont()
-        font.setPixelSize(40)
-        font.setBold(True)
-        p.setFont(font)
-        p.setPen(qcolor(COLOR_PRIMARY))
-        spinner_rect = self.rect().adjusted(0, 0, 0, -32)
-        p.drawText(spinner_rect, int(Qt.AlignmentFlag.AlignCenter),
-                   self._FRAMES[self._idx])
-        font.setPixelSize(13)
-        font.setBold(True)
-        p.setFont(font)
-        p.setPen(qcolor(COLOR_FONT_INVERSE))
-        caption_rect = self.rect().adjusted(0, 32, 0, 0)
-        p.drawText(caption_rect, int(Qt.AlignmentFlag.AlignCenter),
-                   self._caption)
-        p.end()
+from aglaia.gui.sidebar.widgets import (
+    BusyOverlay as _BusyOverlay, RadioCardGroup,
+)
 
 
 class OcrTab(QWidget):
@@ -207,6 +130,18 @@ class OcrTab(QWidget):
         # the available room.
         self._cards_scroll.setMinimumHeight(150)
         outer.addWidget(self._cards_scroll, 1)
+        # "More…" — six engine cards is a wall, and the answer for almost
+        # everyone is one of the first two. The rest fold away behind this.
+        self._more_btn = QPushButton()
+        self._more_btn.setFlat(True)
+        self._more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._more_btn.setStyleSheet(
+            f"QPushButton {{ color: {COLOR_FONT_MUTED}; font-size: 11px; "
+            f"border: none; padding: 2px 0 6px 0; text-align: left; }}"
+            f"QPushButton:hover {{ color: {COLOR_PRIMARY}; }}")
+        self._more_btn.clicked.connect(self._toggle_more_engines)
+        outer.addWidget(self._more_btn)
+        self._engines_expanded = False
         self._populate_engines()
         # Track the active engine so we can detect REAL switches (the
         # currentChanged signal also fires on initial seed / refresh).
@@ -427,12 +362,18 @@ class OcrTab(QWidget):
         names = [n for n in names if _platform_ok(n)]
 
         self._complement_combo = None  # rebuilt below if apple_docs present
+        # `available` is set in the engine's __init__ (deps probed at
+        # construction), never on the class — so it has to be recorded here,
+        # while the instance exists, not read back off ENGINE_REGISTRY later.
+        self._engine_available: dict[str, bool] = {}
         for name in names:
             cls = ENGINE_REGISTRY[name]
             try:
                 eng = cls()
             except Exception:
                 continue
+            self._engine_available[name] = bool(
+                getattr(eng, "available", False))
             # "missing" (not "not installed") + a hard length cap: long names
             # like "PaddleOCR-VL" otherwise overflow the sidebar card width,
             # pushing the speed/quality badges off the row.
@@ -466,6 +407,69 @@ class OcrTab(QWidget):
 
         self._apply_engine_gating()
         self._select_default_engine()
+        self._apply_engine_overflow()
+
+    #: How many engine cards stay on screen before the rest fold away.
+    #: Three is what fits without scrolling and covers the real choice:
+    #: on macOS Apple Document, Cloud and a local VLM; elsewhere Cloud and
+    #: the two local VLMs.
+    VISIBLE_ENGINES = 3
+
+    def _visible_engine_keys(self) -> list[str]:
+        """The engines to show while folded, in card order.
+
+        The first `VISIBLE_ENGINES` that are actually usable — an engine
+        whose weights are not downloaded is a card offering an Install
+        button, which is not what someone opening this panel is looking for,
+        so it waits under "More…" with the rest.
+
+        The current selection is always among them. Hiding the engine that
+        is about to run would be a panel that lies about what it will do."""
+        avail = getattr(self, "_engine_available", {})
+        usable: list[str] = []
+        for key in self.engine_group.keys():
+            card = self.engine_group._cards.get(key)
+            if card is None or not card.frame.isEnabled():
+                continue
+            if not avail.get(key, False):
+                continue
+            usable.append(key)
+        shown = usable[:self.VISIBLE_ENGINES]
+        current = self.engine_group.current_key()
+        if current and current not in shown:
+            shown.append(current)
+        if not shown:
+            # Nothing usable at all (a fresh install with no models and no
+            # key): show the first few anyway, or the panel is empty and the
+            # Install buttons are unreachable.
+            shown = self.engine_group.keys()[:self.VISIBLE_ENGINES]
+        return shown
+
+    def _apply_engine_overflow(self) -> None:
+        keys = self.engine_group.keys()
+        shown = set(self._visible_engine_keys())
+        hidden = [k for k in keys if k not in shown]
+        # Auto-expand when the user's own engine is one of the folded ones —
+        # their choice is persisted, so someone who works in Surya opens the
+        # panel already unfolded instead of clicking "More…" every session.
+        if self._engines_expanded or not hidden:
+            for k in keys:
+                self.engine_group.set_card_visible(k, True)
+        else:
+            for k in keys:
+                self.engine_group.set_card_visible(k, k in shown)
+        n = len(hidden)
+        if not n:
+            self._more_btn.setVisible(False)
+            return
+        self._more_btn.setVisible(True)
+        self._more_btn.setText(
+            self.tr("▴  Fewer engines") if self._engines_expanded
+            else self.tr("▾  {n} more engine(s)…").format(n=n))
+
+    def _toggle_more_engines(self) -> None:
+        self._engines_expanded = not self._engines_expanded
+        self._apply_engine_overflow()
 
     def _select_default_engine(self) -> None:
         """Pick the default engine, skipping disabled / unavailable cards.
@@ -649,9 +653,12 @@ class OcrTab(QWidget):
         col.setSpacing(4)
 
         if not sdk_available:
+            # The SDK is a base dependency (#139), so getting here means a
+            # damaged install rather than a missing option — say that, not
+            # "run this command to enable a feature you already have".
             hint = QLabel(self.tr(
-                "Cloud OCR needs the 'cloud' extra:\n"
-                "uv sync --extra cloud"))
+                "Aglaïa could not load the component Cloud OCR needs. "
+                "Reinstalling Aglaïa should fix it."))
             hint.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
             hint.setWordWrap(True)
             col.addWidget(hint)
@@ -855,9 +862,11 @@ class OcrTab(QWidget):
         except Exception:
             where = ""
         msgs = {
-            "env": self.tr("Key set (from MISTRAL_API_KEY env var)."),
-            "keychain": self.tr("Key stored in your OS keychain."),
-            "env_file": self.tr("Key stored in APP_DATA/.env (less secure)."),
+            # Where the key came from, in terms of what the user did — not
+            # the name of the variable or the file it landed in.
+            "env": self.tr("Key set by your shell environment."),
+            "keychain": self.tr("Key stored in your keychain."),
+            "env_file": self.tr("Key stored as plain text. Less secure."),
         }
         if where:
             lbl.setText("✓ " + msgs.get(where, self.tr("API key set.")))
@@ -903,10 +912,13 @@ class OcrTab(QWidget):
         edit.setMinimumWidth(440)
         v.addWidget(edit)
         # Smaller, dimmed description — the supersede order.
+        # Which key wins, said as an outcome. The variable's name belongs in
+        # the log and the docs; a user who set one already knows it, and a
+        # user who did not cannot act on it.
         note = QLabel(self.tr(
-            "The keychain key is superseded by the MISTRAL_API_KEY "
-            "environment variable (shell), or by {env_path}."
-        ).format(env_path=env_path))
+            "A key set in your shell environment, or stored as plain text, "
+            "is used instead of this one."
+        ))
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
         v.addWidget(note)
@@ -936,9 +948,9 @@ class OcrTab(QWidget):
             _ok, reason = keychain_backend()
             if reason == "not_installed":
                 msg = self.tr(
-                    "Keychain storage needs the 'cloud' extra "
-                    "(uv sync --extra cloud); it is not installed, so the key "
-                    "was saved as plain text in {env_path} instead."
+                    "Aglaïa could not load the component that talks to the "
+                    "keychain, so the key was saved as plain text in "
+                    "{env_path} instead. Reinstalling Aglaïa should fix it."
                 ).format(env_path=env_path)
             else:
                 msg = self.tr(

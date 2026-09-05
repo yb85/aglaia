@@ -144,6 +144,8 @@ datas = [
     # open). Without them the frozen app finds zero .sql files, thinks the DB
     # is fully migrated, and creates NO tables → first query stalls.
     (str(REPO / "aglaia" / "storage" / "schema"), "aglaia/storage/schema"),
+    # The agent skill printed by `aglaia skill`.
+    (str(REPO / "aglaia" / "assets" / "SKILL.md"), "aglaia/assets"),
     (str(REPO / "aglaia" / "assets" / "icons"), "aglaia/assets/icons"),
     (str(REPO / "aglaia" / "assets" / "modes"), "aglaia/assets/modes"),
     # Theme-aware wordmarks (About dialog / startup) + the 1024 logo.
@@ -188,6 +190,18 @@ hiddenimports = (
     # Baked version module (written above). aglaia.version imports it inside a
     # try/except, which static analysis can miss — name it so it's bundled.
     + ["aglaia._version"]
+    # keyring picks its backend at RUNTIME, through entry points and a
+    # dynamic import of `keyring.backends.<name>`. Static analysis sees none
+    # of that, and there is no bundled PyInstaller hook for it, so a frozen
+    # app finds no store and quietly writes every password — Mistral key,
+    # SMTP password, plugin API keys — as plain text into APP_DATA/.env
+    # instead. It fails silently and correctly-looking, which is why it is
+    # named here rather than left to discovery. All platforms listed: the
+    # non-matching ones simply never load.
+    + ["keyring.backends.macOS", "keyring.backends.Windows",
+       "keyring.backends.SecretService", "keyring.backends.libsecret",
+       "keyring.backends.kwallet", "keyring.backends.chainer",
+       "keyring.backends.fail", "keyring.backends.null"]
 )
 
 # Pull the compiled JBIG2 extension (.so) into the bundle.

@@ -373,6 +373,24 @@ class RadioCardGroup(QWidget):
         self._layout.addWidget(frame)
         frame.clicked.connect(lambda k=key: self._select(k))
 
+    def remove_card(self, key: str) -> None:
+        """Drop one card. Needed because plugin-provided cards come and go
+        while the tab is alive — installing or removing an exporter must not
+        require a restart to be reflected here."""
+        card = self._cards.pop(key, None)
+        if card is None:
+            return
+        if key in self._order:
+            self._order.remove(key)
+        if self._current == key:
+            self._current = None
+        self._layout.removeWidget(card.frame)
+        card.frame.setParent(None)
+        card.frame.deleteLater()
+
+    def keys(self) -> list[str]:
+        return list(self._order)
+
     def set_current_key(self, key: Optional[str]) -> bool:
         if key is not None and key not in self._cards:
             return False
@@ -399,6 +417,21 @@ class RadioCardGroup(QWidget):
             Qt.CursorShape.PointingHandCursor if enabled
             else Qt.CursorShape.ArrowCursor
         )
+
+    def set_card_visible(self, key: str, visible: bool) -> None:
+        """Show or hide one card without removing it.
+
+        Hidden, not destroyed: the card keeps its state, its extras and its
+        place in `keys()`, so a caller can fold a long list down to the few
+        that matter and unfold it again without rebuilding anything."""
+        c = self._cards.get(key)
+        if c is None:
+            return
+        c.frame.setVisible(bool(visible))
+
+    def is_card_visible(self, key: str) -> bool:
+        c = self._cards.get(key)
+        return bool(c is not None and not c.frame.isHidden())
 
     def set_card_tooltip(self, key: str, tooltip: str) -> None:
         """Set (or clear, with "") the hover tooltip on a card — used to

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
+from aglaia.processors import erase as _erase
 from aglaia.processors.utils import is_binary, to_gray, to_rgb
 
 from aglaia.processors.layout_backends import get_backend
@@ -988,6 +989,26 @@ class PageDetector(AbstractImageProcessor):
             
             if child_roi:
                 l_buf.meta["roi"] = child_roi
+
+            # Erase masks are in PARENT coordinates; each child takes the ones
+            # that fall inside its own crop, translated into child coords. A
+            # stamp on the left page is not the right page's problem, and a
+            # mask handed to the wrong child would erase a band of unrelated
+            # text.
+            _parent_erase = _erase.get(input_buf.meta)
+            if _parent_erase:
+                _shifted = _erase.transform_translate(
+                    _parent_erase, -fx1, -fy1)
+                _cw, _ch = fx2 - fx1, fy2 - fy1
+                for _poly in _shifted:
+                    _xs = [q[0] for q in _poly]
+                    _ys = [q[1] for q in _poly]
+                    # Any overlap at all: a stamp straddling the gutter is
+                    # clipped by the fill, not dropped by the hand-off.
+                    if (max(_xs) < 0 or min(_xs) > _cw
+                            or max(_ys) < 0 or min(_ys) > _ch):
+                        continue
+                    _erase.add(l_buf.meta, _poly)
             if suffix in manual_branches:
                 # Name WHICH instrument drew it: a per-branch `roi` and a
                 # hand-drawn layout set are both hand edits, but only one of

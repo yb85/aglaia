@@ -125,6 +125,86 @@ differently-sized frame is refused and detection resumes, like every other
 spatial override. It outranks a per-branch `roi`, which was drawn on a crop
 that may no longer be the same shape.
 
+## Erase masks (`aglaia/processors/erase.py`)
+
+`meta["roi"]` names the region to **keep**. `meta["erase"]` names regions to
+**drop** — a list of polygons in the coordinates of the buffer carrying them.
+It is a general facility, not one plugin's private arrangement: any processor
+that can find something the page should not contain (a library stamp, an
+owner's inscription, a barcode label, a finger) says so by appending a polygon,
+and the `Binarizer` consumes them.
+
+Polygons rather than rasters, because the region has to survive the geometry —
+deskew rotates, keystone applies a homography, dewarp remaps a curved sheet,
+and the mask must arrive at the binarizer sitting exactly where the stamp is.
+`roi` already makes that trip. **The rule for carriers is one line: if you
+transform `roi`, transform `erase` on the same line.** A mask left at the old
+coordinates erases the wrong part of the page, silently. `erase.py` provides
+`transform_affine`, `transform_perspective`, `transform_translate`,
+`transform_remap` and `carry` so no carrier has to invent it.
+
+### Removing a region without leaving a rim
+
+Painting the stamp white before binarizing is the obvious move and it is wrong
+twice:
+
+* **A hard white patch is a strong local edge.** Wolf's threshold comes from a
+  window's mean and variance; a window straddling the boundary sees a step and
+  marks a black ring along it — a spurious blob exactly where the user asked
+  for nothing.
+* **Wolf is globally sensitive to a dark region.** Its formula uses the image's
+  global minimum grey, so a big black stamp shifts thresholds across the whole
+  page. Removing it before binarizing *is* a statistics exclusion — which is
+  why "exclude from the statistics" and "paint it out" are two halves of one
+  operation, not two competing options.
+
+So the forward pass (`fill_with_paper`) fills each region with the **paper
+level measured from a ring just outside it** — not white, and not one value
+for the page. The `Binarizer` once had a global bg-fill for the ROI and gave
+it up (`"interior lighting gradients still produce ink rings"` —
+`_fill_outside_roi_with_bg`, now dead code); the lesson is that one paper level
+cannot serve a page that is brighter at one edge, and a fill that does not
+match its surroundings *is* the step it was meant to remove. Locally, the ring
+value is the paper. The fill extends a halo of at least half a Wolf window
+outside the polygon, so a window centred on the edge sees only paper on the
+erased side.
+
+After binarizing, `whiten` fills the polygon pure white with `LINE_8` — never
+`LINE_AA`, since an anti-aliased edge is a row of mid-greys and a mid-grey
+beside a threshold is a black pixel — grown by `erase_grow` (default 2, the
+mirror of `roi_shrink`) to take any surviving rim with it.
+
+### In replay
+
+Replay carries a keep-mask through every geometric step and binarises once at
+the end with `wolf_masked`, which already skips masked-out pixels when
+computing its local statistics and whitens them afterwards. That is exactly
+what an erase region needs, and it is *better* than the forward pass's fill: a
+true exclusion rather than a substitution approximating one. So in replay an
+erase region is not painted at all — the producing processor subtracts it from
+the keep-mask (`erase.punch`) at the point in the chain where it was found, and
+it rides the geometry to the final binarize for free.
+
+The forward binarize stamps `erase` into `replay_params` as **provenance
+only**. Those coordinates are in its own input frame; replay binarises a
+differently-sized fused composite, so applying them there would erase the wrong
+part of the page.
+
+### Who produces one
+
+`StampRemover` (a registry plugin, `processors/stamp-remover`) is the first
+producer: it matches a library stamp by SIFT against a user-built library and
+appends the matched exclusion polygon. It changes **no pixels** — it finds, and
+the host removes. That split is why the plugin is small and why the removal is
+correct in replay as well as in the forward pass.
+
+Placement matters and is not a suggestion: an erase producer belongs right
+after the layout split, before any geometric step. Replay folds erase regions
+into its keep-mask **at the anchor**, so a producer sitting after a warp has
+polygons in the wrong frame by then; `_anchor_erase` checks the frame and skips
+with a note rather than erasing the wrong pixels — meaning a badly-placed
+producer works in the forward pass and quietly does nothing on replay.
+
 ## Binarizer (`aglaia/processors/Binarizer.py`)
 
 ![Local adaptive binarization: an unevenly-lit page (left) becomes clean black-on-white text (right), the shadow gradient removed.](figures/binarize_example.jpg)
@@ -148,9 +228,54 @@ options:
   morpho_close: 2        # Morphological close (0–10) after threshold
 ```
 
-ROI masking (`_apply_roi_mask`): if the input buffer carries a `meta["roi"]` polygon (set by SkewFinder / PageDetector), pixels outside the polygon are forced to white after binarization. `roi_shrink` is the number of `cv2.erode` iterations applied to the mask first.
+### `wolf` vs `wolf++`
+
+**`wolf`** is doxapy's Wolf over the whole frame, with the page outline wiped
+white afterwards.
+
+**`wolf++` is Wolf that understands missing values**, and it is the same
+algorithm at both ends of the chain. A pixel inside an erase region — or
+outside the page outline — is not thresholded and then painted over: it is
+excluded from the local mean and variance *and* from Wolf's global minimum
+grey, then written white. `_wolfpp` runs `wolf_masked`; `Binarizer.apply_replay`
+runs the same function on the same parameters, and the two agree to the pixel
+(`tests/processors/test_erase_masks.py`).
+
+It did not, until #144. The constructor mapped `WOLF++` to `WOLF` for doxapy,
+so the forward pass ran **plain Wolf** and the `++` only engaged at replay: a
+user who selected `wolf++` got two different algorithms depending on which end
+of the chain they looked at. The pre-binarize paper fill existed to paper over
+an algorithm that had never been asked to handle the hole — which is why it
+grew the region by half a window, and why that halo ate the line of text
+beside a stamp (1625 px of real ink, to remove ~25 px of specks).
+
+`wolf++` falls through to plain Wolf when there is nothing to be mask-aware
+about — no ROI and no erase — because the answer is then identical and doxapy
+is three times faster (7 ms vs 23 ms on a 3 Mpx page).
+
+Non-Wolf methods have no notion of a missing value, so an erase region is
+still filled with the paper tone measured around it before thresholding — with
+no halo.
+
+ROI masking (`_apply_roi_mask`): pixels outside `meta["roi"]` are forced white
+after binarization, with `roi_shrink` erode iterations first. Under `wolf++`
+the outline is already excluded from the statistics, so this is a
+belt-and-braces wipe rather than the thing that removes the border artefact.
 
 BW inputs are a no-op (pass-through).
+
+## Shared text-scale estimate (`aglaia/processors/text_metrics.py`)
+
+Both `TrapezoidalCorrection` and `PageDewarper` size their line-joining
+morphology from the median height of character-like connected components. Each
+used to carry its own copy of that estimator; two copies of one estimate drift
+apart. Now there is one (`median_char_height`), and the rule is **meta is a
+cache, never the only source**: the keystone step writes `char_h_frac`
+(dimensionless — median glyph height over the analysis frame height, so it
+survives a resample), the dewarper reads it if it is there and computes it
+through the same function if it is not. The pipeline works with or without the
+keystone step; the two steps agree by construction; the only thing meta buys is
+skipping a recomputation. (#143)
 
 ## TrapezoidalCorrection (`aglaia/processors/TrapezoidalCorrection.py`)
 
@@ -552,15 +677,40 @@ Return semantics:
 - Set `buffer.children = [child1, child2, ...]` (or return a list) → chain branches; each child re-enters at the next step.
 - Return `None` → branch stops, warning logged.
 
-## Drop-in user plugins (no repo edit)
+## User plugins (no repo edit)
 
-Users add processors (and OCR engines) without modifying the repo by
-dropping a `*.py` file into the per-user plugin dirs:
+Users add processors (and OCR engines) without modifying the repo, in either of
+two shapes. Both end up in the same registry and the same trust ledger.
+
+**Installed from the store** — the normal path. Lands as a directory with a
+manifest naming its entry module:
+
+```
+<APP_DATA>/plugins/processors/<slug>/aglaia-plugin.toml
+<APP_DATA>/plugins/processors/<slug>/<entry>.py
+```
+
+**Dropped in by hand** — a loose module, for a one-off you wrote yourself:
 
 ```
 <APP_DATA>/plugins/processors/   AbstractImageProcessor subclass (SUMMARY + OPTIONS)
 <APP_DATA>/plugins/ocr/          OcrEngine subclass decorated @register
 ```
+
+### A store-installed processor gets a `PluginContext`
+
+`self.ctx` — settings, secrets, its own `data_dir`, a log line — exactly as a
+destination does. Use it for anything the plugin needs to keep: a model, a
+cache, a library of reference images.
+
+It is a **lazy class property**, not a value fixed at registration, because
+processors are constructed inside spawned workers from a pickled
+`ChainElement`; a context built in the parent would never arrive. Each process
+that asks builds its own, which is also what SQLite wants.
+
+A hand-dropped loose module gets `ctx is None`. It never declared a manifest,
+so it never declared it wanted settings or secrets — and there is no slug to
+namespace them under. A plugin that needs a context needs a manifest.
 
 (`<APP_DATA>` = `aglaia/app_data.plugins_dir()`; on macOS
 `~/Library/Application Support/Aglaia/plugins/…`.)

@@ -33,9 +33,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -51,7 +53,9 @@ from aglaia.gui.colors import (
     COLOR_PRIMARY,
     COLOR_PRIMARY_HOVER,
 )
-from aglaia.gui.sidebar.widgets import RadioCardGroup, ToggleSwitch
+from aglaia.gui.sidebar.widgets import (
+    BusyOverlay, RadioCardGroup, ToggleSwitch,
+)
 
 
 _PRIMARY_BTN_QSS = f"""
@@ -67,8 +71,20 @@ QPushButton:disabled {{ background-color: {COLOR_FONT_DIM}; color: {COLOR_FONT_P
 class ExportTab(QWidget):
     """Format-cards picker + single Export button."""
 
+    #: A destination that is not configured yet: open its settings.
+    destination_settings_requested = Signal(str)
+
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        #: destination name -> its format combo (None when it takes only one)
+        self._dest_formats: dict[str, Optional[QComboBox]] = {}
+        # A send takes as long as the far end takes — a 45 MB PDF over SMTP,
+        # or a calibre server on a laptop that has gone to sleep. A button
+        # that does nothing visible for forty seconds reads as a broken
+        # button, so say what is happening while it happens. Same overlay the
+        # OCR tab uses, so "something is running" looks the same everywhere.
+        self._busy_overlay = BusyOverlay(self)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -104,9 +120,12 @@ class ExportTab(QWidget):
         self.chk_jbig2.setToolTip(
             self.tr(
                 "1-bit pages: encode with JBIG2 (≈30% smaller than G4)."
+            # No build instructions: whoever installed the app cannot run
+            # maturin, and whoever can already knows how. Say what they get
+            # instead, since G4 is a perfectly good outcome.
             ) if _jbig2_ok else self.tr(
-                "JBIG2 encoder not installed — exports use CCITT G4. "
-                "Build it: cd aglaia_jbig2 && uv run maturin develop --release"
+                "The JBIG2 encoder is not available in this build. "
+                "1-bit pages use CCITT G4 instead, which is slightly larger."
             )
         )
         pdf_extras_l.addWidget(self.chk_jbig2)
@@ -193,6 +212,7 @@ class ExportTab(QWidget):
         )
 
         self.format_group.set_current_key("pdf")
+        self.refresh_destinations()
 
         # ── Why-is-this-greyed-out hint ────────────────────────────
         # The Markdown card and the PDF OCR-layer toggle both go dead
@@ -328,6 +348,114 @@ class ExportTab(QWidget):
     def selected_ocr_engine(self) -> Optional[str]:
         """The engine whose OCR layer to export, or None for the latest layer."""
         return self.combo_ocr_layer.currentData()
+
+    # ── export plugins ────────────────────────────────────────────
+    #: Card keys for plugin exporters are prefixed so they cannot collide
+    #: with a built-in format, and so the host can tell them apart with a
+    #: string test instead of a second lookup.
+    SEND_PREFIX = "send:"
+
+    def refresh_destinations(self) -> None:
+        """Rebuild the exporter cards from the installed plugins.
+
+        An exporter is an exporter: a plugin that puts a finished export
+        somewhere gets the same card as PDF and Markdown, in the same list,
+        selected the same way, run by the same Export button. It was briefly
+        a separate "Send to" strip below the button, which meant two ways to
+        start an export and two shapes of control for one idea.
+
+        Cheap and idempotent — called after a plugin is installed or removed,
+        so the list never offers something that is no longer there."""
+        keep = self.format_group.current_key()
+        for key in self.format_group.keys():
+            if key.startswith(self.SEND_PREFIX):
+                self.format_group.remove_card(key)
+        try:
+            from aglaia.workers import destinations as _dest
+            dests = list(_dest.load_all().values())
+        except Exception:
+            dests = []
+        dests.sort(key=lambda d: (d.display or d.name).lower())
+        for d in dests:
+            self._add_destination_card(d)
+        if keep and not self.format_group.set_current_key(keep):
+            self.format_group.set_current_key("pdf")
+
+    def _add_destination_card(self, dest) -> None:
+        from aglaia.gui.colors import COLOR_ERROR
+        missing = dest.missing_settings()
+        # What the plugin will actually be handed. Only formats Aglaïa can
+        # produce count, so a destination that takes epub and pdf offers pdf
+        # and says nothing about epub.
+        formats = [f for f in ("pdf", "md") if f in dest.accepts]
+
+        extras = QWidget()
+        col = QVBoxLayout(extras)
+        col.setContentsMargins(0, 4, 0, 0)
+        col.setSpacing(4)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        combo = None
+        if len(formats) > 1:
+            row.addWidget(self._field_label(self.tr("Export as")))
+            combo = QComboBox()
+            for f in formats:
+                combo.addItem({"pdf": "PDF", "md": "Markdown"}[f], f)
+            combo.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
+            row.addWidget(combo, 1)
+        else:
+            row.addStretch(1)
+        btn = QPushButton(self.tr("Settings…"))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet("font-size: 10px; padding: 2px 8px;")
+        btn.clicked.connect(
+            lambda _=False, n=dest.name: self.destination_settings_requested.emit(n))
+        row.addWidget(btn)
+        col.addLayout(row)
+
+        if missing:
+            # A card that will refuse the moment it is used should say so
+            # before it is used, not after the export has already run.
+            warn = QLabel(self.tr("Not set up yet — needs {what}.").format(
+                what=", ".join(missing)))
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color: {COLOR_ERROR}; font-size: 10px;")
+            col.addWidget(warn)
+
+        self._dest_formats[dest.name] = combo
+        self.format_group.add_card(
+            f"{self.SEND_PREFIX}{dest.name}",
+            dest.display or dest.name,
+            dest.description or "",
+            icon_name="upload",
+            extras=extras,
+        )
+
+    def destination_format(self, name: str) -> str:
+        """Which export format the chosen destination card asks for."""
+        combo = self._dest_formats.get(name)
+        if combo is not None:
+            return str(combo.currentData() or "pdf")
+        try:
+            from aglaia.workers import destinations as _dest
+            d = _dest.load_all().get(name)
+            for f in ("pdf", "md"):
+                if d is not None and f in d.accepts:
+                    return f
+        except Exception:
+            pass
+        return "pdf"
+
+    def set_busy(self, caption: str = "") -> None:
+        """Show or hide the working overlay. Empty caption = hide."""
+        if caption:
+            self._busy_overlay.set_caption(caption)
+            self._busy_overlay.start()
+            self.btn_export.setEnabled(False)
+        else:
+            self._busy_overlay.stop()
+            self.btn_export.setEnabled(True)
 
     def current_format(self) -> Optional[str]:
         return self.format_group.current_key()

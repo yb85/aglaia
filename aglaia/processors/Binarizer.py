@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from dataclasses import dataclass, field, make_dataclass
 from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors import erase as _erase
 from aglaia.processors.utils import to_gray, to_rgb, is_binary
 from aglaia.processors.abstraction import (
     AbstractImageProcessor, AbstractProcessorOption, ReplayTrait, _fmt_value,
@@ -124,9 +125,14 @@ def _build_binarizer_options() -> Dict[str, Any]:
         "to a global cut.",
         visible_when={"method": ["bernsen"]},
     )
+    opts["erase_grow"] = _i(
+        2, 0, 32,
+        "Grow each erased region by N px when whitening it after "
+        "binarisation. The mirror of roi_shrink: it takes with it any "
+        "one-pixel rim left at the boundary.", advanced=True)
     opts["roi_shrink"] = _i(
         2, 0, 50,
-        "If meta.roi is set, erode the mask N iterations before applying.",
+        "Erode the page outline N iterations before applying it.",
         advanced=True,
         visible_when={"method": _ALL_DOXA_METHODS},
     )
@@ -149,6 +155,7 @@ def _build_binarizer_option_class():
         ("method", str, "wolf++"),
         ("bernsen_contrast", int, 15),
         ("roi_shrink", int, 2),
+        ("erase_grow", int, 2),
         ("morpho_close", int, 0),
         ("extra", Any, field(default_factory=dict)),
     ]
@@ -207,6 +214,7 @@ def _build_binarizer_option_class():
 
         self.bernsen_contrast = int(kwargs.pop("bernsen_contrast", 15))
         self.roi_shrink = kwargs.pop("roi_shrink", 2)
+        self.erase_grow = kwargs.pop("erase_grow", 2)
         # Clamp to the spec range so a stray yaml value can't drag a
         # huge kernel through cv2 and tank a scan's elapsed_ms.
         mc = int(kwargs.pop("morpho_close", 0))
@@ -367,6 +375,98 @@ class Binarizer(AbstractImageProcessor):
     def _active_family(self) -> Union[str, None]:
         return _METHOD_TO_FAMILY.get(str(self.options.method).lower())
 
+    def _stamp_replay_params(self, img_buf, current_params, erase_polys) -> None:
+        """Record how to re-binarize this page at the end of the chain — one
+        threshold over the final, cleanly-resampled pixels. Window is already
+        in pixels, k is a plain float; no resolution gymnastics."""
+        img_buf.meta["replay_kind"] = "binarize"
+        fam = self._active_family()
+        k_default = 0.0
+        if fam is not None and _FAMILIES[fam].get("k"):
+            k_default = float(getattr(self.options, f"k_{fam}"))
+        img_buf.meta["replay_params"] = {
+            "method": str(self.options.method),
+            "window": int(current_params.get(
+                "window", self._resolve_window_px(img_buf))),
+            "k": float(current_params.get("k", k_default)),
+            "roi_shrink": int(self.options.roi_shrink),
+            "morpho_close": int(self.options.morpho_close),
+            # PROVENANCE ONLY — `apply_replay` must not use these. They are in
+            # this step's input frame, and replay binarises a differently-sized
+            # fused composite, so applying them there would erase the wrong
+            # part of the page. Replay handles erase regions through the MASK:
+            # the producing processor's polygons are punched out of the ROI
+            # mask, which is carried through every geometric step, and
+            # `wolf_masked` excludes them from the statistics and whitens them.
+            # Kept here so a node records what was erased and by whom.
+            "erase": erase_polys,
+            "erase_grow": int(self.options.erase_grow),
+        }
+
+    def _wolfpp(self, img_buf: ImageBuffer, gray, erase_polys):
+        """Mask-aware Wolf for `wolf++`, or None to fall through to doxapy.
+
+        `wolf++` means "Wolf that understands missing values". It did not, on
+        this path: the constructor mapped WOLF++ to WOLF for doxapy, so the
+        forward pass ran PLAIN Wolf and the `++` only ever engaged at replay.
+        A user who selected wolf++ got two different algorithms depending on
+        which end of the chain they looked at — and the paper fill existed to
+        paper over an algorithm that had never been asked to handle the hole.
+
+        Now the region really is a missing value in both passes: punched out
+        of the mask, excluded from the local mean and variance AND from Wolf's
+        global minimum grey, then written white. The page outline is excluded
+        the same way rather than being wiped after the fact, which is what
+        `roi_shrink` was trimming a ring for.
+
+        Returns None when there is nothing to be mask-aware ABOUT — no ROI and
+        no erase — because plain Wolf is then the same answer three times
+        faster.
+        """
+        if str(self.options.method).lower() != "wolf++":
+            return None
+        roi = img_buf.meta.get("roi")
+        if not roi and not erase_polys:
+            return None
+        h, w = gray.shape[:2]
+        if roi:
+            mask = np.zeros((h, w), np.uint8)
+            cv2.fillPoly(mask, [np.array(roi, np.int32).reshape(-1, 1, 2)], 255)
+            if self.roi_shrink > 0:
+                mask = cv2.erode(
+                    mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+                    iterations=int(self.roi_shrink))
+        else:
+            mask = np.full((h, w), 255, np.uint8)
+        if erase_polys:
+            mask = _erase.punch(mask, erase_polys, (h, w))
+        if not mask.any() or int(np.count_nonzero(mask)) >= mask.size:
+            return None
+        params = self._params_for_frame(img_buf)
+        bw = wolf_masked(gray, mask,
+                         int(params.get("window",
+                                        self._resolve_window_px(img_buf))),
+                         k=float(params.get("k", 0.25)))
+        if self.debug_enabled():
+            print(f"[{self.name}] wolf++: {len(erase_polys or [])} erase "
+                  f"region(s) and the page outline treated as missing values",
+                  flush=True)
+        return bw
+
+    def _finish_doxa(self, img_buf, current_params, erase_polys):
+        """The tail every DOXA path shares: replay params, ROI wipe, erase
+        whitening, morphology, stats."""
+        self._stamp_replay_params(img_buf, current_params, erase_polys)
+        self._apply_roi_mask(img_buf)
+        if erase_polys:
+            _erase.whiten(img_buf.buffer, erase_polys,
+                          grow=int(self.options.erase_grow))
+        if self.morpho_close_n() > 0:
+            img_buf.buffer = morpho_close(img_buf.buffer,
+                                          self.morpho_close_n())
+        self._record_stats(img_buf)
+        return img_buf
+
     def _resolve_window_px(self, img_buf: ImageBuffer) -> int:
         """Pick the window size in pixels for this frame, reading the
         active family's `window_mm_<fam>` / `window_px_<fam>` pair.
@@ -422,13 +522,42 @@ class Binarizer(AbstractImageProcessor):
         if img_buf.type == ImageType.BW:
             return img_buf
 
-        # No pre-binarisation bg-fill — interior lighting gradients still
-        # produce ink rings and halo erosion clips text on tight bboxes.
-        # Use the post-mask erosion path instead.
+        # No pre-binarisation bg-fill for the ROI — interior lighting
+        # gradients still produce ink rings and halo erosion clips text on
+        # tight bboxes. Use the post-mask erosion path instead.
+        #
+        # Erase masks (`meta["erase"]`) ARE pre-filled, and the difference is
+        # the reason: a stamp is a small local region, so the paper level is
+        # measured from a ring around each one rather than once for the page.
+        # That is what the abandoned ROI fill could not do. See
+        # `processors/erase.py`.
 
         # DOXA takes Gray
         if self.mode == "DOXA":
             gray = img_buf.to_gray()
+            erase_polys = _erase.get(img_buf.meta)
+            binary = self._wolfpp(img_buf, gray, erase_polys)
+            if binary is not None:
+                img_buf.buffer = binary
+                img_buf.type = ImageType.BW
+                current_params = self._params_for_frame(img_buf)
+                if self.debug_enabled():
+                    self._dump_debug(img_buf, gray, current_params)
+                return self._finish_doxa(img_buf, current_params, erase_polys)
+            if erase_polys:
+                # Not wolf++ — sauvola, niblack and friends have no notion of
+                # a missing value, so the region is filled with the paper tone
+                # measured around it before thresholding. No halo: every pixel
+                # of it is page content destroyed, and on a stamp that
+                # overlaps text a half-window halo cost 1625 px of real ink to
+                # remove ~25 px of specks.
+                n = _erase.fill_with_paper(
+                    gray, erase_polys, halo_px=0,
+                    roi_polygon=img_buf.meta.get("roi"))
+                if self.debug_enabled():
+                    print(f"[{self.name}] erase: filled {n}px across "
+                          f"{len(erase_polys)} region(s) before binarising",
+                          flush=True)
             try:
                 self.binarizer.initialize(gray)
                 binary = np.empty_like(gray)
@@ -445,30 +574,7 @@ class Binarizer(AbstractImageProcessor):
             if self.debug_enabled():
                 self._dump_debug(img_buf, gray, current_params)
 
-            # Replay params: re-binarize the replay buffer with the same
-            # algorithm at the end of the chain (one threshold over the
-            # final, cleanly-resampled pixels). Window is already in
-            # pixels, k is a plain float — no resolution gymnastics.
-            img_buf.meta["replay_kind"] = "binarize"
-            fam = self._active_family()
-            k_default = 0.0
-            if fam is not None and _FAMILIES[fam].get("k"):
-                k_default = float(getattr(self.options, f"k_{fam}"))
-            img_buf.meta["replay_params"] = {
-                "method": str(self.options.method),
-                "window": int(current_params.get(
-                    "window", self._resolve_window_px(img_buf))),
-                "k": float(current_params.get("k", k_default)),
-                "roi_shrink": int(self.options.roi_shrink),
-                "morpho_close": int(self.options.morpho_close),
-            }
-            self._apply_roi_mask(img_buf)
-            if self.morpho_close_n() > 0:
-                img_buf.buffer = morpho_close(
-                    img_buf.buffer, self.morpho_close_n(),
-                )
-            self._record_stats(img_buf)
-            return img_buf
+            return self._finish_doxa(img_buf, current_params, erase_polys)
 
     def morpho_close_n(self) -> int:
         return int(getattr(self.options, "morpho_close", 0) or 0)

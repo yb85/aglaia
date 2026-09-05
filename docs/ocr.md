@@ -36,7 +36,7 @@ plugin](./processors.md) appears automatically.
 | **apple_vision** | on-device | line-based `VNRecognizeTextRequest`, Latin-first, **no page** — good for the searchable-**PDF** text layer, not for Markdown structure; **default** |
 | **surya** | on-device | Qwen-VL served via `mlx-vlm`; `whole_doc` |
 | **glm** | on-device | VLM served via `mlx-vlm` |
-| **unlimited** | on-device | Baidu Unlimited-OCR (MLX port, in-process); whole-doc, per-page (window=1), DPI-independent |
+| **unlimited** | on-device | Baidu Unlimited-OCR (MLX port, in-process); whole-doc, per-page (window=1), DPI-independent. **Not offered to users yet** — the q4 weights it needs are unpublished, so the card reads *(missing)* on every machine but a developer's. Registered and benchmarked (see [ocr-benchmark](ocr-benchmark.md)); left out of the user-facing engine list until the model ships. |
 | **mistral_cloud** | cloud | Mistral Document AI over HTTPS; reads any script; footnote + header/footer post-processing |
 
 ## Footnote lift (`aglaia/workers/ocr/md_postprocess.py`)
@@ -90,16 +90,22 @@ Both live in `engine.py` (one place for picker, env, and DB key):
 (macOS Keychain / Windows Credential Locker / Linux Secret Service), with
 a `0600` plaintext `<APP_DATA>/.env` fallback when no keychain is reachable
 (`aglaia/app_data/secrets.py`). The key never touches the project DB or the
-config DB. Install with `uv sync --extra cloud`.
+config DB.
 
-**`keyring` ships in that same `cloud` extra**, and the usual dev syncs
-(`--extra dev --extra gui --extra macos`) leave it out — so a source checkout
-can have `mistralai` and no keychain at all, and the key lands in the
-plaintext `.env`. `secrets.keychain_backend()` returns `(False,
-"not_installed")` for that and `(False, "no_backend")` for a real absence of
-any store, and the GUI names which one rather than blaming the OS keychain
-(#107). The shipped macOS app always includes `cloud`, so this only bites
-from source.
+**Both `mistralai` and `keyring` are base dependencies** (#139). They were
+in the `cloud` extra, which the usual dev syncs leave out — so a source
+checkout could have the Cloud card visible and no SDK behind it, or an SDK and
+no keychain, with the key landing in the plaintext `.env`. Cloud OCR and secret
+storage are features of every build: a card that raises `ImportError` the first
+time it is clicked is broken, not optional, and a packaging choice is not
+allowed to decide whether a password is encrypted. `--extra cloud` survives as
+an empty alias so existing commands keep working.
+
+`secrets.keychain_backend()` still separates `(False, "not_installed")` — now
+a damaged environment rather than a missing extra — from `(False,
+"no_backend")`, a real absence of any store (headless Linux with no Secret
+Service). The GUI names which one rather than blaming the OS keychain
+(#107).
 
 ## Mistral batch OCR (async, cheaper)
 
@@ -136,7 +142,20 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
 4. **Jobs tab** — *View → Mistral OCR jobs…* (or the card's **Jobs** pill):
    a zebra table of every Aglaïa job on the account (`batch.jobs.list`,
    newest first); the job's `aglaia_project` metadata is a clickable link
-   that opens that project (close-current confirm).
+   that opens that project (close-current confirm). A **finished** job
+   (`SUCCESS`, `FAILED`, `TIMEOUT_EXCEEDED`, `CANCELLED`) carries a trash
+   button that **dismisses** it: the Mistral Batch API is create / get /
+   list / cancel with **no delete**, so the job itself is permanent account
+   history and the button can only stop showing it. Being a view filter it
+   is reversible — the count says how many are hidden, and *Show dismissed*
+   brings them back with an undo button each. Dismissing also drops the
+   project's own `mistral_batch_jobs` row, which is what makes a job
+   "pending" for **Check result**; leaving it would keep asking about a job
+   the user has just finished with. A live job (`RUNNING` / `QUEUED` /
+   `CANCELLATION_REQUESTED`) gets no button: there is nothing to clear yet,
+   and one beside a running row would read as *cancel*, which it is not.
+   Hidden ids live in the app-data config DB
+   (`KEY_MISTRAL_JOBS_DISMISSED`) — per user, not per project.
 
 The key + SDK are the same `[cloud]` extra as the synchronous path; only
 the submit/poll/fetch calls differ.

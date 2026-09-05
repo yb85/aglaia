@@ -467,6 +467,31 @@ def _is_real_calibration(K) -> bool:
         return False
 
 
+class MissingProcessorError(RuntimeError):
+    """A pipeline names a processor this install does not have.
+
+    Almost always a plugin: uninstalled, switched off, or a pipeline shared
+    with someone who never had it. Raised rather than skipped — a pipeline is
+    a description of what the user wants done, and quietly doing less of it
+    produces output that looks finished and is not.
+
+    `steps` is [(step_name, processor_name), …]; `slugs` guesses the plugin
+    slug from the processor name so the message can name what to install."""
+
+    def __init__(self, steps, pipeline_name: str = ""):
+        self.steps = list(steps)
+        self.pipeline_name = pipeline_name
+        names = ", ".join(sorted({p for _s, p in self.steps}))
+        super().__init__(
+            f"This pipeline uses {names}, which is not available. "
+            f"Install it from the Plugins tab, turn it back on if you "
+            f"switched it off, or remove the step from the pipeline.")
+
+    @property
+    def processors(self) -> list[str]:
+        return sorted({p for _s, p in self.steps})
+
+
 def create_processing_chain(args, log_queue, queue_factory=multiprocessing.Queue, db_path=None):
     """
     Factory to create an IntegratedProcessingChain based on arguments and pipeline def.
@@ -490,7 +515,8 @@ def create_processing_chain(args, log_queue, queue_factory=multiprocessing.Queue
                                          paths=args.options.get("paths"), queue_factory=queue_factory)
 
     elements = []
-    
+    missing: list[tuple[str, str]] = []
+
     print(f"Building pipeline: {pipeline_def.get('name', 'Unknown')}")
     
     pipeline_list = pipeline_def.get("pipeline", [])
@@ -507,7 +533,13 @@ def create_processing_chain(args, log_queue, queue_factory=multiprocessing.Queue
         
         info = _proc_registry.get_processor(proc_name)
         if info is None:
-            print(f"Warning: Unknown processor {proc_name} in pipeline step {step_name}. Skipping.")
+            # NOT skipped. A dropped step means the book is processed as if
+            # that step had never been asked for — three hundred pages that
+            # still carry their stamps, and a printed warning nobody sees. The
+            # common cause is a plugin uninstalled or switched off while a
+            # pipeline still names it, and the user is entitled to be told
+            # that before the run, not to discover it in the output.
+            missing.append((step_name, proc_name))
             continue
         opt_class = info.option_cls
 
@@ -557,6 +589,9 @@ def create_processing_chain(args, log_queue, queue_factory=multiprocessing.Queue
     # replay-stamping step, so users can drop a no-warp pipeline through
     # without touching the flag.
     replay_enabled = bool(pipeline_def.get("replay", True))
+    if missing:
+        raise MissingProcessorError(missing,
+                                    pipeline_def.get("name") or str(pipeline_path))
     return IntegratedProcessingChain(
         elements, num_workers, log_queue, db_path=db_path,
         paths=args.options.get("paths"), queue_factory=queue_factory,

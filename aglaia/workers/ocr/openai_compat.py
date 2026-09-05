@@ -352,6 +352,8 @@ class OpenAiCompatVlmOcr(DirectBlockOCR, OcrEngine):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        # Plain urllib on purpose — see `aglaia/net.py`: this talks to a
+        # server on localhost, where forcing IPv4 could break a ::1 setup.
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as resp:  # noqa: S310
             payload = json.loads(resp.read().decode("utf-8"))
         return payload["choices"][0]["message"]["content"] or ""

@@ -45,10 +45,16 @@ def test_no_override_means_no_tooltip(qapp):
     assert manual_tooltip(None) == ""
 
 
-def test_the_pip_is_small_and_carries_its_reason(qapp):
+def test_the_pip_is_a_glyph_and_carries_its_reason(qapp):
+    """It was a 7 px dot, which was too small to notice AND sat exactly where
+    the next-page chevron is — the two overlapped and the dot lost. Now a
+    `hand` glyph, big enough to read at thumbnail size but still a mark
+    rather than a badge: no background, no border, no text."""
     pip = ManualPip(["curl"])
-    assert pip.width() == pip.SIZE <= 8      # a mark, not a badge
+    assert 14 <= pip.width() == pip.SIZE <= 24
+    assert not pip.pixmap().isNull(), "the hand glyph did not load"
     assert pip.toolTip() == "Hand-tuned: dewarp curl"
+    assert pip.text() == ""
 
 
 def test_a_table_row_marks_only_an_edited_page(qapp):

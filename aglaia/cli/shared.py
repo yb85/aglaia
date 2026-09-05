@@ -76,6 +76,7 @@ def ocr_config(
     parent_dir: Optional[Path],
     input_dpi: Optional[str],
     check_ocr: bool,
+    send_to: Optional[str] = None,
 ) -> "object":
     """Build a CliConfig for `aglaia ocr` — like `run` but with no pipeline /
     workers / force-proc (there is no processing chain). OCR is the point, so a
@@ -95,6 +96,7 @@ def ocr_config(
         input_dpi_force=dpi_force,
         exports=_parse_export_arg(export),
         md_refine=md_refine,
+        send_to=[t for t in (send_to or '').split('+') if t.strip()],
         project_name=project_name,
         parent_dir=Path(parent_dir).expanduser() if parent_dir else None,
         check_ocr=check_ocr,
@@ -118,6 +120,7 @@ def run_config(
     parent_dir: Optional[Path],
     input_dpi: Optional[str],
     check_ocr: bool,
+    send_to: Optional[str] = None,
 ) -> "object":
     from aglaia.workers.cli import (
         CliConfig,
@@ -137,6 +140,7 @@ def run_config(
         input_dpi_force=dpi_force,
         exports=_parse_export_arg(export),
         md_refine=md_refine,
+        send_to=[t for t in (send_to or '').split('+') if t.strip()],
         project_name=project_name,
         parent_dir=Path(parent_dir).expanduser() if parent_dir else None,
         check_ocr=check_ocr,
