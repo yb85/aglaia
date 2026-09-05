@@ -8,6 +8,7 @@
 import cv2
 from dataclasses import dataclass
 from aglaia.ImageBuffer import ImageBuffer, ImageType
+from aglaia.processors import erase as _erase
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.option_specs import _i
 from typing import Optional
@@ -111,5 +112,16 @@ class DPIfixer(AbstractImageProcessor):
                     else:
                         new_roi.append(pt) # Fallback / Passthrough
                 img_buf.meta["roi"] = new_roi
-        
+
+        # Erase regions ride the same resample. The rule in `erase.py` is
+        # "if you transform roi, transform erase on the same line", and this
+        # step did the first and not the second — harmless while every erase
+        # producer ran AFTER the DPI normalise, and wrong the day a stamp
+        # finder was moved in front of it to work at native resolution: its
+        # polygons stayed in pre-resample coordinates, a factor of two out.
+        if img_buf.meta:
+            _erase.carry(img_buf.meta, img_buf.meta,
+                         lambda polys: [[[x * scale_factor, y * scale_factor]
+                                         for x, y in poly] for poly in polys])
+
         return img_buf

@@ -361,3 +361,33 @@ def test_the_erased_region_is_excluded_from_the_statistics():
     changed = int(((counted != excluded) & outside).sum())
     assert changed > 0, ("nothing outside the polygon changed, so the region "
                          "is only being whitened, not excluded")
+
+
+# ── the DPI normalise carries erase polygons through its resample ────
+
+def test_dpifixer_scales_erase_polygons_with_the_image():
+    """A stamp finder placed BEFORE the DPI normalise — to work at native
+    resolution, which is both faster and less noisy than the upsampled page —
+    hands its polygons to a step that resamples the image. `roi` was scaled;
+    `erase` was not, and stayed in pre-resample coordinates, a factor of two
+    out. The rule in erase.py is "if you transform roi, transform erase on the
+    same line"."""
+    from aglaia.processors.DPIfixer import DPIfixer, DPIfixerOption
+    img = np.full((200, 100), 220, np.uint8)
+    buf = ImageBuffer(img, ImageType.GRAY, dpi=150.0)
+    buf.filestem = "t"
+    buf.meta["roi"] = [[10, 10], [90, 10], [90, 190], [10, 190]]
+    erase.add(buf.meta, [[20, 20], [40, 20], [40, 40], [20, 40]])
+
+    out = DPIfixer(DPIfixerOption(min_dpi=300, max_dpi=300)).process(buf)
+    assert out.buffer.shape == (400, 200)                 # 150 → 300 dpi = 2×
+    assert out.meta["roi"][2] == [180, 380]               # roi scaled, as before
+    assert erase.get(out.meta) == [[[40, 40], [80, 40], [80, 80], [40, 80]]]
+
+
+def test_dpifixer_without_erase_is_unchanged():
+    from aglaia.processors.DPIfixer import DPIfixer, DPIfixerOption
+    buf = ImageBuffer(np.full((200, 100), 220, np.uint8), ImageType.GRAY, dpi=150.0)
+    buf.filestem = "t"
+    out = DPIfixer(DPIfixerOption(min_dpi=300, max_dpi=300)).process(buf)
+    assert erase.get(out.meta) == []
