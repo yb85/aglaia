@@ -363,7 +363,7 @@ def _show(d) -> None:
 
 
 def _run_test(d) -> None:
-    from aglaia.gui.PluginsTab import KIND_LABEL_UI  # labels only; no Qt widgets
+    from aglaia.plugin_api import KIND_LABEL_UI
     res = d.check()
     label = KIND_LABEL_UI.get(getattr(res, "kind", ""), "")
     typer.echo(("✓ " if res.ok else "! ") + (f"{label} — " if label and not res.ok else "") + res.message)

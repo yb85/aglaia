@@ -15,6 +15,10 @@ import importlib
 
 import pytest
 
+# `aglaia.gui.__init__` imports the MainWindow, so even this Qt-free module
+# needs Qt on the path; CI without the `gui` extra skips, like every GUI test.
+pytest.importorskip("PySide6")
+
 
 @pytest.fixture()
 def cm(tmp_path, monkeypatch):

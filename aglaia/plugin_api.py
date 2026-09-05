@@ -201,6 +201,18 @@ class CheckResult:
     UNKNOWN = "unknown"
 
 
+#: One word for each failure kind a plugin can report. Deliberately not the
+#: enum's own name: "auth" is our vocabulary, "Wrong credentials" is theirs.
+KIND_LABEL_UI = {
+    "network": "Cannot connect",
+    "auth": "Wrong credentials",
+    "permission": "Not allowed",
+    "server": "Server problem",
+    "config": "Missing setting",
+    "unknown": "Failed",
+}
+
+
 class Destination:
     """Somewhere a finished export goes: a server, a library, a mailbox.
 

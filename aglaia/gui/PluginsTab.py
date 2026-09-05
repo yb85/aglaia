@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
+
+from aglaia.plugin_api import KIND_LABEL_UI
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
@@ -118,18 +120,6 @@ KIND_LABEL = {
     "destinations": "export",
     "processors": "processing",
     "ocr": "OCR",
-}
-
-
-#: One word for each failure kind a plugin can report. Deliberately not the
-#: enum's own name: "auth" is our vocabulary, "Wrong credentials" is theirs.
-KIND_LABEL_UI = {
-    "network": "Cannot connect",
-    "auth": "Wrong credentials",
-    "permission": "Not allowed",
-    "server": "Server problem",
-    "config": "Missing setting",
-    "unknown": "Failed",
 }
 
 

@@ -153,7 +153,7 @@ the code.
   exceptions or design rationale in the UI: say what it is and where it goes,
   and leave the mechanism to the log. 97 strings retranslated; fr_FR complete.
 
-- **`wolf++` is `wolf++` in both passes** (#144). The forward pass mapped it to
+- **`wolf++` is `wolf++` in both passes.** The forward pass mapped it to
   plain Wolf and only the replay used the mask-aware variant, so the two
   passes binarised differently and a stamp erased in one came out with a halo
   in the other. Cost measured marginal.
@@ -173,7 +173,7 @@ the code.
 
 ### Fixed
 
-- **The stamp came back at replay** (#142). `_anchor_erase` guarded on a frame
+- **The stamp came back at replay.** `_anchor_erase` guarded on a frame
   that was never set, so the erase polygons were never mapped back to the
   anchor and the replay binarised the stamp in. Inverse composition through
   the stored transforms replaces the dead guard.
@@ -186,14 +186,14 @@ the code.
   traced at capture resolution was erased at the wrong place after DPI
   normalisation.
 
-- **The erase editor hijacked every other stage** (#143) — it armed on any
+- **The erase editor hijacked every other stage** — it armed on any
   page that had ever stored an erase payload, so dragging a dewarp slider
   moved mask vertices. It arms only on a stage whose geometry carries `erase`.
   **Clicking a handle grabs the handle you clicked**, not the first one in
   range.
 
-- **A processor installed from the store was invisible to the pipeline**
-  (#140), and got no `PluginContext` (#141); the Plugins menu appeared twice.
+- **A processor installed from the store was invisible to the pipeline**,
+  and got no `PluginContext`; the Plugins menu appeared twice.
   **Uninstalling a destination** deleted its files but left it registered, so
   it stayed on offer until restart.
 
