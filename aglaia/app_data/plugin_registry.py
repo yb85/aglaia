@@ -449,8 +449,40 @@ def _write_plugin(kind: str, slug: str, files: dict[str, bytes], *,
         return InstallResult(False, f"could not write the plugin: {e}")
 
     _record(slug, kind, man, source)
+    _accept_entry(kind, dest, man)
     return InstallResult(True, f"{man.name} {man.version} installed.",
                          slug=slug, path=dest, scan=scan)
+
+
+def _accept_entry(kind: str, dest: Path, man: Manifest) -> None:
+    """Record the installed module in the SAME acceptance ledger the drop-in
+    trust gate uses.
+
+    Consent already happened — in the registry dialog, or by typing the trust
+    sentence for an archive. Asking again on the next launch would be asking
+    about a decision the user has just made, and a warning that fires when
+    nothing is wrong is one people learn to dismiss.
+
+    But it goes in the ledger rather than bypassing it, so the two paths keep
+    one source of truth: the sha is recorded, and a plugin whose file changes
+    on disk afterwards still reverts to pending and re-asks.
+
+    `processors` and `ocr` only — a destination is loaded by `destinations.py`
+    from its own manifest and never enters this table."""
+    if kind not in ("processors", "ocr"):
+        return
+    entry = dest / man.entry
+    if not entry.is_file():
+        return
+    try:
+        from . import db as cfg
+        from .plugins import sha256_file
+        with cfg.session() as conn:
+            cfg.acknowledge_plugin(conn, kind, entry, sha256_file(entry))
+            conn.commit()
+    except Exception as e:  # noqa: BLE001 — a plugin that installs but needs
+        # one extra confirmation is a nuisance; a failed install is worse.
+        print(f"[plugins] could not pre-accept {man.slug}: {e}")
 
 
 # ── the installed record ──────────────────────────────────────────────
@@ -505,6 +537,24 @@ def is_disabled(slug: str) -> bool:
     return bool(installed_record(slug).get("disabled"))
 
 
+def _forget_entry(kind: str, dest: Path) -> None:
+    """Drop the acceptance row when a plugin is removed.
+
+    Otherwise a later install of a DIFFERENT plugin at the same path inherits
+    consent the user gave to the old one."""
+    try:
+        from . import db as cfg
+        from .plugins import _manifest_entry
+        entry = _manifest_entry(dest)
+        if entry is None:
+            return
+        with cfg.session() as conn:
+            cfg.forget_plugin(conn, entry)
+            conn.commit()
+    except Exception:
+        pass
+
+
 def uninstall(slug: str) -> InstallResult:
     """Remove the code, the settings, the scratch dir and the secrets.
 
@@ -516,6 +566,10 @@ def uninstall(slug: str) -> InstallResult:
     for k in ([kind] if kind else list(KINDS)):
         d = installed_root(k) / slug
         if d.is_dir():
+            # Before the files go: the acceptance row is keyed by the entry
+            # module's path, and once the directory is gone there is nothing
+            # left to read the manifest from.
+            _forget_entry(k, d)
             shutil.rmtree(d, ignore_errors=True)
             removed.append(str(d))
     try:

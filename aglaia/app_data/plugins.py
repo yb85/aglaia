@@ -57,11 +57,39 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _iter_files() -> list[tuple[str, Path]]:
-    """All importable ``.py`` files across the typed plugin dirs.
+def _manifest_entry(d: Path) -> Path | None:
+    """The one module a store-installed plugin declares, or None.
 
-    Skips dunder/private files (``__init__``, ``_helpers`` …) so a plugin
-    can ship private support modules without each one tripping the gate."""
+    Store installs land as ``<kind>/<slug>/`` with a manifest beside the entry
+    module; a hand-dropped plugin is a loose ``.py``. Both are real, and this
+    is the only place that has to know the difference."""
+    man = d / "aglaia-plugin.toml"
+    if not man.is_file():
+        return None
+    try:
+        import tomllib
+        with man.open("rb") as fh:
+            entry = str((tomllib.load(fh).get("plugin") or {}).get("entry", ""))
+    except Exception:
+        return None
+    if not entry or "/" in entry or "\\" in entry or not entry.endswith(".py"):
+        return None
+    p = d / entry
+    return p.resolve() if p.is_file() else None
+
+
+def _iter_files() -> list[tuple[str, Path]]:
+    """Every importable plugin module, in both shapes it can arrive in.
+
+    A plugin gets here two ways, and until #140 only one of them was looked
+    at. `glob("*.py")` finds a file dropped into ``<APP_DATA>/plugins/
+    processors/``; it does not descend, so a plugin installed from the store —
+    which lands in ``processors/<slug>/`` — was invisible. StampRemover
+    installed, appeared in the Plugins tab, and never showed up in the
+    pipeline editor's element list.
+
+    Skips dunder/private files (``__init__``, ``_helpers`` …) so a plugin can
+    ship private support modules without each one tripping the gate."""
     out: list[tuple[str, Path]] = []
     for kind in KINDS:
         d = plugins_dir(kind)
@@ -69,6 +97,12 @@ def _iter_files() -> list[tuple[str, Path]]:
             if p.name.startswith("_"):
                 continue
             out.append((kind, p.resolve()))
+        for sub in sorted(x for x in d.iterdir() if x.is_dir()) if d.is_dir() else []:
+            if sub.name.startswith((".", "_")):
+                continue
+            entry = _manifest_entry(sub)
+            if entry is not None:
+                out.append((kind, entry))
     return out
 
 
@@ -128,9 +162,20 @@ def accepted_for_load(kind: str) -> list[Path]:
 
 
 def _ensure_on_path(kind: str) -> None:
-    d = str(plugins_dir(kind))
-    if d not in sys.path:
-        sys.path.insert(0, d)
+    """Put every directory a plugin module can live in on `sys.path`.
+
+    By NAME, not by path: spawn re-imports a worker's modules by module name,
+    so a path-only import would unpickle fine in the parent and fail in every
+    worker. A store-installed plugin sits one level deeper, in its own slug
+    directory, so that directory goes on the path too."""
+    roots = [plugins_dir(kind)]
+    d = plugins_dir(kind)
+    if d.is_dir():
+        roots += [x for x in sorted(d.iterdir())
+                  if x.is_dir() and not x.name.startswith((".", "_"))]
+    for r in roots:
+        if str(r) not in sys.path:
+            sys.path.insert(0, str(r))
 
 
 def import_accepted(kind: str) -> list[str]:
