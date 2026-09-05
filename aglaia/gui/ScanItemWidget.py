@@ -57,70 +57,6 @@ from aglaia.gui.colors import (
 ThumbLoader = Callable[[int, int], Optional[bytes]]
 
 
-class ElidedLabel(QLabel):
-    """A label that shortens its text with an ellipsis when squeezed.
-
-    `shrinkable=False` says this text is the widget's IDENTITY and must not be
-    the thing that gives way — its minimum equals its wanted width, so a tight
-    layout takes the space from a neighbour instead. Used for the scan number,
-    which elided to "Scan 0…" and then to nothing when it had to compete with
-    the DPI tag in a narrow card.
-    """
-
-    def __init__(self, text="", parent=None, *, shrinkable=True):
-        super().__init__(text, parent)
-        self._full_text = text
-        self._shrinkable = bool(shrinkable)
-        # Preferred, not Ignored. Ignored made Qt disregard `sizeHint`
-        # entirely — it existed to stop a long filename from pushing the card
-        # off-screen, and that label is gone. It also meant a label could be
-        # handed zero width and elide its text away to nothing, silently.
-        # Shrinking is now governed by `minimumSizeHint` instead, which is
-        # what that is for.
-        from PySide6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Policy.Preferred,
-                           QSizePolicy.Policy.Preferred)
-        self.setMinimumWidth(0)
-
-    def sizeHint(self):  # noqa: N802 — Qt API
-        """The width the full text WANTS.
-
-        It used to return width 0 unconditionally, which was invisible while
-        every user of this class also had the Ignored size policy — Qt does
-        not consult sizeHint then. The moment one of them asked for a real
-        policy, the layout handed it zero width and `elidedText` returned the
-        empty string: a label that silently displayed nothing.
-
-        `minimumSizeHint` stays at zero, so it can still be squeezed and
-        elided; this only says what it would like."""
-        metrics = QFontMetrics(self.font())
-        # +2: `horizontalAdvance` is a ROUNDED advance, not an upper bound, so
-        # a label sized to exactly that value still elides — the text needs
-        # 62 px, the label is 62 px wide, and Qt renders "Scan 0…". Two pixels
-        # of slack is cheaper than a fight with font rounding.
-        return QSize(metrics.horizontalAdvance(self._full_text) + 2,
-                     metrics.height())
-
-    def minimumSizeHint(self):  # noqa: N802 — Qt API
-        if not self._shrinkable:
-            return self.sizeHint()
-        return QSize(0, QFontMetrics(self.font()).height())
-
-    def setFullText(self, text):
-        self._full_text = text
-        self.updateGeometry()      # the wanted width just changed
-        self.update_elided_text()
-
-    def update_elided_text(self):
-        metrics = QFontMetrics(self.font())
-        elided = metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, self.width())
-        super().setText(elided)
-
-    def resizeEvent(self, event):
-        self.update_elided_text()
-        super().resizeEvent(event)
-
-
 class _ClickableLabel(QLabel):
     """QLabel that emits `clicked` on left mouse press. Used so a
     thumbnail can open the debug viewer without a separate button."""
@@ -452,35 +388,33 @@ class ScanItemWidget(QWidget):
         self.del_btn.setToolTip(self.tr("Discard scan"))
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.scan_id))
 
-        self.name_label = ElidedLabel(
-            self.tr("Scan {idx}").format(idx=f"{idx:03d}"), shrinkable=False)
-        # Font set programmatically, NOT in the stylesheet. QSS applies a font
-        # at polish time; `QFontMetrics(self.font())` does not see it, so an
-        # elide measured against the regular weight cut text that is painted
-        # bold — "Scan 002" became "Scan 0…" in a label wide enough for it.
-        _nf = self.name_label.font()
-        _nf.setBold(True)
-        _nf.setPixelSize(13)
-        self.name_label.setFont(_nf)
+        # A plain QLabel. This used to be an ElidedLabel, which had to
+        # predict the text's width with `QFontMetrics` — and every way of
+        # doing that was wrong in a different way: QSS applies its font after
+        # `setFont`, so the measurement used one font and the paint used
+        # another; and on a Retina display the fractional advances round the
+        # other way, so a label sized to a computed 65 px still lost its last
+        # character. Qt sizes a plain QLabel from the font it will actually
+        # paint with. "Scan 006" is eight characters — there was never
+        # anything to elide.
+        self.name_label = QLabel(
+            self.tr("Scan {idx}").format(idx=f"{idx:03d}"))
+        self.name_label.setStyleSheet("font-weight: bold; font-size: 13px;")
 
         # The filestem was the widest thing in the header and the least
         # useful: it repeats the project name on every card and differs only
-        # in the number already shown to its left.
-        self.path_label = ElidedLabel(raw_filestem)
+        # in the number already shown to its left. Kept as an attribute
+        # because callers still read `path_label.text()`.
+        self.path_label = QLabel(raw_filestem)
         self.path_label.setVisible(False)
-        from PySide6.QtWidgets import QSizePolicy as _SP2
-        self.path_label.setSizePolicy(_SP2.Policy.Ignored,
-                                      _SP2.Policy.Preferred)
 
-        # A second label rather than markup inside the first: ElidedLabel
-        # elides PLAIN text, so an HTML span in it renders as nothing.
-        # Elidable, and the first thing to give way: a reference value, not
-        # the card's identity.
-        self.dpi_label = ElidedLabel("")
-        self.dpi_label.setStyleSheet(f"color: {COLOR_FONT_MUTED};")
-        _df = self.dpi_label.font()
-        _df.setPixelSize(10)
-        self.dpi_label.setFont(_df)
+        # A second label rather than markup inside the first: a QLabel with
+        # rich text would need `setTextFormat` and re-lays out differently.
+        # Shown whole or not at all — `_fit_header` hides it when the card is
+        # too narrow for both. "139 dp" is worse than no tag.
+        self.dpi_label = QLabel("")
+        self.dpi_label.setStyleSheet(
+            f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
 
         self.rerun_btn = make_icon_button(
             "refresh-cw", size=20, icon_size=13, color=COLOR_FONT_MUTED,
@@ -1417,17 +1351,20 @@ class ScanItemWidget(QWidget):
         # The step counter goes with it. "[11/11]" was the same on every card
         # of a finished scan, and the cards that are NOT finished already say
         # so through the spinner and the dim.
-        self.dpi_label.setFullText(
+        self.dpi_label.setText(
             self.tr("{dpi} dpi").format(dpi=int(round(self.raw_dpi)))
             if self.raw_dpi else "")
         # No stage suffix. "[11/11]" was identical on every finished card,
         # "(Input)" said what the thumbnail underneath already shows, and both
         # were wide enough to elide the scan number itself out of a narrow
         # card — which is how the number went missing entirely.
-        final_text = status_text
-        if self.dimmed:
-            final_text += self.tr(" (No page detected)")
-        self.name_label.setFullText(final_text)
+        # The "no page detected" note is a TOOLTIP, not appended text: it is
+        # three words longer than the card is wide, and appending it is what
+        # pushed the scan number out of the header in the first place. The
+        # card is already visually dimmed, which is the at-a-glance signal.
+        self.name_label.setText(status_text)
+        self.header_widget.setToolTip(
+            self.tr("No page detected in this scan") if self.dimmed else "")
         self._fit_header()
 
         # The QSS below only changes when `dimmed` flips. setStyleSheet
