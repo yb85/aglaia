@@ -191,6 +191,34 @@ class EditCanvas(ZoomCanvas):
         cx, cy = self._barycentre(self._layouts[i])
         return self._to_view(cx, cy)
 
+    def _nearest_vertex(self, pos, polys) -> Optional[tuple]:
+        """`(polygon index, vertex index)` of the handle NEAREST the click.
+
+        Nearest, not first-within-range. The old rule walked the polygons in
+        order and took the first vertex inside the grab radius, which is only
+        the right answer when handles are further apart than that radius. On a
+        traced stamp outline they are not — a circle of twenty vertices at
+        working zoom has neighbours well inside it — so a click reliably
+        grabbed whichever came earlier in the list, appearing as a constant
+        few-millimetre offset up and to the left.
+
+        Euclidean, not `manhattanLength`, so the grab area is the circle the
+        handle looks like rather than a diamond that is a third smaller on the
+        diagonals.
+        """
+        target = QPointF(pos)
+        limit = float(GRAB_PX * 2) ** 2
+        best = None
+        best_d = limit
+        for li, poly in enumerate(polys or []):
+            for i, (x, y) in enumerate(poly):
+                d = self._to_view(x, y) - target
+                d2 = d.x() * d.x() + d.y() * d.y()
+                if d2 <= best_d:
+                    best_d = d2
+                    best = (li, i)
+        return best
+
     def _badge_hit(self, pos) -> Optional[tuple]:
         """``("add", None)`` / ``("delete", i)`` under `pos`, else None."""
         target = QPointF(pos)
@@ -272,24 +300,21 @@ class EditCanvas(ZoomCanvas):
                     # start of a drag on whatever sits under it.
                     self.layout_action.emit(hit[0], hit[1])
                     return
-                for li, poly in enumerate(self._layouts):
-                    for i, (x, y) in enumerate(poly):
-                        if (self._to_view(x, y)
-                                - QPointF(pos)).manhattanLength() <= GRAB_PX * 2:
-                            self._drag_layout = li
-                            self._drag_vertex = i
-                            self.update()
-                            return
+                near = self._nearest_vertex(pos, self._layouts)
+                if near is not None:
+                    self._drag_layout, self._drag_vertex = near
+                    self.update()
+                    return
             end = self._rot_end()
             if end is not None and (end - QPointF(pos)).manhattanLength() <= GRAB_PX * 2:
                 self._drag_rot = True
                 return
             if self._poly:
-                for i, (x, y) in enumerate(self._poly):
-                    if (self._to_view(x, y) - QPointF(pos)).manhattanLength() <= GRAB_PX * 2:
-                        self._drag_vertex = i
-                        self.update()
-                        return
+                near = self._nearest_vertex(pos, [self._poly])
+                if near is not None:
+                    _, self._drag_vertex = near
+                    self.update()
+                    return
         # Not on a handle — let the base class do its pin/unpin PiP thing.
         super().mousePressEvent(ev)
 
