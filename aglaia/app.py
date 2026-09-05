@@ -506,7 +506,8 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
         reprocess_active_scans,
     )
     from aglaia.workers.Initializer import (
-        create_processing_chain, initialize, load_pipeline_def,
+        MissingProcessorError, create_processing_chain, initialize,
+        load_pipeline_def,
     )
     from aglaia.workers.PDFprocessor import create_pdf_from_images
     from aglaia.storage.db import open_db
@@ -637,7 +638,17 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
 
     # ── chain ────────────────────────────────────────────────────
     log_queue = multiprocessing.Queue()
-    chain = create_processing_chain(args, log_queue, db_path=str(db_path))
+    try:
+        chain = create_processing_chain(args, log_queue, db_path=str(db_path))
+    except MissingProcessorError as e:
+        # A traceback at the splash screen tells the user nothing they can
+        # act on. Name what is missing and where to get it.
+        from PySide6.QtWidgets import QMessageBox
+        splash.close()
+        QMessageBox.critical(
+            None, "Cannot start this pipeline",
+            f"{e}\n\nMissing: {', '.join(e.processors)}")
+        return 1
     chain.start()
     state = {"chain": chain, "log_queue": log_queue,
              "pipeline_version_id": pipeline_version_id, "args": args}
@@ -659,9 +670,15 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
                 state["chain"].stop()
             except Exception:
                 pass
-            new_chain = create_processing_chain(
-                state["args"], state["log_queue"], db_path=str(db_path),
-            )
+            try:
+                new_chain = create_processing_chain(
+                    state["args"], state["log_queue"], db_path=str(db_path),
+                )
+            except MissingProcessorError as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(window, "Cannot apply this pipeline",
+                                    str(e))
+                return
             new_chain.start()
             state["chain"] = new_chain
             state["pipeline_version_id"] = new_pvid
@@ -757,9 +774,14 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
             dropped = old.hard_stop()
         except Exception:
             dropped = 0
-        new_chain = create_processing_chain(
-            state["args"], state["log_queue"], db_path=str(db_path),
-        )
+        try:
+            new_chain = create_processing_chain(
+                state["args"], state["log_queue"], db_path=str(db_path),
+            )
+        except MissingProcessorError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(window, "Cannot restart the pipeline", str(e))
+            return dropped
         new_chain.start()
         state["chain"] = new_chain
         def _swap():

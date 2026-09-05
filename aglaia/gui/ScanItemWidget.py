@@ -307,6 +307,8 @@ class ScanItemWidget(QWidget):
     # Emits (scan_id, node_id) when the round stage-toggle is clicked —
     # host flips the step's per-page disable + reruns the page.
     step_toggle_requested = Signal(int, int)
+    #: Re-run this one scan from its raw capture.
+    rerun_requested = Signal(int)
 
     def __init__(self, *, scan_id: int, idx: int, raw_node_id: int, raw_image_id: int,
                  raw_filestem: str, pipeline_steps: list[str],
@@ -407,24 +409,51 @@ class ScanItemWidget(QWidget):
         from aglaia.gui.widgets import make_icon_button
         # Scan-level delete — keep the trash icon (this really removes the
         # scan). Layout-level hiding uses eye / eye-off elsewhere.
+        # Muted, not COLOR_ERROR. A trash icon on every card in a 300-card
+        # grid is a lot of red for something the user is not being warned
+        # about; it goes red on hover, where it is actually about to happen.
         self.del_btn = make_icon_button(
-            "trash-2", size=20, icon_size=14, color=COLOR_ERROR,
-            hover_bg=COLOR_ERROR_BG_SOFT,
+            "trash-2", size=20, icon_size=14, color=COLOR_FONT_MUTED,
+            hover_color=COLOR_ERROR, hover_bg=COLOR_ERROR_BG_SOFT,
         )
         self.del_btn.setToolTip(self.tr("Discard scan"))
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.scan_id))
 
-        self.name_label = ElidedLabel(self.tr("Scan #{idx}").format(idx=idx))
+        self.name_label = ElidedLabel(self.tr("Scan {idx}").format(idx=f"{idx:03d}"))
         self.name_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        # ElidedLabel ignores its natural width by default — that stopped a
+        # long filename from pushing the card off-screen, back when the
+        # header carried one. "Scan 002" is bounded, and with the width
+        # ignored and no stretch it collapsed to zero and elided to nothing.
+        from PySide6.QtWidgets import QSizePolicy as _SP
+        self.name_label.setSizePolicy(_SP.Policy.Preferred,
+                                      _SP.Policy.Preferred)
 
+        # The filestem was the widest thing in the header and the least
+        # useful: it repeats the project name on every card and differs only
+        # in the number already shown to its left.
         self.path_label = ElidedLabel(raw_filestem)
-        self.path_label.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 9px;")
-        self.path_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.path_label.setVisible(False)
+
+        # A second label rather than markup inside the first: ElidedLabel
+        # elides PLAIN text, so an HTML span in it renders as nothing.
+        self.dpi_label = QLabel("")
+        self.dpi_label.setStyleSheet(
+            f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+
+        self.rerun_btn = make_icon_button(
+            "refresh-cw", size=20, icon_size=13, color=COLOR_FONT_MUTED,
+            hover_color=COLOR_PRIMARY,
+        )
+        self.rerun_btn.setToolTip(self.tr("Re-run this scan"))
+        self.rerun_btn.clicked.connect(
+            lambda: self.rerun_requested.emit(self.scan_id))
 
         header_layout.addWidget(self.del_btn)
-        header_layout.addWidget(self.name_label, 1)
-        header_layout.addSpacing(10)
-        header_layout.addWidget(self.path_label, 1)
+        header_layout.addWidget(self.name_label)
+        header_layout.addWidget(self.dpi_label)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self.rerun_btn)
         self.layout.addWidget(self.header_widget)
 
         self.thumbs_container = QWidget()
@@ -1157,11 +1186,13 @@ class ScanItemWidget(QWidget):
         place_overlay(btn, container, width // 2 - 11, 4)
 
     def _add_manual_pip(self, container, width, stem: str) -> None:
-        """A quiet dot on a layout the user tuned by hand (M9 #102).
+        """The hand mark on a layout the user tuned (M9 #102).
 
-        Top-RIGHT, so it never collides with the disabled band's mini-map
-        (top edge, full width, 3 px) or the nav buttons. Absent when the page
-        carries no override, which is the common case."""
+        Bottom edge, CENTRED: the eye toggle owns the bottom left and the OCR
+        badge the bottom right, so the middle is the one place on this
+        thumbnail that is always free. It was top-right, which is where the
+        next-page chevron is — the two overlapped and the mark lost. Absent
+        when the page carries no override, which is the common case."""
         provider = self.manual_fields_provider
         if provider is None:
             return
@@ -1173,7 +1204,8 @@ class ScanItemWidget(QWidget):
             return
         from aglaia.gui.widgets import ManualPip, place_overlay
         pip = ManualPip(fields, parent=container)
-        place_overlay(pip, container, int(width) - ManualPip.SIZE - 5, 6)
+        place_overlay(pip, container, (int(width) - ManualPip.SIZE) // 2,
+                      int(container.height()) - ManualPip.SIZE - 4)
 
     def _add_disabled_band(self, container, width, data, states) -> None:
         """Top-edge mini-map of the layout's disabled steps. Hidden when
@@ -1274,7 +1306,7 @@ class ScanItemWidget(QWidget):
         self.refresh_composite()
 
     def update_header(self):
-        status_text = self.tr("Scan #{idx}").format(idx=self.idx)
+        status_text = self.tr("Scan {idx}").format(idx=f"{self.idx:03d}")
         target_idx = self.current_history_idx
 
         root_data = self.items.get(self.raw_filestem)
@@ -1307,12 +1339,20 @@ class ScanItemWidget(QWidget):
             except (ValueError, IndexError):
                 suffix = self.tr(" ({step})").format(step=current_type)
 
-        # Source-DPI tag — surfaces inconsistencies between the
-        # importer's claim and what the chain receives (e.g. a PDF
-        # extracted at 72 dpi when the user expected 300).
-        dpi_tag = (self.tr(" · {dpi} dpi").format(dpi=int(round(self.raw_dpi)))
-                   if self.raw_dpi else "")
-        final_text = f"{status_text}{dpi_tag}{suffix}"
+        # Source-DPI tag — surfaces inconsistencies between the importer's
+        # claim and what the chain receives (e.g. a PDF extracted at 72 dpi
+        # when the user expected 300). Smaller and grey: it is a reference
+        # value, not the card's identity, and at card density the two must
+        # not compete.
+        #
+        # The step counter goes with it. "[11/11]" was the same on every card
+        # of a finished scan, and the cards that are NOT finished already say
+        # so through the spinner and the dim.
+        self.dpi_label.setText(
+            self.tr("{dpi} dpi").format(dpi=int(round(self.raw_dpi)))
+            if self.raw_dpi else "")
+        tail = suffix if current_type == "raw" else ""
+        final_text = f"{status_text}{tail}"
         if self.dimmed:
             final_text += self.tr(" (No page detected)")
         self.name_label.setFullText(final_text)

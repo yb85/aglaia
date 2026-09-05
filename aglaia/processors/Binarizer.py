@@ -127,13 +127,12 @@ def _build_binarizer_options() -> Dict[str, Any]:
     )
     opts["erase_grow"] = _i(
         2, 0, 32,
-        "Erase masks (meta.erase — e.g. from StampRemover): grow the polygon "
-        "by N px when whitening it after binarisation. The mirror of "
-        "roi_shrink: it takes with it any one-pixel rim the binariser "
-        "produced at the boundary.", advanced=True)
+        "Grow each erased region by N px when whitening it after "
+        "binarisation. The mirror of roi_shrink: it takes with it any "
+        "one-pixel rim left at the boundary.", advanced=True)
     opts["roi_shrink"] = _i(
         2, 0, 50,
-        "If meta.roi is set, erode the mask N iterations before applying.",
+        "Erode the page outline N iterations before applying it.",
         advanced=True,
         visible_when={"method": _ALL_DOXA_METHODS},
     )

@@ -98,12 +98,29 @@ def _iter_files() -> list[tuple[str, Path]]:
                 continue
             out.append((kind, p.resolve()))
         for sub in sorted(x for x in d.iterdir() if x.is_dir()) if d.is_dir() else []:
-            if sub.name.startswith((".", "_")):
+            if sub.name.startswith((".", "_")) or _is_disabled(sub.name):
                 continue
             entry = _manifest_entry(sub)
             if entry is not None:
                 out.append((kind, entry))
     return out
+
+
+def _is_disabled(slug: str) -> bool:
+    """Whether the user switched this plugin off in the Plugins tab.
+
+    `plugin_registry.is_disabled` and the "Disabled" badge both existed; NOTHING
+    read them. Turning a plugin off changed the label and nothing else — its
+    processor stayed in the element list and its code kept running, which is
+    the worst kind of switch: one the user believes they have thrown.
+
+    Imported here rather than at module scope: `plugin_registry` imports this
+    module for `sha256_file`."""
+    try:
+        from aglaia.app_data.plugin_registry import is_disabled
+        return bool(is_disabled(slug))
+    except Exception:
+        return False
 
 
 def scan_pending() -> list[PluginCandidate]:
@@ -149,6 +166,7 @@ def accepted_for_load(kind: str) -> list[Path]:
     with _db.session() as conn:
         accepted = _db.accepted_plugins(conn)
     out: list[Path] = []
+    root = plugins_dir(kind).resolve()
     for key, rec in accepted.items():
         if rec["kind"] != kind:
             continue
@@ -157,6 +175,15 @@ def accepted_for_load(kind: str) -> list[Path]:
             continue
         if sha256_file(p) != rec["sha256"]:
             continue
+        # A store-installed plugin lives one level down, in its slug's own
+        # directory. This is the gate the "Disabled" switch acts through —
+        # `_iter_files` is only the trust scan, and gating there would have
+        # left a disabled plugin loading exactly as before.
+        try:
+            if p.parent.resolve() != root and _is_disabled(p.parent.name):
+                continue
+        except OSError:
+            pass
         out.append(p)
     return out
 

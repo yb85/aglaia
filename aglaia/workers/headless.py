@@ -37,6 +37,7 @@ from PIL import Image
 
 from aglaia.app_data import db as app_db
 from aglaia.workers.Initializer import (
+    MissingProcessorError,
     create_processing_chain,
     initialize,
     load_pipeline_def,
@@ -957,7 +958,15 @@ def run(cfg: CliConfig) -> int:
 
     # Chain
     log_queue = multiprocessing.Queue()
-    chain = create_processing_chain(args, log_queue, db_path=str(project_file))
+    try:
+        chain = create_processing_chain(args, log_queue,
+                                        db_path=str(project_file))
+    except MissingProcessorError as e:
+        # Exit before touching the project. A batch that runs to completion
+        # with a step quietly missing is the expensive failure: the pages
+        # look processed and are not.
+        print(f"\n{e}", file=sys.stderr)
+        raise SystemExit(2)
     chain.start()
 
     # Start draining log_queue NOW, on its own thread — before any feeding —

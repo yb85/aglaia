@@ -89,6 +89,12 @@ def discover() -> list[Found]:
         slug = d.name
         if not SLUG_RE.match(slug):
             continue
+        try:
+            from aglaia.app_data.plugin_registry import is_disabled
+            if is_disabled(slug):
+                continue
+        except Exception:
+            pass
         man = _read_manifest(d / "aglaia-plugin.toml")
         plugin = man.get("plugin") or {}
         entry_name = str(plugin.get("entry") or "")

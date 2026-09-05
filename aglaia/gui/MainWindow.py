@@ -1033,6 +1033,7 @@ class MainWindow(QMainWindow):
         widget.step_states_provider = self.cell_disable_states
         widget.manual_fields_provider = self.manual_fields_for_layout
         widget.step_toggle_requested.connect(self.toggle_step_disabled)
+        widget.rerun_requested.connect(self._on_rerun_scan)
         # Visibility (eye) still writes branches.trashed_at so gallery +
         # table see the same hide state. (selection_changed is vestigial.)
         widget.visibility_changed.connect(self._on_card_visibility_changed)
@@ -1078,6 +1079,22 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_scans_pin_bottom", False):
             return
         self._scans_scroll.verticalScrollBar().setValue(hi)
+
+    def _on_rerun_scan(self, scan_id: int) -> None:
+        """Re-run one scan from its raw capture.
+
+        The reprocess controls act on the whole project, which is the wrong
+        granularity for the common case: one page came out wrong, and rerunning
+        three hundred to fix it is a coffee break. Manual per-page tuning
+        survives the rerun — that is the point of storing it — so this replays
+        the chain with the user's corrections in place."""
+        try:
+            self._rerun_scans_from_raw({int(scan_id)})
+        except Exception as e:  # noqa: BLE001
+            self._on_log_line("error", f"rerun of scan {scan_id} failed: "
+                                       f"{type(e).__name__}: {e}")
+            self.toast(self.tr("Could not re-run this scan. See the Log tab."),
+                       6000)
 
     def _rerun_scans_from_raw(self, scan_ids) -> None:
         """Reprocess these scans from their raw image.
@@ -4985,6 +5002,7 @@ class MainWindow(QMainWindow):
             t.debug_requested.connect(self._open_debug_viewer)
             t.trash_requested.connect(self._on_table_trash_requested)
             t.step_toggle_requested.connect(self.toggle_step_disabled)
+            t.rerun_requested.connect(self._on_rerun_scan)
             # Drag-grip reorder reuses the grid card-drop handler.
             t.card_dropped.connect(self._on_card_dropped)
             # Seed the thumb-row height from the current zoom slider so a
