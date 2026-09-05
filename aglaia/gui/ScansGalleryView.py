@@ -200,10 +200,22 @@ class ScansGalleryView(QWidget):
         self._btn_down = _ChevronButton("chevron-down", self._host)
         self._btn_left = _ChevronButton("chevron-left", self._host)
         self._btn_right = _ChevronButton("chevron-right", self._host)
-        self._btn_up.clicked.connect(self.go_up)
-        self._btn_down.clicked.connect(self.go_down)
+        # Shift-click jumps to the end of the run — the same "extend all the
+        # way" convention as a shift-click in a list. It reuses the control
+        # that is already there: two more floating buttons would sit over the
+        # one part of this view that should stay clear, the page itself.
+        self._btn_up.clicked.connect(
+            lambda: (self.go_first() if self._shift_held() else self.go_up()))
+        self._btn_down.clicked.connect(
+            lambda: (self.go_last() if self._shift_held() else self.go_down()))
         self._btn_left.clicked.connect(self.go_left)
         self._btn_right.clicked.connect(self.go_right)
+        self._btn_up.setToolTip(
+            self.tr("Previous scan — shift-click or Home for the first"))
+        self._btn_down.setToolTip(
+            self.tr("Next scan — shift-click or End for the last"))
+        self._btn_left.setToolTip(self.tr("Previous stage"))
+        self._btn_right.setToolTip(self.tr("Next stage"))
         for b in (self._btn_up, self._btn_down, self._btn_left, self._btn_right):
             b.raise_()
         self._refresh_chevrons()
@@ -329,6 +341,34 @@ class ScansGalleryView(QWidget):
             self._scan_idx += 1
             self._stage_idx = self._carry_stage_across_scan(self._stage_idx)
             self._present()
+
+    def go_first(self) -> None:
+        """Jump to the first scan. Home, or ⌘↑, or shift-click the chevron."""
+        self._jump_to(0)
+
+    def go_last(self) -> None:
+        """Jump to the last scan."""
+        self._jump_to(len(self._scans) - 1)
+
+    def _jump_to(self, idx: int) -> None:
+        # Same stage-carrying rule as a single step, so arriving at the end
+        # of a 300-page book does not also throw away the stage the user was
+        # looking at.
+        self._follow_scan = None
+        if not self._scans:
+            return
+        idx = max(0, min(int(idx), len(self._scans) - 1))
+        if idx == self._scan_idx:
+            return
+        self._scan_idx = idx
+        self._stage_idx = self._carry_stage_across_scan(self._stage_idx)
+        self._present()
+
+    @staticmethod
+    def _shift_held() -> bool:
+        from PySide6.QtWidgets import QApplication
+        return bool(QApplication.keyboardModifiers()
+                    & Qt.KeyboardModifier.ShiftModifier)
 
     def _carry_stage_across_scan(self, prev_idx: int) -> int:
         """Hold the current stage when scrolling scan-to-scan if the new
@@ -830,7 +870,15 @@ class ScansGalleryView(QWidget):
     # ── keyboard nav ──────────────────────────────────────────────
     def keyPressEvent(self, ev):  # noqa: N802
         k = ev.key()
-        if k in (Qt.Key.Key_Left, Qt.Key.Key_A):
+        # ⌘↑ / ⌘↓ as well as Home / End: on a Mac keyboard Home and End
+        # usually need Fn, and ⌘↑/⌘↓ is the native "start / end of document"
+        # idiom, so it is what the user's hands try first.
+        jump = ev.modifiers() & Qt.KeyboardModifier.ControlModifier
+        if k == Qt.Key.Key_Home or (jump and k == Qt.Key.Key_Up):
+            self.go_first()
+        elif k == Qt.Key.Key_End or (jump and k == Qt.Key.Key_Down):
+            self.go_last()
+        elif k in (Qt.Key.Key_Left, Qt.Key.Key_A):
             self.go_left()
         elif k in (Qt.Key.Key_Right, Qt.Key.Key_D):
             self.go_right()

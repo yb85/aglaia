@@ -92,6 +92,19 @@ The three views surface it differently, all via `MainWindow.cell_disable_states`
 - **Gallery** (`ScansGalleryView`) — a toggle (replacing the star) on the
   current stage; left/right still walks stages.
 
+  **Navigation.** Arrows or WASD step: up/down between scans, left/right
+  between stages of the current scan. **Home / End** jump to the first / last
+  scan, and so do **⌘↑ / ⌘↓** — Home and End need Fn on most Mac keyboards,
+  and ⌘↑/⌘↓ is the native start/end-of-document idiom there. With the mouse,
+  **shift-click the up/down chevron**: the same "all the way" convention as a
+  shift-click in a list, reusing a control already on screen rather than
+  putting two more floating buttons over the page, which is the one part of
+  this view that should stay clear. The chevron tooltips name the shortcuts,
+  because a keyboard-only feature is an invisible one.
+
+  A jump carries the current stage across, exactly as a single step does —
+  arriving at page 300 must not also discard the stage being examined.
+
 ## Debug view / per-page editor (`DebugViewerTab`)
 
 Click a stage thumb and a closable tab walks that page's chain, root → leaf.
