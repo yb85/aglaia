@@ -774,6 +774,21 @@ _RENDERERS: dict[str, callable] = {
 }
 
 
+def _guarded(fn, processor_name: str):
+    def _run(img, parent, meta):
+        try:
+            panes = fn(img, parent, meta)
+        except Exception as e:  # noqa: BLE001 — someone else's code
+            print(f"[debug-renderer] {processor_name}: "
+                  f"{type(e).__name__}: {e}")
+            canvas = _label_bar(_to_bgr(img),
+                                f"{processor_name} could not draw this step")
+            return [{"url": _png_data_url(canvas), "label": "output"}]
+        return panes if isinstance(panes, list) and panes else \
+            _default_renderer(img, parent, meta)
+    return _run
+
+
 # ── DB helpers + entry point ──────────────────────────────────────
 
 
@@ -846,16 +861,30 @@ def _resolve_renderer(proc: str):
     to its class name; only then fall back to ``_default_renderer``. Without
     the alias step its overlay (e.g. the layout page bboxes) silently shows
     "no debug renderer for this step"."""
-    renderer = _RENDERERS.get(proc)
+    renderer = _lookup(proc)
     if renderer is None and proc:
         try:
             from aglaia.processors.registry import get_processor
             info = get_processor(proc)
             if info is not None:
-                renderer = _RENDERERS.get(info.processor_cls.__name__)
+                renderer = _lookup(info.processor_cls.__name__)
         except Exception:
             renderer = None
     return renderer or _default_renderer
+
+
+def _lookup(name: str):
+    """Plugin renderers first — a plugin IS that processor."""
+    if not name:
+        return None
+    try:
+        from aglaia.plugin_api import DEBUG_RENDERER_REGISTRY
+        fn = DEBUG_RENDERER_REGISTRY.get(name)
+        if fn is not None:
+            return _guarded(fn, name)
+    except Exception:
+        pass
+    return _RENDERERS.get(name)
 
 
 def _render_one(conn: sqlite3.Connection, node: dict) -> list[dict]:

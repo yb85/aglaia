@@ -330,6 +330,81 @@ def register_window(slug: str, window: PluginWindow) -> PluginWindow:
 DESTINATION_REGISTRY: dict[str, type[Destination]] = {}
 
 
+# ── debug renderers ───────────────────────────────────────────────────
+#
+# The debug view's renderer table is keyed by processor name and was closed to
+# plugins: a plugin processor got "no debug renderer for this step", which for
+# a processor whose whole job is deciding WHERE to act is the one thing the
+# user needs to see. A renderer takes the step's image, its parent (or None)
+# and its meta, and returns the same list of panes a built-in one does.
+
+#: processor name -> renderer. The host merges this over its own table.
+DEBUG_RENDERER_REGISTRY: dict = {}
+
+
+def register_debug_renderer(processor_name: str, fn):
+    """Draw the debug pane for one processor.
+
+    ``fn(img, parent, meta) -> [{"url": …, "label": …, "geom": …}]``. Build the
+    panes with `debug_pane`; put anything the user should be able to GRAB into
+    `geom`, and the debug view paints handles over it.
+    """
+    DEBUG_RENDERER_REGISTRY[str(processor_name)] = fn
+    return fn
+
+
+def debug_pane(image, label: str, *, erase=None, frame_wh=None,
+               origin=(0, 0)) -> dict:
+    """One pane of the debug view, from a BGR image.
+
+    Pass `erase` — a list of polygons in the step's own frame — to make them
+    editable: the debug view draws each one with a trash badge at its centre
+    and an add badge in the corner, stores what the user leaves behind as a
+    manual override, and reruns the page. Read it back with
+    `manual_erase(buf.meta, frame_wh=…)`.
+    """
+    from aglaia.storage.debug_renderers import _geom, _png_data_url
+    pane = {"url": _png_data_url(image), "label": str(label)}
+    if erase is not None:
+        pane["geom"] = _geom(image, origin=origin, composite=image,
+                             erase=[[[float(x), float(y)] for x, y in poly]
+                                    for poly in erase] or None,
+                             frame_wh=list(frame_wh) if frame_wh else None)
+    return pane
+
+
+def manual_erase(meta: dict, *, frame_wh) -> Optional[list]:
+    """The user's hand-edited erase set for this page, or None.
+
+    None means "no override — decide for yourself". An EMPTY LIST means the
+    user deleted every region, which is a decision and must be honoured: a
+    mask removed by hand must not come back on the next run.
+
+    Validated against the frame it was drawn on, like every other spatial
+    override — a polygon applied to an image of a different size would be
+    silently shifted onto the wrong pixels.
+    """
+    payload = ((meta or {}).get("manual_overrides") or {})
+    if not isinstance(payload, dict) or "erase" not in payload:
+        payload = ((meta or {}).get("manual_overrides_all") or {}).get("") or {}
+    if not isinstance(payload, dict) or "erase" not in payload:
+        return None
+    stored = payload.get("erase_frame_wh")
+    if stored and frame_wh:
+        try:
+            if (int(stored[0]) != int(frame_wh[0])
+                    or int(stored[1]) != int(frame_wh[1])):
+                return None
+        except (TypeError, ValueError, IndexError):
+            pass
+    out = []
+    for poly in (payload.get("erase") or []):
+        pts = [[float(x), float(y)] for x, y in poly]
+        if len(pts) >= 3:
+            out.append(pts)
+    return out
+
+
 def register_destination(cls: type[Destination]) -> type[Destination]:
     """Class decorator that puts a `Destination` in the registry."""
     if not getattr(cls, "name", ""):
@@ -346,7 +421,9 @@ __all__ = [
     "AbstractImageProcessor", "AbstractProcessorOption", "ReplayTrait",
     "option_bool", "option_enum", "option_float", "option_int", "option_str",
     "to_gray", "to_rgb", "to_bw", "is_binary",
-    "add_erase", "get_erase",
+    "add_erase", "get_erase", "manual_erase",
+    # debug view
+    "register_debug_renderer", "DEBUG_RENDERER_REGISTRY", "debug_pane",
     # networking
     "http_client", "http_get",
     # ocr
