@@ -462,9 +462,28 @@ that.
 
 * **Disable** — a checkbox in the Plugins tab. Keeps the files, stops importing
   it. The first thing to try when a plugin is suspected of breaking a run.
-* **Update** — the tab shows when the index carries a newer version;
-  updating re-runs the full verify + consent for the *new* hashes. A registry
-  plugin never updates silently.
+  Enforced in `plugins.accepted_for_load` and `destinations.discover`, which is
+  where loading actually happens; it existed as a label and a stored flag for a
+  while with nothing reading either, so a switched-off plugin kept running.
+* **Update** — an `UPDATE` pill and an **Update to X** button appear on an
+  installed card when the index carries a **strictly newer** version. Not
+  merely different: a registry that has gone backwards must not offer a
+  downgrade, and re-offering the same version forever is how an update badge
+  becomes wallpaper. Versions compare numerically, so 1.10.0 beats 1.9.0.
+
+  **An update is not uninstall-then-install.** Uninstall deletes the plugin's
+  data directory, its settings and its secrets — for the stamp remover that is
+  every hand-traced stamp, for an export plugin the stored SMTP password.
+  `update_from_registry` writes the code directory over the top (the same
+  atomic swap an install uses) and touches nothing else.
+
+  Consent is not re-asked — the user is updating something they already chose,
+  from the same reviewed registry — but the manifest is re-scanned and a
+  version declaring **new capabilities is refused**, naming them. "I trusted it
+  when it only read files" is not consent to a version that has learned to use
+  the network; installing it deliberately is still available.
+
+  The old module stays imported for the session, so the tab says to restart.
 * **Uninstall** — removes the code directory, `data/<slug>/`, its keychain
   namespace, and its `plugins` rows. It leaves nothing behind, and the dialog
   says exactly what it is about to delete.

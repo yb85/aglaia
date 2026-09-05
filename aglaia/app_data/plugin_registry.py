@@ -507,6 +507,65 @@ def _record(slug: str, kind: str, man: Manifest, source: str) -> None:
         pass
 
 
+def _version_tuple(v: str) -> tuple:
+    """A comparable version. Unparseable parts sort as 0 rather than raising —
+    a plugin with an odd version string must not break the update check for
+    every other one."""
+    out = []
+    for part in str(v or "0").split("."):
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        out.append(int(digits) if digits else 0)
+    return tuple(out) + (0,) * (4 - len(out))
+
+
+def update_available(slug: str, registry_version: str) -> bool:
+    """Is the registry's copy newer than what is installed?
+
+    Strictly newer, not merely different: a registry that has gone BACKWARDS
+    — a plugin pulled and an older one published under the same slug — should
+    not be offered as an update, and re-offering the same version forever is
+    how an update badge becomes wallpaper."""
+    rec = installed_record(slug)
+    if not rec:
+        return False
+    return _version_tuple(registry_version) > _version_tuple(rec.get("version"))
+
+
+def update_from_registry(entry, *, on_progress=None) -> InstallResult:
+    """Replace a plugin's CODE, keeping everything it owns.
+
+    Not uninstall-then-install. Uninstall deletes the plugin's data directory,
+    its settings and its secrets — which for the stamp remover means every
+    hand-traced stamp in the library, and for a destination means the SMTP
+    password. Updating must not cost the user their work; `_write_plugin`
+    already swaps the code directory atomically and touches nothing else, so
+    an update is simply an install over the top.
+
+    Consent is not re-asked: the user is updating something they already chose,
+    from the same reviewed registry. The manifest is re-scanned though, and a
+    version that declares NEW capabilities is refused rather than waved
+    through — "I trusted it when it only read files" is not consent to a
+    version that has learned to use the network.
+    """
+    before = installed_record(entry.slug)
+    old_caps = {k for k, v in (before.get("capabilities") or {}).items() if v}
+    new_caps = {k for k, v in (entry.capabilities or {}).items() if v}
+    gained = sorted(new_caps - old_caps)
+    if gained:
+        return InstallResult(
+            False,
+            f"{entry.name} {entry.version} asks for more than the version you "
+            f"have: {', '.join(gained)}. Remove it and install the new "
+            f"version if you want to allow that.",
+            slug=entry.slug)
+    return install_from_registry(entry, on_progress=on_progress)
+
+
 def installed_record(slug: str = "") -> dict:
     from . import db as cfg
     try:

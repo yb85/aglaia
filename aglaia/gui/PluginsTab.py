@@ -739,6 +739,9 @@ class PluginsTab(QWidget):
                              COLOR_PRIMARY))
         if unreviewed:
             tags.addWidget(_pill(self.tr("UNREVIEWED"), COLOR_ERROR))
+        newer = self._newer_version(item["slug"])
+        if newer:
+            tags.addWidget(_pill(self.tr("UPDATE"), COLOR_PRIMARY))
         tags.addStretch(1)
         v.addLayout(tags)
 
@@ -773,11 +776,53 @@ class PluginsTab(QWidget):
             cfg = QPushButton(self.tr("Settings…"))
             cfg.clicked.connect(lambda _=False, s=slug: self._configure(s))
             row.addWidget(cfg)
+        if newer:
+            up = QPushButton(self.tr("Update to {v}").format(v=newer.version))
+            up.setStyleSheet("font-weight: 600;")
+            up.clicked.connect(lambda _=False, e=newer: self._update(e))
+            row.addWidget(up)
         rm = QPushButton(self.tr("Uninstall"))
         rm.clicked.connect(lambda _=False, s=slug: self._uninstall(s))
         row.addWidget(rm)
         v.addLayout(row)
         return card
+
+    def _newer_version(self, slug: str):
+        """The registry entry for `slug` if it is newer than what is
+        installed, else None. Reads the index already fetched — an update
+        check must not become a second network round trip per card."""
+        from aglaia.app_data import plugin_registry as reg
+        index = getattr(self, "_index", None)
+        entry = index.get(slug) if index is not None else None
+        if entry is None:
+            return None
+        return entry if reg.update_available(slug, entry.version) else None
+
+    def _update(self, entry) -> None:
+        """Update in place, keeping everything the plugin owns.
+
+        Not uninstall-then-install: uninstall deletes the plugin's data
+        directory, which for the stamp remover is every hand-traced stamp and
+        for a destination is the stored password. Nobody expects an update to
+        cost them that."""
+        from aglaia.app_data import plugin_registry as reg
+        from aglaia.workers import destinations as dest
+        res = reg.update_from_registry(entry)
+        if not res.ok:
+            QMessageBox.warning(
+                self, self.tr("Could not update {name}").format(
+                    name=entry.name), res.message)
+            return
+        # The old module is still imported; the new code only takes effect on
+        # the next launch, and saying so is better than the user wondering why
+        # a fixed plugin still misbehaves.
+        dest.forget(entry.slug)
+        dest.reset_for_tests()
+        self.refresh()
+        QMessageBox.information(
+            self, self.tr("{name} updated").format(name=entry.name),
+            self.tr("Updated to {v}. Restart Aglaïa for it to take effect.")
+            .format(v=entry.version))
 
     def _available_card(self, entry) -> QWidget:
         card = _card()
