@@ -9,6 +9,7 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | [server.md](./server.md) | `aglaia server` HTTP job API — endpoints, auth, job lifecycle, Mistral-batch backoff, capability download URLs, completion email, admin panel, storage layout |
 | [architecture.md](./architecture.md) | Process tree, IntegratedProcessingChain, log_queue protocol |
 | [pipeline.md](./pipeline.md) | YAML pipeline schema, template substitution, default pipeline annotated |
+| [processors-review.md](./processors-review.md) | **Architecture review** — where processors bleed into each other, what the pipeline still keys on a processor's NAME, and the processor-protocol plan (REQUIRES/PROVIDES, EDITABLE, render_debug, summary) |
 | [processors.md](./processors.md) | DPIfixer, SkewFinder, PageDetector, Binarizer, PageDewarper — options, behavior, extension points, **drop-in user plugins** |
 | [imagebuffer.md](./imagebuffer.md) | Standard image envelope, meta keys, write logic |
 | [gui.md](./gui.md) | Capture GUI (aglaia), threads, key/voice bindings, calibration buttons |
