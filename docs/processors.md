@@ -632,15 +632,40 @@ Return semantics:
 - Set `buffer.children = [child1, child2, ...]` (or return a list) → chain branches; each child re-enters at the next step.
 - Return `None` → branch stops, warning logged.
 
-## Drop-in user plugins (no repo edit)
+## User plugins (no repo edit)
 
-Users add processors (and OCR engines) without modifying the repo by
-dropping a `*.py` file into the per-user plugin dirs:
+Users add processors (and OCR engines) without modifying the repo, in either of
+two shapes. Both end up in the same registry and the same trust ledger.
+
+**Installed from the store** — the normal path. Lands as a directory with a
+manifest naming its entry module:
+
+```
+<APP_DATA>/plugins/processors/<slug>/aglaia-plugin.toml
+<APP_DATA>/plugins/processors/<slug>/<entry>.py
+```
+
+**Dropped in by hand** — a loose module, for a one-off you wrote yourself:
 
 ```
 <APP_DATA>/plugins/processors/   AbstractImageProcessor subclass (SUMMARY + OPTIONS)
 <APP_DATA>/plugins/ocr/          OcrEngine subclass decorated @register
 ```
+
+### A store-installed processor gets a `PluginContext`
+
+`self.ctx` — settings, secrets, its own `data_dir`, a log line — exactly as a
+destination does. Use it for anything the plugin needs to keep: a model, a
+cache, a library of reference images.
+
+It is a **lazy class property**, not a value fixed at registration, because
+processors are constructed inside spawned workers from a pickled
+`ChainElement`; a context built in the parent would never arrive. Each process
+that asks builds its own, which is also what SQLite wants.
+
+A hand-dropped loose module gets `ctx is None`. It never declared a manifest,
+so it never declared it wanted settings or secrets — and there is no slug to
+namespace them under. A plugin that needs a context needs a manifest.
 
 (`<APP_DATA>` = `aglaia/app_data.plugins_dir()`; on macOS
 `~/Library/Application Support/Aglaia/plugins/…`.)

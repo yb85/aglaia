@@ -66,13 +66,31 @@ def test_every_menu_method_it_calls_is_defined(window):
         assert callable(getattr(window, name, None)), f"missing {name}"
 
 
-def test_the_plugin_menu_is_absent_when_nothing_contributes_one(window):
+def _menu_titles(window):
+    return [m.title() for m in window.menuBar().findChildren(type(
+        window.menuBar().addMenu("x")))]
+
+
+def test_the_plugins_menu_exists_even_with_no_plugin_windows(window):
+    """It always carries "Manage plugins…", and a menu that appears only once
+    a plugin happens to contribute a window is a menu nobody can learn."""
     from aglaia.plugin_api import WINDOW_REGISTRY
     WINDOW_REGISTRY.clear()
     window._build_menu_bar()
-    titles = [m.title() for m in window.menuBar().findChildren(type(
-        window.menuBar().addMenu("x")))]
-    assert "Plugins" not in titles
+    assert "Plugins" in _menu_titles(window)
+
+
+def test_there_is_exactly_one_way_into_the_plugins_tab(window):
+    """It was in View as well, so the menu bar carried two identical entries
+    opening the same tab."""
+    from aglaia.plugin_api import WINDOW_REGISTRY
+    WINDOW_REGISTRY.clear()
+    window._build_menu_bar()
+    hits = [a.text() for m in window.menuBar().findChildren(type(
+                window.menuBar().addMenu("x")))
+            for a in m.actions()
+            if "plugin" in a.text().lower()]
+    assert len(hits) == 1, f"several ways in: {hits}"
 
 
 def test_a_contributed_window_gets_a_menu_entry(window, monkeypatch):

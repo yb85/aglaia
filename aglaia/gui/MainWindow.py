@@ -813,9 +813,6 @@ class MainWindow(QMainWindow):
             self.tr("Mistral OCR jobs…"), None,
             lambda: self.open_mistral_jobs_tab()))
         view_menu.addAction(_act(
-            self.tr("Plugins…"), None,
-            lambda: self.open_plugins_tab()))
-        view_menu.addAction(_act(
             self.tr("Close Tab"), QKeySequence.StandardKey.Close,
             self._close_current_tab))
         view_menu.addSeparator()
@@ -833,9 +830,10 @@ class MainWindow(QMainWindow):
             view_menu.addAction(a)
             self._view_mode_actions[_mode] = a
 
-        # Help menu — docs link, diagnostics, bug report, about.
-        # Plugin-contributed windows, grouped under the owning plugin's name
-        # so two plugins cannot collide even with the same window title.
+        # Plugins menu — contributed windows grouped under the owning plugin's
+        # name (so two plugins cannot collide even with the same window title),
+        # plus the single way into the Plugins tab. It used to be reachable
+        # from View as well, which put two identical entries in the menu bar.
         self._build_plugin_menu(mb, _act)
 
         help_menu = mb.addMenu(self.tr("Help"))
@@ -3943,15 +3941,16 @@ class MainWindow(QMainWindow):
         afterwards appears at the next launch. Rebuilding a native menu bar
         live is possible and is not worth the failure modes for something that
         happens once."""
+        WINDOW_REGISTRY: dict = {}
         try:
             from aglaia.plugin_api import WINDOW_REGISTRY
             from aglaia.workers import plugin_windows
             plugin_windows.load_all()
         except Exception as e:  # noqa: BLE001 — a plugin must not cost the menu
             print(f"[plugin-windows] not loaded: {type(e).__name__}: {e}")
-            return
-        if not WINDOW_REGISTRY:
-            return
+        # Built unconditionally: it always carries "Manage plugins…", and a
+        # menu that exists only once a plugin happens to contribute a window
+        # is a menu the user cannot learn. Plugin windows appear above it.
         menu = mb.addMenu(self.tr("Plugins"))
         for slug, windows in sorted(WINDOW_REGISTRY.items()):
             sub = menu.addMenu(slug)
@@ -3960,7 +3959,8 @@ class MainWindow(QMainWindow):
                     win.title, None,
                     lambda _=False, s=slug, w=win:
                         self._open_plugin_window(s, w)))
-        menu.addSeparator()
+        if WINDOW_REGISTRY:
+            menu.addSeparator()
         menu.addAction(_act(self.tr("Manage plugins…"), None,
                             lambda: self.open_plugins_tab()))
 
