@@ -258,6 +258,19 @@ written against the current drop-in contract keeps working.
 
 ---
 
+## 5b. Metadata a plugin writes
+
+Every key a plugin puts in `buf.meta` must be declared at import time so a warp knows what to do with it:
+
+```python
+from aglaia.plugin_api import MetaKind, declare_meta
+declare_meta("stamps_found", MetaKind.SCALAR)
+```
+
+`POLYGON` / `POLYGONS` / `POINTS` are carried through every geometric step by the host; `SCALAR` / `LABEL` / `OPAQUE` are copied;
+an **undeclared key is dropped at the first warp** with a log line. `add_erase` writes the pre-declared `erase` key, so a
+plugin that only erases declares nothing. Schema and rationale: [imagebuffer.md](imagebuffer.md).
+
 ## 6. Allowed imports
 
 A plugin may import:

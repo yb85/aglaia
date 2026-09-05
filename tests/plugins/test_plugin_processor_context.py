@@ -32,6 +32,9 @@ MANIFEST = ('[plugin]\nslug = "ctx-probe"\nname = "Ctx probe"\n'
 
 SOURCE = '''
 from aglaia.processors.abstraction import AbstractImageProcessor
+from aglaia.plugin_api import MetaKind, declare_meta
+for _k in ("saw_ctx", "slug", "data_dir"):
+    declare_meta(_k, MetaKind.LABEL)
 
 
 class CtxProbe(AbstractImageProcessor):

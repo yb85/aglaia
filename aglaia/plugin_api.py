@@ -330,6 +330,19 @@ def register_window(slug: str, window: PluginWindow) -> PluginWindow:
 DESTINATION_REGISTRY: dict[str, type[Destination]] = {}
 
 
+# ── metadata schema ───────────────────────────────────────────────────
+#
+# Every key a plugin writes to `buf.meta` must say what it is, so a warp knows
+# whether to transform it. Declare at import time:
+#
+#     declare_meta("stamps_found", MetaKind.SCALAR)
+#
+# A POLYGON / POLYGONS key is carried through every geometric step by the
+# host; a SCALAR / LABEL / OPAQUE key is copied; an undeclared key is dropped
+# at the first warp, with a log line. See docs/imagebuffer.md.
+from aglaia.meta_schema import MetaKind, declare_meta  # noqa: E402,F401
+
+
 # ── debug renderers ───────────────────────────────────────────────────
 #
 # The debug view's renderer table is keyed by processor name and was closed to
@@ -422,6 +435,8 @@ __all__ = [
     "option_bool", "option_enum", "option_float", "option_int", "option_str",
     "to_gray", "to_rgb", "to_bw", "is_binary",
     "add_erase", "get_erase", "manual_erase",
+    # metadata
+    "MetaKind", "declare_meta",
     # debug view
     "register_debug_renderer", "DEBUG_RENDERER_REGISTRY", "debug_pane",
     # networking

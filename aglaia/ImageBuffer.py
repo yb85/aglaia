@@ -18,6 +18,43 @@ class ImageType(Enum):
     GRAY = "GRAY"
     COLOR = "COLOR"
 
+class Meta(dict):
+    """`ImageBuffer.meta`: a dict that checks its keys against the schema.
+
+    Reads are plain dict reads. Writes report an undeclared key — once per
+    process, as a printed line in production and a `KeyError` under
+    `AGLAIA_META_STRICT=1`, which the tests set — so a new coordinate key
+    cannot be added without saying what it is, and a warp can never be asked to
+    carry something it does not understand (see `aglaia/meta_schema.py`).
+
+    A dict subclass, not a wrapper: it pickles across `spawn` unchanged,
+    `json.dumps` accepts it, `copy.deepcopy` preserves it, and every
+    `meta["roi"]` in the code base keeps working.
+    """
+
+    def __setitem__(self, key, value):
+        _check_key(key)
+        super().__setitem__(key, value)
+
+    def setdefault(self, key, default=None):
+        _check_key(key)
+        return super().setdefault(key, default)
+
+    def update(self, *args, **kwargs):
+        for k in dict(*args, **kwargs):
+            _check_key(k)
+        super().update(*args, **kwargs)
+
+    def __reduce__(self):
+        # Pickle as a plain dict rebuilt into Meta: no per-instance state.
+        return (Meta, (dict(self),))
+
+
+def _check_key(key) -> None:
+    from aglaia.meta_schema import check_key
+    check_key(str(key), where="ImageBuffer.meta")
+
+
 class ImageBuffer:
     """Standardized object for image data exchange."""
     def __init__(self, buffer, type: ImageType, dpi: float = 72.0, path: str = None, parent: 'ImageBuffer' = None, filestem: str = None, out_dir: str = None, parent_stem: str = None,
@@ -52,7 +89,19 @@ class ImageBuffer:
                  except: pass
 
         self.children = [] # List of child ImageBuffers (e.g. layouts)
-        self.meta = {} # Metadata dict (ROI, OCR text, etc.)
+        self.meta = {}  # per-buffer metadata; see aglaia/meta_schema.py
+
+    # `meta` is a `Meta` — a dict that knows the schema. Assigning a plain dict
+    # (a processor's `img_buf.meta = {}`, the chain's `json.loads(meta_json)`)
+    # wraps it, so every write site gets the undeclared-key check without
+    # changing.
+    @property
+    def meta(self) -> "Meta":
+        return self._meta
+
+    @meta.setter
+    def meta(self, value) -> None:
+        self._meta = value if isinstance(value, Meta) else Meta(value or {})
 
     def __repr__(self):
         return f"<ImageBuffer {self.type.value} {self.buffer.shape} @ {self.dpi}dpi>"
