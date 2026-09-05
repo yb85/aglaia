@@ -175,21 +175,46 @@ def test_each_region_takes_its_own_local_paper_level():
 
 
 def test_a_wolf_binarize_leaves_no_blob_where_the_stamp_was():
-    """End to end, through the real binarizer: the stamp is gone and it did
-    not leave a rim behind."""
+    """End to end, through the real binarizer.
+
+    Three things, and the third is the one this test got wrong for a while.
+    The erased region is white. The page just outside it is UNTOUCHED — this
+    used to assert the opposite, that a band outside the polygon must also be
+    white, which passed only because the fill extended half a Wolf window
+    beyond it and wiped the text line above the stamp with it. And the
+    binarizer invents no rim of its own along the boundary, which is the real
+    "no blob" requirement and is measured against the same page binarized
+    without any erase at all.
+    """
     pytest.importorskip("doxapy")
     img = _stamped_page()
-    buf = ImageBuffer(img.copy(), ImageType.GRAY, dpi=300.0)
-    buf.filestem = "t"
-    erase.add(buf.meta, [[85, 95], [215, 95], [215, 185], [85, 185]])
-    out = Binarizer(BinarizerOption(method="wolf", window_px_wolf=30,
-                                    k_wolf=0.25)).process(buf)
-    bw = out.buffer
-    # The erased region is pure white …
+    poly = [[85, 95], [215, 95], [215, 185], [85, 185]]
+
+    def _binarize(with_erase):
+        buf = ImageBuffer(img.copy(), ImageType.GRAY, dpi=300.0)
+        buf.filestem = "t"
+        if with_erase:
+            erase.add(buf.meta, poly)
+        return Binarizer(BinarizerOption(method="wolf", window_px_wolf=30,
+                                         k_wolf=0.25)).process(buf).buffer
+
+    bw = _binarize(True)
+    ref = _binarize(False)
+
+    # 1. the erased region is pure white
     assert bw[100:180, 90:210].min() == 255
-    # … and so is a ring just outside it: no rim.
-    ring = bw[88:92, 80:220]
-    assert ring.min() == 255, "a dark rim survived at the erase boundary"
+
+    # 2. the text line immediately above the polygon survives. `_stamped_page`
+    #    rules a line every 20 px, so rows 90-96 are text, and the polygon
+    #    starts at y=95 — a halo would take it.
+    above = bw[88:94, 20:280]
+    assert (above < 128).sum() > 100, "the text line above the stamp was eaten"
+
+    # 3. nothing dark appears outside the polygon that was not there before
+    outside = np.ones_like(bw, bool)
+    outside[95:186, 85:216] = False
+    invented = ((bw < 128) & (ref >= 128) & outside).sum()
+    assert invented == 0, f"{invented} px of rim invented at the boundary"
 
 
 def test_the_erased_region_is_white_even_without_doxapy():

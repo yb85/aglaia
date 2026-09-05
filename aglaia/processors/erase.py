@@ -69,10 +69,13 @@ import numpy as np
 
 META_KEY = "erase"
 
-#: How far outside the polygon the pre-binarize paper fill extends, when no
-#: window size is known. Half a Wolf window is the real requirement; this is
-#: the floor for callers that have no window to ask about.
-DEFAULT_HALO_PX = 6
+#: How far outside the polygon the pre-binarize paper fill extends by default.
+#: ZERO, deliberately. Every pixel of halo is page content destroyed — on a
+#: stamp that overlaps text, a 33 px halo cost 1625 px of real ink to remove
+#: ~25 px of specks. The fill is the local paper tone, not white, so there is
+#: no artificial edge for a halo to insure against. Callers that genuinely
+#: want a wider erase should widen the POLYGON, where the user can see it.
+DEFAULT_HALO_PX = 0
 
 
 def get(meta: Optional[dict]) -> list[list[list[float]]]:

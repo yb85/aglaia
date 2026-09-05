@@ -445,13 +445,27 @@ class Binarizer(AbstractImageProcessor):
             gray = img_buf.to_gray()
             erase_polys = _erase.get(img_buf.meta)
             if erase_polys:
-                # Half a window plus a safety margin: Wolf's window has to be
-                # able to sit centred on the polygon edge and still see only
-                # paper on the erased side, or it marks a ring along it.
-                halo = max(_erase.DEFAULT_HALO_PX,
-                           self._resolve_window_px(img_buf) // 2 + 4)
+                # NO halo. This used to fill half a Wolf window beyond the
+                # polygon — 33 px at the default window — on the theory that
+                # the window must be able to sit centred on the edge and see
+                # only paper on the erased side. Measured on a page where the
+                # stamp overlaps text, that cost 1625 px of REAL INK to remove
+                # about 25 px of specks: a 40:1 trade against the user.
+                #
+                # The theory was wrong because the fill is not white. It is
+                # the paper tone measured around each region, so a window
+                # straddling the boundary sees paper inside and page outside
+                # — which is the ordinary situation everywhere else on the
+                # page, not an artificial edge. The halo was insuring against
+                # a hard white patch that this code stopped producing.
+                #
+                # It also made the forward pass disagree with replay, which
+                # punches exactly the polygon out of its keep-mask: the same
+                # stamp came out erased wider on one path than the other.
+                # Widening is now the plugin's `margin_mm`, where the user
+                # can see it and set it.
                 n = _erase.fill_with_paper(
-                    gray, erase_polys, halo_px=halo,
+                    gray, erase_polys, halo_px=0,
                     roi_polygon=img_buf.meta.get("roi"))
                 if self.debug_enabled():
                     print(f"[{self.name}] erase: filled {n}px across "
