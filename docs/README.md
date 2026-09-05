@@ -14,6 +14,7 @@ Detailed docs for the Aglaïa project. Start at the project root `CLAUDE.md` for
 | [gui.md](./gui.md) | Capture GUI (aglaia), threads, key/voice bindings, calibration buttons |
 | [calibration.md](./calibration.md) | Camera calibration workflow, DPI calibration, camera_params.json |
 | [configuration.md](./configuration.md) | Config layers (defaults / YAML / CLI), `args.options` shape, path resolution |
+| [ui-writing.md](./ui-writing.md) | **Writing for the user** — the UI/log register split, measured length budgets, error slots, case & punctuation, the do-not-write list |
 | [development.md](./development.md) | Env setup, module map, multiprocessing constraints, adding processors, conventions |
 | [storage.md](./storage.md) | M0 SQLite schema: tables, branches, query cookbook |
 | [ocr.md](./ocr.md) | OCR engine interface + registry, bundled engines (Apple Vision/Document, Surya, PaddleOCR-VL, Mistral cloud), shared DPI / confidence knobs, cloud key storage |

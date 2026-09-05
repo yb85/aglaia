@@ -76,6 +76,7 @@ export default defineConfig({
             { label: 'ImageBuffer', slug: 'docs/reference/imagebuffer' },
             { label: 'Storage', slug: 'docs/reference/storage' },
             { label: 'APP_DATA', slug: 'docs/reference/app_data' },
+            { label: 'Writing for the user', slug: 'docs/reference/ui-writing' },
             { label: 'Theme', slug: 'docs/reference/theme' },
             { label: 'Internationalization', slug: 'docs/reference/i18n' },
           ],
