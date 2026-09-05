@@ -966,11 +966,19 @@ class DebugViewerWidget(QWidget):
         skew = stored.get("skew_deg")
         if skew is None:
             skew = geom.get("skew_deg")
-        if geom.get("erase") is not None or stored.get("erase") is not None:
-            # An erase set from ANY processor, plugin ones included. Same
-            # editor as the layout set — several polygons in one frame, each
-            # with a trash badge, plus an add badge — because it is the same
-            # gesture and the user should not have to learn it twice.
+        if geom.get("erase") is not None:
+            # Only the row whose renderer OFFERS an erase set. Gating on the
+            # stored payload as well was wrong: `_stored` returns the whole
+            # branch's overrides, so the moment one erase existed every stage
+            # of that branch took this path — the ROI editor on PageDetector
+            # and the quad editor on TrapezoidalCorrection were replaced by
+            # it, and a drag there stored erase polygons measured on THAT
+            # stage's frame. `manual_erase` then rejected them for a frame
+            # mismatch, so the mask stopped responding and looked stuck.
+            #
+            # Same editor as the layout set — several polygons in one frame,
+            # each with a trash badge, plus an add badge — because it is the
+            # same gesture and the user should not have to learn it twice.
             #
             # A stored [] is not "nothing stored": it is the user having
             # deleted every region, and it must win over what the processor
@@ -1278,7 +1286,9 @@ class DebugViewerWidget(QWidget):
         key = self._row_key(row)
         fields = self._STAGE_FIELDS.get(key[2] if key else "", ())
         stored = dict(self._stored(row))
-        if stored.get("erase") is not None:
+        geom = (self._overlay_geom[row]
+                if 0 <= row < len(self._overlay_geom) else {}) or {}
+        if stored.get("erase") is not None and geom.get("erase") is not None:
             fields = tuple(fields) + self._ERASE_FIELDS
         if "layouts" in fields and self._trunk_stored(row).get("layouts"):
             stored["layouts"] = True
@@ -1291,7 +1301,10 @@ class DebugViewerWidget(QWidget):
         if key is None:
             return
         fields = self._STAGE_FIELDS.get(key[2], ())
-        if self._stored(row).get("erase") is not None:
+        _g = (self._overlay_geom[row]
+              if 0 <= row < len(self._overlay_geom) else {}) or {}
+        if (self._stored(row).get("erase") is not None
+                and _g.get("erase") is not None):
             fields = tuple(fields) + self._ERASE_FIELDS
         if not fields:
             return

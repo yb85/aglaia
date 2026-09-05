@@ -341,10 +341,20 @@ def scan_source(source: str, man: Optional[Manifest] = None) -> ScanResult:
 
 def scan_plugin_dir(directory: Path,
                     man: Optional[Manifest] = None) -> ScanResult:
-    """Scan the entry module and every private support module beside it."""
+    """Scan the entry module and every private support module beside it.
+
+    Tests are excluded. CONTRIBUTING asks every submission to ship
+    `tests/test_<slug>.py`, and a test necessarily imports `pytest`, `sys` and
+    whatever it is exercising — so scanning them refused every plugin that
+    followed the instructions. They are also never imported by the app: only
+    the manifest's entry module and its private siblings are, and this scan
+    exists to say what the RUNNING code can reach.
+    """
     directory = Path(directory)
     merged = ScanResult()
-    files = sorted(directory.rglob("*.py"))
+    files = [f for f in sorted(directory.rglob("*.py"))
+             if "tests" not in f.relative_to(directory).parts
+             and not f.name.startswith("test_")]
     if not files:
         merged.error = "no Python in the plugin directory"
         return merged
