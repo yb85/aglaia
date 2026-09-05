@@ -166,7 +166,7 @@ a stamp remover), `ocr` (engines), `destinations` (export plugins).
 | `aglaia plugins install SLUG` | From the registry. `aglaia plugins install FILE.aglplugin --trust [--kind processors\|ocr\|destinations]` for a local archive — `--trust` is mandatory because nobody reviewed it. |
 | `aglaia plugins update SLUG` / `--all` | To the registry's newer version; keeps settings, files and secrets. |
 | `aglaia plugins toggle SLUG` | Disable ↔ enable. A pipeline that references a disabled/uninstalled processor **fails with an error** — it does not silently skip the step. |
-| `aglaia plugins remove SLUG [-y]` | Uninstall, including its settings and any password it stored in the keychain. |
+| `aglaia plugins remove SLUG [--yes]` | Uninstall, including its settings and any password it stored in the keychain. `--yes`/`-y` skips the confirmation. |
 | `aglaia plugins config SLUG` | Interactive view (select/text/password prompts) of an export plugin's settings. `--set key=value` (repeatable) for scripts; `--test` checks the connection afterwards. |
 
 Secrets (passwords, API keys, SMTP credentials) go to the OS keychain,
