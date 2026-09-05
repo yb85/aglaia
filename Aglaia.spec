@@ -144,6 +144,8 @@ datas = [
     # open). Without them the frozen app finds zero .sql files, thinks the DB
     # is fully migrated, and creates NO tables → first query stalls.
     (str(REPO / "aglaia" / "storage" / "schema"), "aglaia/storage/schema"),
+    # The agent skill printed by `aglaia skill`.
+    (str(REPO / "aglaia" / "assets" / "SKILL.md"), "aglaia/assets"),
     (str(REPO / "aglaia" / "assets" / "icons"), "aglaia/assets/icons"),
     (str(REPO / "aglaia" / "assets" / "modes"), "aglaia/assets/modes"),
     # Theme-aware wordmarks (About dialog / startup) + the 1024 logo.

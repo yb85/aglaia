@@ -471,6 +471,11 @@ that.
 
 ---
 
+## 9b. From the command line
+
+`aglaia plugins list | search | install | update | toggle | remove | config` — see [cli.md](cli.md).
+Same code paths as the tab. An unreviewed archive needs `--trust`, the terminal's form of the typed sentence.
+
 ## 10. Lifecycle
 
 * **Disable** — a checkbox in the Plugins tab. Keeps the files, stops importing

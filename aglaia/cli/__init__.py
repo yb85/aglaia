@@ -23,9 +23,11 @@ import typer
 from aglaia.cli.commands import gui as _gui
 from aglaia.cli.commands import list_cmd as _list
 from aglaia.cli.commands import ocr as _ocr
+from aglaia.cli.commands import plugins as _plugins
 from aglaia.cli.commands import run as _run
 from aglaia.cli.commands import server as _server
 from aglaia.cli.commands import setup as _setup
+from aglaia.cli.commands import skill as _skill
 from aglaia.cli.commands import version as _version
 
 #: The base class of the usage errors Typer raises (bad option, missing
@@ -42,7 +44,7 @@ except ImportError:                               # typer <= 0.25
     from click.exceptions import ClickException as _ClickException
 
 #: First-token names that are real commands (not the default `gui`).
-KNOWN_COMMANDS = {"gui", "run", "ocr", "setup", "server", "list", "version"}
+KNOWN_COMMANDS = {"gui", "run", "ocr", "setup", "server", "list", "version", "plugins", "skill"}
 
 
 def _version_callback(value: bool) -> None:
@@ -77,7 +79,9 @@ app.command("ocr")(_ocr.ocr)
 app.command("setup")(_setup.setup)
 app.command("server")(_server.server)
 app.command("list")(_list.list_)
+app.add_typer(_plugins.plugins_app, name="plugins")
 app.command("version")(_version.version)
+app.command("skill")(_skill.skill)
 
 
 def _prepare_args(argv: Optional[list[str]]) -> list[str]:

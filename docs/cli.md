@@ -183,6 +183,22 @@ aglaia version       # or: aglaia --version
 
 Print the Aglaïa version and exit.
 
+## `skill`
+
+```
+aglaia skill
+```
+
+Prints the **agent skill** — `aglaia/assets/SKILL.md` — to stdout: what each
+command is for, which to use in which circumstance, the questions to ask a user
+before running anything, DPI arithmetic, engines, exports, plugins, recipes and
+gotchas. It is written for an AI agent driving the CLI (Claude Code, etc.), and
+printing it from the installed binary means the agent gets the version that
+matches the commands it will run. For this repository's own Claude Code
+sessions, `.claude/skills/aglaia-cli/SKILL.md` is a symlink to the asset — one
+file, nothing to keep in sync. A test walks the Typer app and fails if any
+command or long option is missing from the document.
+
 ## What changed from the old flat CLI
 
 The old single-command form (`aglaia <workspace_dir> --headless …`) is gone.
