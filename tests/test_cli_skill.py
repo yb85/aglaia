@@ -15,7 +15,6 @@ in the skill — the document cannot fall behind the code without failing here.
 """
 from __future__ import annotations
 
-import click
 import typer
 from typer.testing import CliRunner
 
@@ -46,7 +45,7 @@ def test_skill_has_frontmatter():
     assert "\ndescription: " in text.split("---", 2)[1]
 
 
-def _walk(cmd: click.Command, prefix: str):
+def _walk(cmd, prefix: str):
     yield prefix, cmd
     # Duck-typed: Typer's group class is not a `click.Group` subclass in
     # every click version, but it always carries `.commands`.
@@ -63,7 +62,10 @@ def test_every_command_and_option_is_named_in_the_skill():
         if path != "aglaia" and path not in text:
             missing.append(path)
         for param in cmd.params:
-            if not isinstance(param, click.Option):
+            # click is typer's dependency, not ours to import — the release
+            # gate on Linux/Windows proved it absent. An option is the param
+            # kind that spells itself with dashes.
+            if getattr(param, "param_type_name", "") != "option":
                 continue
             longs = [o for o in param.opts if o.startswith("--")]
             if longs and longs[0] != "--help" and not any(o in text for o in longs):
