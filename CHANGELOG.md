@@ -4,14 +4,71 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0rc5] — 2026-09-04
+## [0.1.0rc5] — 2026-09-05
 
-Per-page manual tuning (milestone M9), editable capture shortcuts, and a
+The plugin store and a plugin API (#133), the CLI that drives all of it
+(`aglaia plugins`, `--send-to`, `aglaia skill`), erase masks with a
+StampRemover plugin to prove them, a declared schema for page metadata,
+per-page manual tuning (milestone M9), editable capture shortcuts, and a
 run of output defects that had been degrading pages silently — most with no
 failing test, and all found by measuring real projects rather than by reading
 the code.
 
 ### Added
+
+- **A plugin store, and nothing ships inside the app** (#133). Plugins install
+  from the registry (github.com/yb85/aglaia-plugins) or a local archive into
+  `<APP_DATA>/plugins/<kind>/<slug>/`, in three kinds: processors (pipeline
+  steps), OCR engines, and **destinations** — somewhere a finished export goes
+  (Kindle, Calibre, a corpus). Each gets a `PluginContext`: settings in the
+  config DB, secrets in the OS keychain under its own namespace, a scratch
+  dir, a log line. The Plugins tab installs, updates in place when the
+  registry has a newer version, disables, removes — and the install dialog
+  says who wrote the plugin, because that is what the user is being asked to
+  judge. A pipeline step whose plugin is missing or disabled **fails and says
+  so**, instead of quietly doing less.
+
+- **An exporter is an exporter.** Installed destinations appear in the Export
+  tab as ordinary format cards beside PDF and Markdown, run by the same
+  Export button; the send runs off the GUI thread with a spinner and a toast,
+  because mail to a Kindle takes time. A destination that is not set up says
+  so on the card, before the export runs.
+
+- **The CLI reaches all of it.** `aglaia plugins list|search|install|update|
+  toggle|remove|config` — `config` is a small interactive view over the
+  plugin's declared fields, or `--set key=value` for scripts, `--test` to
+  check the connection. `run`/`ocr` take `--send-to SLUG+SLUG` to hand the
+  exports to destinations. `aglaia skill` prints the agent skill: what each
+  command is for, what to ask the user, DPI arithmetic, recipes, gotchas — a
+  test walks the Typer app and fails if any command or option is missing
+  from it.
+
+- **Erase masks** — `meta["erase"]`, a list of polygons any processor may add
+  and every coordinate step carries through resample, deskew, keystone and
+  dewarp; the binariser treats the inside as missing paper (`wolf++`), so a
+  removed stamp leaves no halo, in the forward pass and at replay alike. The
+  **StampRemover** plugin proves it: trace a stamp once in its own window,
+  name it, export/import the library as JSON; it then finds the stamp on any
+  page by SIFT features at native resolution (57 ms/page over 240 real pages,
+  3/3 found, 0 false positives) and erases it with a `margin_mm` halo. Its
+  debug pane shows the mask and the matched keypoints and lets the user add,
+  move or delete mask polygons by hand — plugins can draw and own an editable
+  debug pane.
+
+- **A declared schema for `ImageBuffer.meta`** (#139). Every key has a kind —
+  polygon, polygons, points, rect, scalar, label, opaque — and a coordinate
+  transform moves every geometric key by its kind instead of each processor
+  remembering its own list. Undeclared keys are dropped at a warp;
+  `AGLAIA_META_STRICT=1` makes a write of one an error, which surfaced ten
+  keys nobody had declared.
+
+- **Cameras remember their transform.** Rotation and mirroring are stored per
+  camera in the app database, so a webcam mounted upside-down stays upright
+  across projects.
+
+- **Rerun one page** from its card header, which now reads
+  `Scan 012 · 300 dpi` with the delete control dimmed. **Jump to the first or
+  last scan** in the gallery (Home/End, ⌘↑/⌘↓, shift-click the chevrons).
 
 - **Tune a page by hand, in the debug view.** The view a user already opens to
   see what the pipeline decided is now where they correct it. Four stages take
@@ -70,6 +127,15 @@ the code.
 
 ### Removed
 
+- **The three bundled destinations** (`aglaia/plugins/`), with the `cloud`
+  extra's meaning. They loaded unconditionally, so "Export to Calibre server"
+  sat in every install's Export tab whether or not anyone had a Calibre, and a
+  Kindle plugin's SMTP settings existed in a build belonging to someone with no
+  Kindle. Install them from the registry instead. `keyring` and `mistralai`
+  become base dependencies — a card that raises ImportError when clicked is
+  broken, not optional — and `--extra cloud` is kept as an empty alias so
+  existing commands still work.
+
 - **The CUDA build target.** It existed to batch the JAX page-dewarp on a GPU,
   back when the alternative was Powell. `backend: auto` now resolves to the LM
   solver, which fits the same sheet on CPU in ~0.25 s/page — about 100× faster
@@ -81,6 +147,22 @@ the code.
 
 ### Changed
 
+- **Every string the user reads was rewritten for the user** (#138), against a
+  written standard (`docs/ui-writing.md`) distilled from thirty well-crafted
+  open-source apps. No env var names, headers, module paths, spliced
+  exceptions or design rationale in the UI: say what it is and where it goes,
+  and leave the mechanism to the log. 97 strings retranslated; fr_FR complete.
+
+- **`wolf++` is `wolf++` in both passes** (#144). The forward pass mapped it to
+  plain Wolf and only the replay used the mask-aware variant, so the two
+  passes binarised differently and a stamp erased in one came out with a halo
+  in the other. Cost measured marginal.
+
+- **One char-height estimator** (#143). TrapezoidalCorrection and PageDewarper
+  each measured text height their own way; now `text_metrics` does it once,
+  and `meta["char_h_frac"]` is a cache the dewarper fills itself when the
+  trapezoid step did not run.
+
 - **The default page margin is 2 mm**, stated explicitly in all four shipped
   pipelines. They said 5 and 15 — inconsistent between workflows as well as
   within a page (#112).
@@ -90,6 +172,40 @@ the code.
   guard was refusing pages it fits well.
 
 ### Fixed
+
+- **The stamp came back at replay** (#142). `_anchor_erase` guarded on a frame
+  that was never set, so the erase polygons were never mapped back to the
+  anchor and the replay binarised the stamp in. Inverse composition through
+  the stored transforms replaces the dead guard.
+
+- **The forward pass erased far more than the mask.** A default 6 px halo in
+  `fill_with_paper` ate 1625 text pixels around one stamp; halo is 0 and the
+  margin is the user's `margin_mm`.
+
+- **DPIfixer left erase polygons in pre-resample coordinates**, so a stamp
+  traced at capture resolution was erased at the wrong place after DPI
+  normalisation.
+
+- **The erase editor hijacked every other stage** (#143) — it armed on any
+  page that had ever stored an erase payload, so dragging a dewarp slider
+  moved mask vertices. It arms only on a stage whose geometry carries `erase`.
+  **Clicking a handle grabs the handle you clicked**, not the first one in
+  range.
+
+- **A processor installed from the store was invisible to the pipeline**
+  (#140), and got no `PluginContext` (#141); the Plugins menu appeared twice.
+  **Uninstalling a destination** deleted its files but left it registered, so
+  it stayed on offer until restart.
+
+- **Installs froze the window** — the download and the sha check ran on the
+  GUI thread — and crawled on a dual-stack network; outbound HTTP now goes
+  through one IPv4-preferring client, off the GUI thread.
+
+- **The scan number vanished from the card header** on Retina: a predicted
+  label width rounded the wrong way. The header stops predicting widths.
+
+- **The project name was slugified** for the `.agl` and the derived export
+  names. It is kept exactly as typed.
 
 - **The margin you set was not the margin you got.** Measured over 40 pages of
   a real project asking for 5 mm: top and bottom exact, left and right never
