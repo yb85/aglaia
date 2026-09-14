@@ -37,7 +37,7 @@ from typing import Optional
 import sys
 
 import qdarktheme
-from PySide6.QtCore import Qt, QByteArray, QEvent, QObject, QSize
+from PySide6.QtCore import Qt, QByteArray, QEvent, QObject, QRectF, QSize
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -655,7 +655,17 @@ def _tint_and_render(svg_src: str, color: str, size: int):
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     if opacity < 1.0:
         p.setOpacity(opacity)
-    renderer.render(p)
+    # Fit the viewBox into the square, centred, keeping its aspect. A bare
+    # `render(p)` STRETCHES it to fill the pixmap: invisible on the square
+    # Lucide set (24x24), but the mode artwork is not square — up to
+    # 1203x762 — and came out squashed.
+    vb = renderer.viewBoxF()
+    if vb.width() > 0 and vb.height() > 0:
+        k = min(px / vb.width(), px / vb.height())
+        w, h = vb.width() * k, vb.height() * k
+        renderer.render(p, QRectF((px - w) / 2, (px - h) / 2, w, h))
+    else:
+        renderer.render(p)
     p.end()
     return pix
 
@@ -692,7 +702,13 @@ def _svg_pixmap_path_cached(path: str, color: str, size: int):
         svg_src = Path(path).read_text(encoding="utf-8")
     except OSError:
         return None
-    return _tint_and_render(svg_src, color, size)
+    pix = _tint_and_render(svg_src, color, size)
+    # `_tint_and_render` rasterises at 2x. Say so, or the pixmap reports TWICE
+    # its logical size and a fixed-size label shows only its centre — the
+    # cropped mode artwork after #114, which had replaced a `QIcon.pixmap`
+    # that returned the requested size.
+    pix.setDevicePixelRatio(2.0)
+    return pix
 
 
 def lucide(name: str, *, color: Optional[str] = None, size: int = 20) -> QIcon:

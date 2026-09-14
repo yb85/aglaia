@@ -74,6 +74,20 @@ painter opacity. Two entry points, both cached per (source, colour, size):
 Passing `color=None` resolves to the palette's text colour, which is the
 right default for anything that must simply stay legible.
 
+**Size.** `_tint_and_render` rasterises at **2×** and fits the viewBox into
+the square with its aspect kept (a bare `render(p)` stretches it — invisible
+on the square Lucide set, but the mode artwork runs up to 1203 × 762).
+
+- `svg_pixmap_path` returns a pixmap whose **logical** size is `size`: it sets
+  `devicePixelRatio(2.0)` itself.
+- `lucide_pixmap` does **not** — the caller sets the ratio, as the existing
+  call sites do. Hand its result to a fixed-size `QLabel` without that and
+  the label shows only the centre of the glyph. Copy the pixmap before
+  setting the ratio: it is shared from the render cache.
+
+`QIcon(path).pixmap(size, size)` returned the requested size, so replacing it
+without the ratio cropped every mode card (#114 → fixed right after).
+
 ## Surfaces (background layers)
 
 | Token | Dark | Light | Use |
