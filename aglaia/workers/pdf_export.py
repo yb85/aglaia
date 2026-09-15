@@ -24,6 +24,8 @@ console warning.
 from __future__ import annotations
 
 import io
+import math
+import re
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -184,7 +186,8 @@ def _row_to_jpeg(row) -> tuple[bytes, int, int, Name]:
     return buf.getvalue(), im.width, im.height, cs
 
 
-def build_native_pdf(rows: Sequence, output_path: Path) -> bool:
+def build_native_pdf(rows: Sequence, output_path: Path, *,
+                     pages: list | None = None) -> bool:
     """Build a PDF whose pages embed the row blobs as DCTDecode JPEGs.
 
     Per row: re-use the JPEG bytes verbatim when possible (lossless),
@@ -195,7 +198,7 @@ def build_native_pdf(rows: Sequence, output_path: Path) -> bool:
         raise RuntimeError(f"pikepdf required for native PDF export: {_PIKEPDF_ERR}")
     pdf = pikepdf.Pdf.new()
     pages_added = 0
-    for row in rows:
+    for idx, row in enumerate(rows):
         try:
             jpeg_bytes, w, h, cs = _row_to_jpeg(row)
         except Exception:
@@ -218,6 +221,8 @@ def build_native_pdf(rows: Sequence, output_path: Path) -> bool:
             ProcSet=[Name.PDF, Name.ImageC, Name.ImageI, Name.ImageB],
         )
         pages_added += 1
+        if pages is not None:
+            pages.append(idx)
     if pages_added == 0:
         return False
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,14 +257,135 @@ def _pdf_escape_winansi(text: str) -> bytes:
             .replace(b")", b"\\)"))
 
 
-def inject_ocr_layer(pdf_path: Path, ocr_per_page: list) -> None:
-    """Overlay each page with an invisible Helvetica text run (render
-    mode 3) so the produced PDF stays selectable / searchable.
+#: A stored line covering at least this fraction of the page in both axes is
+#: not a line: it is a whole page of text with no geometry (Mistral).
+_FULL_PAGE_FRAC = 0.9
 
-    `ocr_per_page[i]` is `None` or a dict with `lines`, `page_w`, `page_h`.
+_MD_NOISE = re.compile(r"^\s{0,3}(#{1,6}\s+|[-*+]\s+|>\s*)|\*\*|__|`")
+
+
+def _md_plain(line: str) -> str:
+    """Drop the Markdown syntax a reader would not search for (heading hashes,
+    bullets, quote marks, bold/code markers). Words stay exactly as OCR'd."""
+    return _MD_NOISE.sub("", line).strip()
+
+
+def _wrap(text: str, n: int) -> list[str]:
+    """Greedy word wrap of `text` into about `n` lines of even length."""
+    words = text.split()
+    if not words or n <= 1:
+        return [" ".join(words)] if words else []
+    budget = max(1, len(" ".join(words)) // n)
+    out: list[str] = []
+    cur: list[str] = []
+    size = 0
+    for w in words:
+        if cur and size + 1 + len(w) > budget and len(out) < n - 1:
+            out.append(" ".join(cur))
+            cur, size = [], 0
+        size += (1 if cur else 0) + len(w)
+        cur.append(w)
+    if cur:
+        out.append(" ".join(cur))
+    return out
+
+
+def _spread(text: str, box) -> list[tuple[str, tuple]]:
+    """Split `text` into lines and stack them evenly inside `box`, top to
+    bottom, so each gets a height that fits the page instead of one run the
+    size of the box.
+
+    Newlines are not enough to count the lines. Mistral runs paragraphs
+    together inside one block — a real page carries 1 178 characters with no
+    break — so the count also comes from the box: at a font of 0.8 × line
+    height and Helvetica's ~0.5 em advance, `n` lines of a `w × h` box hold
+    about ``n² · w / (0.4 · h)`` characters, hence
+    ``n ≥ √(chars · 0.4 · h / w)``. Below that, the text is re-wrapped."""
+    rows = [t for t in (_md_plain(s) for s in text.splitlines()) if t]
+    if not rows:
+        return []
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    if bw > 0 and bh > 0:
+        chars = sum(len(r) for r in rows) + len(rows) - 1
+        need = math.ceil(math.sqrt(chars * 0.4 * bh / bw))
+        if need > len(rows):
+            rows = _wrap(" ".join(rows), need)
+    step = (y1 - y0) / len(rows)
+    return [(t, (x0, y0 + k * step, x1, y0 + (k + 1) * step))
+            for k, t in enumerate(rows)]
+
+
+def ocr_text_lines(ocr: dict) -> list[tuple[str, tuple]]:
+    """``[(text, (x0, y0, x1, y1)), …]`` in the stored page frame
+    (``page_w`` × ``page_h``), in reading order.
+
+    Engines disagree on what a "line" is, and the layer must not care:
+
+    - Apple Vision / Surya store real lines, each with its own box.
+    - **Mistral stores one "line" whose box is the whole page** and whose text
+      is the page's whole Markdown. Drawn as it stands, that is a font the
+      height of the page on a baseline at its bottom edge, one line long,
+      running off the right of the page — every consumer that clips to the
+      page (PyMuPDF, pdftotext) extracts a few glyphs (#149). The geometry was
+      kept all along in ``meta.mistral_page.blocks``, but in the pixel frame
+      of the image SENT to Mistral (``dimensions``), which is the ``ocr_dpi``
+      downsample of the page — so it is rescaled here.
+    - With neither, a whole-page text is stacked over the page, which at least
+      keeps every line on it.
     """
+    page_w = float(ocr.get("page_w") or 0)
+    page_h = float(ocr.get("page_h") or 0)
+    if page_w <= 0 or page_h <= 0:
+        return []
+    mp = ((ocr.get("meta") or {}).get("mistral_page") or {})
+    blocks = mp.get("blocks") or []
+    dims = mp.get("dimensions") or {}
+    sent_w = float(dims.get("width") or 0)
+    sent_h = float(dims.get("height") or 0)
+    if blocks and sent_w > 0 and sent_h > 0:
+        sx, sy = page_w / sent_w, page_h / sent_h
+        out: list[tuple[str, tuple]] = []
+        for b in blocks:
+            try:
+                box = (float(b["top_left_x"]) * sx, float(b["top_left_y"]) * sy,
+                       float(b["bottom_right_x"]) * sx,
+                       float(b["bottom_right_y"]) * sy)
+            except (KeyError, TypeError, ValueError):
+                continue
+            out.extend(_spread(str(b.get("content") or ""), box))
+        if out:
+            return out
+    lines = [ln for ln in (ocr.get("lines") or [])
+             if ln.get("bbox") and ln.get("text")]
+    if len(lines) == 1:
+        x0, y0, x1, y1 = (float(v) for v in lines[0]["bbox"])
+        if (x1 - x0) >= _FULL_PAGE_FRAC * page_w and \
+                (y1 - y0) >= _FULL_PAGE_FRAC * page_h:
+            return _spread(lines[0]["text"], (x0, y0, x1, y1))
+    return [(ln["text"], tuple(float(v) for v in ln["bbox"])) for ln in lines]
+
+
+#: Helvetica's mean advance width, in ems — enough to size a horizontal scale
+#: that keeps an invisible run inside its box.
+_HELV_EM = 0.5
+
+
+def inject_ocr_layer(pdf_path: Path, ocr_per_page: list) -> dict:
+    """Overlay each page with invisible Helvetica text (render mode 3) so the
+    produced PDF stays selectable / searchable.
+
+    `ocr_per_page[i]` is `None` or an OCR result for PDF page `i`. Each run is
+    sized to its line box and horizontally scaled (`Tz`) to its width, so the
+    text stays on the page.
+
+    Returns ``{"expected", "written", "missing"}``: pages whose OCR carries
+    text, pages that actually received some, and the 1-based numbers of those
+    that did not — so the caller can refuse to call it an OCR PDF.
+    """
+    stats = {"expected": 0, "written": 0, "missing": []}
     if pikepdf is None or not any(ocr_per_page):
-        return
+        return stats
     with pikepdf.open(str(pdf_path), allow_overwriting_input=True) as pdf:
         font_obj = pdf.make_indirect(pikepdf.Dictionary(
             Type=Name.Font, Subtype=Name.Type1,
@@ -267,21 +393,25 @@ def inject_ocr_layer(pdf_path: Path, ocr_per_page: list) -> None:
         ))
         for i, page in enumerate(pdf.pages):
             ocr = ocr_per_page[i] if i < len(ocr_per_page) else None
-            if not ocr or not ocr.get("lines"):
+            if not ocr:
                 continue
+            has_text = any((ln.get("text") or "").strip()
+                           for ln in (ocr.get("lines") or []))
+            if not has_text:
+                continue                    # a blank page: nothing owed
+            stats["expected"] += 1
+            placed = ocr_text_lines(ocr)
             try:
                 rect = page.mediabox
                 pw = float(rect[2] - rect[0])
                 ph = float(rect[3] - rect[1])
             except Exception:
+                placed = []
+            if not placed:
+                stats["missing"].append(i + 1)
                 continue
-            img_w = float(ocr.get("page_w") or 0)
-            img_h = float(ocr.get("page_h") or 0)
-            if img_w <= 0 or img_h <= 0:
-                continue
-            sx = pw / img_w
-            sy = ph / img_h
-            # Ensure the page resources have an /AglaiaOCR font slot.
+            sx = pw / float(ocr["page_w"])
+            sy = ph / float(ocr["page_h"])
             try:
                 res = page.Resources
             except Exception:
@@ -290,43 +420,47 @@ def inject_ocr_layer(pdf_path: Path, ocr_per_page: list) -> None:
             if Name.Font not in res:
                 res.Font = pikepdf.Dictionary()
             res.Font.AglaiaOCR = font_obj
-            # Build the appended content stream.
             buf = io.BytesIO()
             buf.write(b"q\n")
-            for line in ocr["lines"]:
-                bbox = line.get("bbox")
-                text = line.get("text") or ""
-                if not bbox or not text:
-                    continue
-                x0, y0, x1, y1 = bbox
+            wrote = 0
+            for text, (x0, y0, x1, y1) in placed:
                 w = (x1 - x0) * sx
                 h = (y1 - y0) * sy
                 if w <= 0 or h <= 0:
                     continue
-                fs = max(2.0, h * 0.85)
-                # PDF coords: origin bottom-left, y up. Image y is from
-                # the top. Place baseline near the bottom edge of the
-                # bbox so descenders sit naturally.
-                pdf_x = x0 * sx
-                pdf_y_baseline = ph - (y1 * sy)
                 escaped = _pdf_escape_winansi(text)
                 if not escaped:
                     continue
+                fs = max(2.0, h * 0.8)
+                # Squeeze or stretch the run to its box width. Without it a
+                # long line in a small font still overflows the page edge,
+                # which is where a clipping extractor drops it.
+                natural = fs * _HELV_EM * max(1, len(escaped))
+                tz = max(5.0, min(400.0, 100.0 * w / natural))
+                # PDF origin is bottom-left, image y runs down: put the
+                # baseline near the bottom of the box so descenders sit in it.
+                pdf_x = x0 * sx
+                pdf_y = ph - y1 * sy + 0.2 * h
                 buf.write(b"BT\n")
                 buf.write(f"/AglaiaOCR {fs:.2f} Tf\n".encode("ascii"))
                 buf.write(b"3 Tr\n")
-                buf.write(f"1 0 0 1 {pdf_x:.2f} {pdf_y_baseline:.2f} Tm\n"
+                buf.write(f"{tz:.1f} Tz\n".encode("ascii"))
+                buf.write(f"1 0 0 1 {pdf_x:.2f} {pdf_y:.2f} Tm\n"
                           .encode("ascii"))
-                buf.write(b"(")
-                buf.write(escaped)
-                buf.write(b") Tj\n")
-                buf.write(b"ET\n")
+                buf.write(b"(" + escaped + b") Tj\nET\n")
+                wrote += 1
             buf.write(b"Q\n")
-            page.contents_add(pikepdf.Stream(pdf, buf.getvalue()))
+            if wrote:
+                page.contents_add(pikepdf.Stream(pdf, buf.getvalue()))
+                stats["written"] += 1
+            else:
+                stats["missing"].append(i + 1)
         pdf.save(str(pdf_path))
+    return stats
 
 
-def build_bitonal_pdf(rows: Sequence, output_path: Path, *, engine: str = "jbig2") -> bool:
+def build_bitonal_pdf(rows: Sequence, output_path: Path, *, engine: str = "jbig2",
+                      pages: list | None = None) -> bool:
     """Build a PDF whose every page is one bitonal image XObject.
 
     `engine`: "jbig2" (lossless via aglaia_jbig2; falls back to G4 if the
@@ -355,7 +489,7 @@ def build_bitonal_pdf(rows: Sequence, output_path: Path, *, engine: str = "jbig2
 
     pdf = pikepdf.Pdf.new()
     pages_added = 0
-    for row in rows:
+    for idx, row in enumerate(rows):
         if row["type"] != "BW":
             continue
         im = _row_to_pil(row)
@@ -398,6 +532,8 @@ def build_bitonal_pdf(rows: Sequence, output_path: Path, *, engine: str = "jbig2
             ProcSet=[Name.PDF, Name.ImageB],
         )
         pages_added += 1
+        if pages is not None:
+            pages.append(idx)
 
     if pages_added == 0:
         return False

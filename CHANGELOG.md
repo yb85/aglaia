@@ -4,6 +4,22 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A PDF exported with a Mistral OCR layer was not searchable** (#149). On a
+  real 278-page project, 0 pages carried more than 100 readable characters
+  (0.1 % of the text), and the export reported success. Mistral stores a page
+  as one full-page line; drawn as one run, it sat off the page. The layer now
+  uses Mistral's per-block geometry, rescaled from the frame Mistral saw, and
+  wraps run-together paragraphs to the block: the same project reads 276/278
+  pages and 100 % of the text. The layer was also shifted one page after any
+  row the builder skipped. An OCR layer that cannot be written now **fails the
+  export** (`OcrLayerError`) and leaves no file. The trigger dates from
+  2026-06-30 (`308b0a5`, per-engine layers): before it, exports used the latest
+  run, which was often a line engine.
+
 ## [0.1.0rc5] — 2026-09-05
 
 The plugin store and a plugin API (#133), the CLI that drives all of it
