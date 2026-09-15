@@ -129,7 +129,10 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
    *“Batch job pending — submitted N ago”* with **Check result** and
    **Cancel** (confirm).
 3. **Check result** — polls each pending job; for `SUCCESS`, downloads the
-   output JSONL and writes each page's markdown back to its OCR run via
+   output JSONL (`fetch_output`), **stores it byte for byte in the project**
+   (`mistral_batch_outputs`, migration 0014, `MistralBatchRepo.store_output`
+   — #147), parses the stored bytes (`pages_from_output`) and writes each
+   page's markdown back to its OCR run via
    `ocr_repo.finish` (dims from `ocr_runs → nodes → images`), then marks the
    job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs. It is
    re-clickable: the poll runs in a `MistralBatchWorker` QThread handed to
@@ -159,6 +162,16 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
 
 The key + SDK are the same `[cloud]` extra as the synchronous path; only
 the submit/poll/fetch calls differ.
+
+**Raw output.** A job id is not a durable record of a paid OCR — Mistral
+does not promise to keep output files — and the OCR textpack ships the raw
+output as `assets/mistral-<job>.jsonl`. So the project keeps it:
+`MistralBatchRepo(conn).output(job_id)` returns the bytes exactly as
+`client.files.download` returned them, `.outputs()` lists them with
+`sha256` / `size` / `output_file_id` / `completed_at`. Re-importing replaces
+the row (idempotent). Dismissing a job in the Jobs tab keeps its output.
+`aglaia --headless --check-ocr <file>.agl` also **backfills** jobs imported
+before #147 (`missing_outputs()`): one file download per job, no new OCR.
 
 ## Engine→GUI logging
 

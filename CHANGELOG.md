@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The raw Mistral batch output is kept in the project** (#147). The output
+  JSONL of each job is stored byte for byte in the `.agl` at import
+  (`mistral_batch_outputs`, migration 0014), readable with
+  `MistralBatchRepo.output(job_id)`. It used to be parsed and dropped, so a
+  paid OCR could not be rebuilt or shipped without calling Mistral again.
+  `--check-ocr` backfills jobs imported before, by download only.
+
 ### Fixed
 
 - **A PDF exported with a Mistral OCR layer was not searchable** (#149). On a

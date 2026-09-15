@@ -124,6 +124,50 @@ class MistralBatchRepo:
     def has_pending(self) -> bool:
         return bool(self.pending())
 
+    # ── raw output (table ``mistral_batch_outputs``, #147) ──────────────
+    def store_output(self, job_id: str, raw: bytes, *,
+                     output_file_id: Optional[str] = None,
+                     completed_at: Optional[str] = None) -> None:
+        """Keep the job's output file byte-for-byte. Re-storing the same job
+        replaces the row, so a repeated import neither duplicates nor loses
+        it."""
+        raw = bytes(raw)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO mistral_batch_outputs "
+            "(job_id, output_file_id, raw, sha256, size, completed_at, "
+            " fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (job_id, output_file_id, raw, hashlib.sha256(raw).hexdigest(),
+             len(raw), completed_at, _now()),
+        )
+
+    def output(self, job_id: str) -> Optional[bytes]:
+        """The raw JSONL of `job_id` as downloaded, or None if never fetched."""
+        row = self.conn.execute(
+            "SELECT raw FROM mistral_batch_outputs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        return bytes(row["raw"]) if row is not None else None
+
+    def missing_outputs(self) -> list[str]:
+        """Imported jobs whose raw output was never stored (imported before
+        #147, or the store failed)."""
+        return [r["job_id"] for r in self.conn.execute(
+            "SELECT j.job_id FROM mistral_batch_jobs j "
+            " WHERE j.imported_at IS NOT NULL "
+            "   AND NOT EXISTS (SELECT 1 FROM mistral_batch_outputs o "
+            "                    WHERE o.job_id = j.job_id) "
+            " ORDER BY j.submitted_at, j.chunk")]
+
+    def outputs(self) -> list[sqlite3.Row]:
+        """Every stored output, metadata only (no blob), oldest job first."""
+        return self.conn.execute(
+            "SELECT o.job_id, o.output_file_id, o.sha256, o.size, "
+            "       o.completed_at, o.fetched_at, j.submitted_at, j.chunk, "
+            "       j.run_ids "
+            "  FROM mistral_batch_outputs o "
+            "  LEFT JOIN mistral_batch_jobs j ON j.job_id = o.job_id "
+            " ORDER BY j.submitted_at, j.chunk, o.job_id"
+        ).fetchall()
+
 
 class PipelineRepo:
     def __init__(self, conn: sqlite3.Connection):
