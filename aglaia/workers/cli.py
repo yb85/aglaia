@@ -65,8 +65,8 @@ class Spec:
 
 @dataclass
 class ExportTask:
-    kind: str             # "pdf" | "md"
-    profile: Optional[str] = None  # for pdf: auto|g4|jbig2|native
+    kind: str             # "pdf" | "md" | "textpack"
+    profile: Optional[str] = None  # for pdf / textpack: auto|g4|jbig2|native
     tokens: list[str] = field(default_factory=list)   # bare tokens from the spec
     params: dict[str, str] = field(default_factory=dict)  # key=value from the spec
 
@@ -174,6 +174,8 @@ def run_list_commands(cfg: "CliConfig") -> bool:
         print(f"  pdf            PDF profiles: {'|'.join(EXPORT_PDF_PROFILES)} "
               "(e.g. pdf:g4)")
         print("  md             Markdown; md:refine=<backend> for on-device LLM cleanup")
+        print("  textpack       OCR textpack for corpus: source.pdf + text.md + raw OCR "
+              "(e.g. textpack:g4:zlib=913898)")
     if cfg.list_destinations:
         print("Destinations (where an export can be sent):")
         try:
@@ -292,6 +294,19 @@ def _parse_export_arg(raw: Optional[str]) -> list[ExportTask]:
         if spec.name == "md":
             out.append(ExportTask(kind="md", tokens=spec.tokens, params=spec.params))
             continue
+        if spec.name == "textpack":
+            # `textpack[:g4|jbig2|native|auto][:ocr=ENGINE][:zlib=ID]` — the
+            # OCR textpack for corpus (#148): source.pdf + text.md + raw OCR.
+            prof = (spec.tokens[0] if spec.tokens
+                    else spec.params.get("profile", "auto")).lower()
+            if prof not in EXPORT_PDF_PROFILES:
+                raise SystemExit(
+                    f"Unknown PDF profile in --export textpack: {prof!r}. "
+                    f"Choices: {EXPORT_PDF_PROFILES}"
+                )
+            out.append(ExportTask(kind="textpack", profile=prof,
+                                  tokens=spec.tokens, params=spec.params))
+            continue
         if spec.name == "pdf":
             prof = (spec.tokens[0] if spec.tokens
                     else spec.params.get("profile", "auto")).lower()
@@ -304,7 +319,8 @@ def _parse_export_arg(raw: Optional[str]) -> list[ExportTask]:
                                   tokens=spec.tokens, params=spec.params))
             continue
         raise SystemExit(
-            f"Unknown export target: {spec.name!r}. Use pdf[:profile] or md."
+            f"Unknown export target: {spec.name!r}. "
+            "Use pdf[:profile], md or textpack[:profile]."
         )
     return out
 

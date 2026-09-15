@@ -112,33 +112,40 @@ def _select_export_rows(conn, step_name: str | None):
     return conn.execute(q).fetchall()
 
 
-def _ocr_results_for_rows(conn, rows, engine: str | None = None):
+def _ocr_results_for_rows(conn, rows, engine: str | None = None,
+                          run_ids: list | None = None):
     """For each row, return the latest OCR result_json (parsed) for the
     matching (scan_id, branch_path). With ``engine`` given, the latest run of
     that engine; otherwise the latest run regardless of engine. Entries are
-    `None` when no completed run exists."""
+    `None` when no completed run exists. ``run_ids``, when given, receives
+    the matching `ocr_runs.id` per row (None alongside a None result)."""
     eng_clause = " AND engine = ?" if engine else ""
     out: list[dict | None] = []
+    ids = run_ids if run_ids is not None else []
     for r in rows:
         try:
             scan_id = int(r["scan_id"])
             branch_path = r["branch_path"] or ""
         except (KeyError, IndexError, TypeError):
             out.append(None)
+            ids.append(None)
             continue
         row = conn.execute(
-            "SELECT result_json FROM ocr_runs "
+            "SELECT id, result_json FROM ocr_runs "
             f"WHERE scan_id = ? AND branch_path = ? AND status = 'done'{eng_clause} "
             "ORDER BY version DESC LIMIT 1",
             (scan_id, branch_path, engine) if engine else (scan_id, branch_path),
         ).fetchone()
         if row is None or row["result_json"] is None:
             out.append(None)
+            ids.append(None)
             continue
         try:
             out.append(json.loads(row["result_json"]))
+            ids.append(int(row["id"]))
         except Exception:
             out.append(None)
+            ids.append(None)
     return out
 
 
@@ -168,7 +175,7 @@ class OcrLayerError(RuntimeError):
 def create_pdf_from_db(
     conn, output_path, *, step_name: str | None = None,
     compression: str = "auto", add_ocr_layer: bool = False,
-    engine: str | None = None,
+    engine: str | None = None, layer: dict | None = None,
 ) -> bool:
     """Build a PDF from project SQLite rows.
 
@@ -185,6 +192,11 @@ def create_pdf_from_db(
     export set, an invisible text layer (Helvetica/WinAnsi, render mode
     3) is added on top of each page so the PDF stays selectable. `engine`
     selects which OCR layer (default: the latest run regardless of engine).
+
+    `layer`, when given with `add_ocr_layer`, receives what was laid on the
+    pages, in PDF page order: ``results`` (parsed OCR result or None) and
+    ``run_ids`` — so a caller writing the same pages' text elsewhere (the
+    OCR textpack) cannot drift from the PDF.
     """
     output_path = Path(output_path)
     rows = _select_export_rows(conn, step_name)
@@ -210,7 +222,11 @@ def create_pdf_from_db(
 
     if ok and add_ocr_layer:
         from aglaia.workers.pdf_export import inject_ocr_layer
-        ocr = _ocr_results_for_rows(conn, [rows[i] for i in kept], engine)
+        run_ids: list[int | None] = []
+        ocr = _ocr_results_for_rows(conn, [rows[i] for i in kept], engine,
+                                    run_ids=run_ids)
+        if layer is not None:
+            layer.update(results=ocr, run_ids=run_ids)
         if not any(ocr):
             # An OCR PDF was asked for and no page matches a completed run of
             # that engine — the lookup-mismatch case. Refuse rather than ship a

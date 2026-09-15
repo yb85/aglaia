@@ -379,7 +379,7 @@ def _submit_batch_ocr(db_path: str, *, engine_name: str, languages: list[str]) -
             print(f"  {j['job_id']}")
         print(
             "\nRetrieve the results when ready with:\n"
-            f"  aglaia --headless --check-ocr {db_path}"
+            f"  aglaia run {db_path} --check-ocr"
         )
         return 0
     finally:
@@ -482,6 +482,9 @@ def _run_exports(
     """Execute every export task. Returns 0 on success, non-zero if any
     task failed."""
     fail = 0
+    # What `--send-to` hands over. It was appended to but never created, so a
+    # Markdown export raised AttributeError and a PDF was never sent.
+    _run_exports.written = []  # type: ignore[attr-defined]
     for task in exports:
         # `pdf:ocr=surya` / `md:ocr=apple` select which OCR layer to export
         # (default = the latest layer regardless of engine). Aliases honoured.
@@ -514,6 +517,30 @@ def _run_exports(
             if not ok:
                 print("  ! PDF export failed", file=sys.stderr)
                 fail += 1
+            else:
+                _run_exports.written.append(out)  # type: ignore[attr-defined]
+        elif task.kind == "textpack":
+            from aglaia.workers.textpack_export import (
+                TextpackError, default_name, write_textpack)
+            conn = open_db(db_path)
+            try:
+                if ocr_engine and not _ocr_layer_available(conn, ocr_engine):
+                    fail += 1
+                    continue
+                out = project_dir / default_name(conn)
+                zlib = task.params.get("zlib")
+                print(f"Export OCR textpack ({task.profile}) → {out}{tag}")
+                try:
+                    write_textpack(conn, out, compression=task.profile or "auto",
+                                   engine=ocr_engine,
+                                   zlib_id=int(zlib) if zlib else None)
+                except (OcrLayerError, TextpackError) as exc:
+                    print(f"  ! Textpack export failed: {exc}", file=sys.stderr)
+                    fail += 1
+                    continue
+            finally:
+                conn.close()
+            _run_exports.written.append(out)  # type: ignore[attr-defined]
         elif task.kind == "md":
             out = project_dir / f"{slug}.md"
             # `--export md:refine=apple_fm` overrides the global --md-refine.

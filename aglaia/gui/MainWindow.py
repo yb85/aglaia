@@ -1939,6 +1939,8 @@ class MainWindow(QMainWindow):
             self.make_pdf("output")
         elif fmt == "markdown":
             self._export_markdown()
+        elif fmt == "textpack":
+            self._export_textpack()
         elif fmt == "slim":
             self._export_slim_project()
 
@@ -1960,8 +1962,11 @@ class MainWindow(QMainWindow):
             self._on_destination_settings(name)
             return
         self._pending_send = name
-        if self._export_tab.destination_format(name) == "md":
+        fmt = self._export_tab.destination_format(name)
+        if fmt == "md":
             self._export_markdown()
+        elif fmt == "textpack":
+            self._export_textpack()
         else:
             self.make_pdf("output")
 
@@ -3019,6 +3024,53 @@ class MainWindow(QMainWindow):
             self._discard_if_staged(output_path)
             self.status_label.setText(self.tr("No OCR text to export."))
             self.toast(self.tr("Markdown export skipped — no OCR text."), 3000)
+        QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
+
+    def _export_textpack(self):
+        """OCR textpack for corpus (#148): source.pdf + text.md + raw OCR."""
+        from aglaia.workers.PDFprocessor import OcrLayerError
+        from aglaia.workers.textpack_export import (
+            TextpackError, default_name, write_textpack)
+        try:
+            with db_session(self.db_path) as conn:
+                name = default_name(conn)
+        except Exception:
+            name = f"{self.slug_name}_OCR.textpack"
+        output_path = self._export_destination(
+            name, self.tr("Export OCR textpack"),
+            self.tr("Textpack (*.textpack)"))
+        if output_path is None:
+            self._pending_send = ""
+            return
+        caption = self.tr("Building OCR textpack…")
+        self.status_label.setText(caption)
+        self._export_tab.set_busy(caption)
+        QApplication.processEvents()
+        error = ""
+        try:
+            with db_session(self.db_path) as conn:
+                write_textpack(conn, output_path,
+                               compression=self._export_tab.compression_hint(),
+                               engine=self._export_tab.selected_ocr_engine())
+        except (OcrLayerError, TextpackError) as e:
+            error = str(e)
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"
+        self._export_tab.set_busy("")
+        if error:
+            self._pending_send = ""
+            self._discard_if_staged(output_path)
+            self._on_log_line("error", f"Textpack export failed: {error}")
+            self.status_label.setText(
+                self.tr("Textpack not saved: {err}").format(err=error))
+            self.toast(self.tr("Textpack export failed. See the Log tab."), 6000)
+            return
+        self.status_label.setText(self.tr("Saved: {name}").format(name=output_path.name))
+        if not getattr(self, "_pending_send", ""):
+            self.toast(self.tr("Textpack saved — {name}").format(
+                name=output_path.name))
+            self._reveal_in_finder(output_path)
+        self.send_export_to_pending(output_path)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
 
     def refresh_norm_widths_visibility(self):

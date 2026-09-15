@@ -49,7 +49,7 @@ def ocr(
     ] = None,
     export: Annotated[
         Optional[str],
-        typer.Option("--export", help="'+'-joined export specs, e.g. 'pdf:g4+md'."),
+        typer.Option("--export", help="'+'-joined export specs, e.g. 'pdf:g4+md' or 'textpack:g4'."),
     ] = None,
     md_refine: Annotated[
         Optional[str],

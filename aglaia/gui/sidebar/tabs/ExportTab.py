@@ -68,6 +68,10 @@ QPushButton:disabled {{ background-color: {COLOR_FONT_DIM}; color: {COLOR_FONT_P
 """
 
 
+#: Export formats Aglaïa produces and can hand to a destination plugin.
+_FORMATS = ("pdf", "md", "textpack")
+
+
 class ExportTab(QWidget):
     """Format-cards picker + single Export button."""
 
@@ -204,6 +208,18 @@ class ExportTab(QWidget):
             extras=md_extras,
         )
 
+        # ── OCR textpack card — PDF + Markdown + OCR metadata (#148) ──
+        # One archive for corpus: the searchable PDF, its text page by page,
+        # and the raw OCR response. Uses the PDF card's JBIG2 choice and the
+        # OCR-layer selector below. Needs OCR, like Markdown.
+        self.format_group.add_card(
+            "textpack", self.tr("OCR textpack"),
+            self.tr("Searchable PDF, Markdown and OCR metadata in one "
+                    "archive. Needs an OCR run."),
+            icon_name="compression",
+            enabled=False,
+        )
+
         # ── Slim project card ──────────────────────────────────────
         self.format_group.add_card(
             "slim", self.tr("Slim Aglaïa project"),
@@ -311,7 +327,9 @@ class ExportTab(QWidget):
         """Toggle Markdown card. When the active selection was Markdown
         and it just became unavailable, fall back to PDF."""
         self.format_group.set_card_enabled("markdown", available)
-        if not available and self.format_group.current_key() == "markdown":
+        self.format_group.set_card_enabled("textpack", available)
+        if not available and self.format_group.current_key() in (
+                "markdown", "textpack"):
             self.format_group.set_current_key("pdf")
         self._set_ocr_hint(available)
 
@@ -387,7 +405,7 @@ class ExportTab(QWidget):
         # What the plugin will actually be handed. Only formats Aglaïa can
         # produce count, so a destination that takes epub and pdf offers pdf
         # and says nothing about epub.
-        formats = [f for f in ("pdf", "md") if f in dest.accepts]
+        formats = [f for f in _FORMATS if f in dest.accepts]
 
         extras = QWidget()
         col = QVBoxLayout(extras)
@@ -401,7 +419,8 @@ class ExportTab(QWidget):
             row.addWidget(self._field_label(self.tr("Export as")))
             combo = QComboBox()
             for f in formats:
-                combo.addItem({"pdf": "PDF", "md": "Markdown"}[f], f)
+                combo.addItem({"pdf": "PDF", "md": "Markdown",
+                               "textpack": self.tr("Textpack (PDF + Markdown)")}[f], f)
             combo.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
             row.addWidget(combo, 1)
         else:
@@ -440,7 +459,7 @@ class ExportTab(QWidget):
         try:
             from aglaia.workers import destinations as _dest
             d = _dest.load_all().get(name)
-            for f in ("pdf", "md"):
+            for f in _FORMATS:
                 if d is not None and f in d.accepts:
                     return f
         except Exception:

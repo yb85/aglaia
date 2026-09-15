@@ -185,8 +185,9 @@ an export and two shapes of control for one idea.
 
 A destination that accepts more than one format Aglaïa can write gets a small
 **Export as** picker in the card's extras; one that accepts a single format
-resolves silently. Formats Aglaïa cannot produce never appear — Kindle accepts
-`epub` and `docx`, and the card offers neither.
+resolves silently. Aglaïa writes `pdf`, `md` and `textpack` (the OCR textpack,
+[export.md](export.md#ocr-textpack)); formats it cannot produce never appear —
+Kindle accepts `epub` and `docx`, and the card offers neither.
 
 A destination that is not configured says **"Not set up yet — needs …"** on the
 card, and pressing Export opens its settings rather than running an export that

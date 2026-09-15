@@ -1008,6 +1008,57 @@ def _render_block(b: dict) -> list[str]:
     return [text]
 
 
+def markdown_pages(results: list) -> list[str]:
+    """One Markdown string per page, for results already in page order.
+
+    `write_markdown` merges paragraphs across pages and marks scans, which is
+    right for reading and wrong for a page-addressed document: the OCR
+    textpack (#148) prefixes each page with `<!-- page N -->`, so a paragraph
+    split by a page break must stay split. Same renderers otherwise — Mistral
+    pages post-processed from `meta.mistral_page` with document-wide footnote
+    anchors, line pages through the document-level heading/running passes.
+    A `None` result (no OCR) yields an empty string, keeping the count."""
+    from aglaia.workers.ocr.md_postprocess import (
+        assign_page_mappings, mistral_settings, postprocess_mistral_page)
+    fn_mode, wrap_hf, same_line = mistral_settings()
+    mpages = [((d.get("meta") or {}).get("mistral_page")
+               if isinstance(d, dict) else None) for d in results]
+    mpages = [mp if isinstance(mp, dict) else None for mp in mpages]
+    present = [mp for mp in mpages if mp is not None]
+    maps = iter(assign_page_mappings(present, fn_mode, same_line=same_line)
+                if present else [])
+
+    pages: list[dict | None] = []
+    for i, (data, mp) in enumerate(zip(results, mpages)):
+        if mp is not None:
+            text = postprocess_mistral_page(
+                mp.get("markdown", "") or "", mp, footnotes=fn_mode,
+                headers=wrap_hf, mapping=next(maps), same_line=same_line)
+            cls: dict | None = {"kind": "assembled", "text": text.rstrip()}
+        else:
+            cls = _classify_data(data)
+        if cls is not None:
+            cls["origin"] = {"scan_id": i, "scan_idx": i, "branch_path": ""}
+        pages.append(cls)
+    _render_line_pages([p for p in pages if p is not None])
+
+    out: list[str] = []
+    for p in pages:
+        if p is None:
+            out.append("")
+        elif p["kind"] == "assembled":
+            out.append(p["text"].strip())
+        else:
+            lines: list[str] = []
+            for b in p.get("blocks", []):
+                b = {**b, "inline_marks": None}
+                lines.extend(ln.rstrip() for ln in _render_block(b))
+                if b["type"] != "list":
+                    lines.append("")
+            out.append("\n".join(lines).strip())
+    return out
+
+
 def write_markdown(conn: sqlite3.Connection, output_path: Path, *,
                    refine: Optional[str] = None,
                    refine_mode: str = "cleanup",

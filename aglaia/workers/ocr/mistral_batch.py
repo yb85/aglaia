@@ -168,11 +168,21 @@ def fetch_output(api_key: str, job_id: str) -> tuple[bytes, dict]:
     else:
         data = dl
     raw = bytes(data) if isinstance(data, (bytes, bytearray)) else str(data).encode("utf-8")
-    done = getattr(job, "completed_at", None)
-    if done is not None and hasattr(done, "isoformat"):
-        done = done.isoformat()
     return raw, {"output_file_id": str(out_id),
-                 "completed_at": str(done) if done else None}
+                 "completed_at": iso_time(getattr(job, "completed_at", None))}
+
+
+def iso_time(value) -> Optional[str]:
+    """A Mistral job timestamp as ISO 8601 UTC. The API gives epoch seconds
+    (``1788473441``); some SDK versions a datetime; None stays None."""
+    if value is None or value == "":
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    text = str(value).strip()
+    if text.lstrip("-").isdigit():
+        return datetime.fromtimestamp(int(text), timezone.utc).isoformat()
+    return text
 
 
 def pages_from_output(raw: bytes) -> list[dict]:
