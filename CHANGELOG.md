@@ -8,6 +8,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **OCR textpack export, for corpus** (#148). One archive holds the
+  searchable PDF (`assets/source.pdf`), its Markdown page by page (`text.md`,
+  `<!-- page N -->` before each page) and the raw Mistral output, with the
+  OCR provenance (engine, jobs, billed pages, cost) in `info.json` — the format
+  corpus reads. From the Export tab (**OCR textpack** card, or a destination
+  that accepts it), or `--export textpack[:g4][:zlib=ID]`. It refuses to pack
+  a PDF whose text layer did not land, or a batch job without its raw output.
 - **The raw Mistral batch output is kept in the project** (#147). The output
   JSONL of each job is stored byte for byte in the `.agl` at import
   (`mistral_batch_outputs`, migration 0014), readable with
@@ -17,6 +24,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`--export md` crashed in a headless run, and `--send-to` never sent a
+  PDF.** The list of written files was appended to but never created, and PDFs
+  were never added to it (since `295d808`).
+- **Mistral job times were stored as epoch seconds**; they are ISO 8601 now.
 - **A PDF exported with a Mistral OCR layer was not searchable** (#149). On a
   real 278-page project, 0 pages carried more than 100 readable characters
   (0.1 % of the text), and the export reported success. Mistral stores a page

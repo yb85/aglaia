@@ -73,7 +73,7 @@ new project.
 |---|---|
 | `--ocr ENGINE[:opt…]` | Run OCR. **Requires a value** — use `--ocr auto` for the default (Apple Vision → Surya). e.g. `--ocr surya:lang=fr-FR`, `--ocr mistral:batch`. |
 | `--ocr-lang CODES` | `+`-joined BCP-47 codes (e.g. `fr-FR+en-US`) or `auto`. |
-| `--export SPECS` | `+`-joined export specs, e.g. `pdf:g4+md`. |
+| `--export SPECS` | `+`-joined export specs, e.g. `pdf:g4+md`. `textpack[:profile][:ocr=ENGINE][:zlib=ID]` writes the OCR textpack for corpus ([export.md](export.md#ocr-textpack)). |
 | `--md-refine BACKEND` | On-device LLM backend for Markdown cleanup, e.g. `apple_fm`. |
 | `--project-name NAME` | Name for a new project (default: from the input filename). |
 | `--parent-dir DIR` | Parent folder for a new project. |

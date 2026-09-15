@@ -126,3 +126,11 @@ def test_pages_from_output_matches_the_old_fetch_pages_parse():
     pages = mistral_batch.pages_from_output(RAW)
     assert [p["markdown"] for p in pages] == ["# Titre\n\nPremière page",
                                               "Deuxième page"]
+
+
+def test_job_times_are_iso_8601():
+    """The API reports epoch seconds; provenance wants ISO 8601."""
+    assert mistral_batch.iso_time(1788473441) == "2026-09-03T22:10:41+00:00"
+    assert mistral_batch.iso_time("1788473441") == "2026-09-03T22:10:41+00:00"
+    assert mistral_batch.iso_time(None) is None
+    assert mistral_batch.iso_time("2026-09-03T22:10:41+00:00").startswith("2026")

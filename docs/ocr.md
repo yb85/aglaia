@@ -170,7 +170,7 @@ output as `assets/mistral-<job>.jsonl`. So the project keeps it:
 `client.files.download` returned them, `.outputs()` lists them with
 `sha256` / `size` / `output_file_id` / `completed_at`. Re-importing replaces
 the row (idempotent). Dismissing a job in the Jobs tab keeps its output.
-`aglaia --headless --check-ocr <file>.agl` also **backfills** jobs imported
+`aglaia run <file>.agl --check-ocr` also **backfills** jobs imported
 before #147 (`missing_outputs()`): one file download per job, no new OCR.
 
 ## Engine→GUI logging

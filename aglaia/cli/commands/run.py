@@ -23,7 +23,7 @@ def run(
     force_proc: ForceProcOpt = False,
     ocr: Annotated[Optional[str], typer.Option("--ocr", help="Run OCR: ENGINE[:opt…]. Use '--ocr auto' for the default (Apple Vision → Surya).")] = None,
     ocr_lang: Annotated[str, typer.Option("--ocr-lang", help="'+'-joined BCP-47 codes (e.g. fr-FR+en-US) or 'auto'.")] = "auto",
-    export: Annotated[Optional[str], typer.Option("--export", help="'+'-joined export specs, e.g. 'pdf:g4+md'.")] = None,
+    export: Annotated[Optional[str], typer.Option("--export", help="'+'-joined export specs, e.g. 'pdf:g4+md' or 'textpack:g4'.")] = None,
     md_refine: Annotated[Optional[str], typer.Option("--md-refine", help="On-device LLM backend for Markdown cleanup, e.g. 'apple_fm'.")] = None,
     send_to: Annotated[Optional[str], typer.Option("--send-to", help="After exporting, hand the files to these export plugins: '+'-joined slugs, e.g. 'send-to-kindle+send-to-corpus'. `aglaia list destinations` shows what is installed.")] = None,
     project_name: Annotated[Optional[str], typer.Option("--project-name", help="Name for a new project (default: from the input filename).")] = None,

@@ -119,10 +119,22 @@ def test_an_unconfigured_destination_says_so_on_the_card(tab, tmp_path):
 
 def test_the_card_resolves_to_a_format_aglaia_can_produce(tab, tmp_path):
     """A destination that also accepts txt and epub must not offer them:
-    Aglaïa writes pdf and md, and nothing else."""
+    Aglaïa writes pdf, md and the OCR textpack, and nothing else."""
     _install_ready_destination(tmp_path)
     tab.refresh_destinations()
-    assert tab.destination_format("ready-dest") in ("pdf", "md")
+    assert tab.destination_format("ready-dest") in ("pdf", "md", "textpack")
+    combo = tab._dest_formats["ready-dest"]
+    assert [combo.itemData(i) for i in range(combo.count())] == [
+        "pdf", "md", "textpack"]
+
+
+def test_the_textpack_card_waits_for_ocr_like_markdown(tab):
+    """#148: the textpack carries text.md, so it needs OCR as Markdown does."""
+    assert "textpack" in tab.format_group.keys()
+    tab.set_markdown_available(False)
+    assert not tab.format_group._cards["textpack"].frame.isEnabled()
+    tab.set_markdown_available(True)
+    assert tab.format_group._cards["textpack"].frame.isEnabled()
 
 
 def _install_ready_destination(tmp_path):
@@ -147,9 +159,9 @@ def _install_ready_destination(tmp_path):
         "class R(Destination):\n"
         "    name = 'ready-dest'\n"
         "    display = 'Ready dest'\n"
-        # txt and epub are here on purpose: the card must offer only the two
+        # txt and epub are here on purpose: the card must offer only the
         # formats Aglaïa can actually write.
-        "    accepts = ('pdf', 'md', 'txt', 'epub')\n",
+        "    accepts = ('pdf', 'md', 'txt', 'textpack', 'epub')\n",
         encoding="utf-8")
     d.reset_for_tests()
     return slug

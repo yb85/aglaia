@@ -73,6 +73,55 @@ Verification: `tests/workers/test_pdf_ocr_layer.py` reads the text with
 paragraphs, dehyphenation, footnotes, lists, cross-page merge). Full
 heuristics in [markdown_export.md](./markdown_export.md).
 
+## OCR textpack
+
+`aglaia/workers/textpack_export.py` (#148). One archive for corpus: the
+searchable PDF, its text page by page, and the raw OCR response — the format
+corpus reads (`docs/OCR-TEXTPACK.md` in yb85/corpus; reference writer
+`corpus/cloud_ocr.py`). Names and keys are corpus's contract: do not vary them.
+
+```
+<stem>_OCR.textpack                (zip, written to .partiel then renamed)
+└── <stem>_OCR.textbundle/
+    ├── info.json                  TextBundle v2 + "corpus" block
+    ├── text.md                    <!-- page N --> before each PDF page
+    └── assets/
+        ├── source.pdf             searchable PDF — fixed name, ZIP_STORED
+        └── mistral-<job>.jsonl    raw batch output, byte for byte, per job
+```
+
+- **`<stem>`** — the original PDF's stem when every scan comes from one
+  imported PDF (`scans.source_ref = <file>#<page>`); otherwise the project
+  slug. `corpus.scan_source` is that file name (or the slug).
+- **One pass, no drift.** `create_pdf_from_db(..., layer=…)` reports the OCR
+  result it laid on each PDF page; `text.md` is rendered from that exact list
+  (`md_export.markdown_pages`: same Mistral post-processing and line
+  renderers as the Markdown export, but no cross-page paragraph merge, so page
+  N of `text.md` is page N of `source.pdf`). A page without OCR still gets its
+  marker, with no text.
+- **Refusals.** An OCR layer that cannot be written raises `OcrLayerError`
+  (#149) — corpus must not receive an unsearchable `source.pdf`. A Mistral
+  batch job whose raw output is not stored raises `TextpackError`; run
+  `aglaia run <file>.agl --check-ocr` to backfill it (#147).
+- **`info.json`** — `version: 2`, `type: net.daringfireball.markdown`,
+  `transient: false`, `creatorIdentifier: cc.bibli.corpus.ocr`,
+  `cc.bibli.corpus.ocr: {version, stem}`, and `corpus`:
+  `scan_source`, `zlib_id` (when given), `double_page` (a scan split into
+  several layouts), `date`, and `ocr` — the provenance keys of the reference
+  writer: `engine` (`mistral-ocr` for Mistral, else the engine name), `model`,
+  `mode` (`batch` / `sync` / `local`), `jobs`, `requests` (`[]`), `pages`,
+  `page_numbers` (`null`: every page of `source.pdf`), `pages_document`,
+  `tokens` (`null`), `billed_pages` (sum of `usage_info.pages_processed` in the
+  raw outputs), `cost_usd` + `cost_basis` (batch $2/1000 on billed pages),
+  `submitted_at` / `completed_at` (ISO 8601), `source_sha256` (of the
+  original PDF when still on disk), `tool` (`aglaia <version>`), `raw_assets`.
+
+Surfaces: the Export tab's **OCR textpack** card (enabled with OCR, uses the
+JBIG2 toggle and the OCR-layer selector); a destination plugin that accepts
+`textpack` offers it in its *Export as* picker (send-to-corpus); CLI
+`--export textpack[:g4|jbig2|native|auto][:ocr=ENGINE][:zlib=ID]`, with
+`--send-to` handing the archive on.
+
 ## What gets exported
 
 Only **visible** pages of **non-deleted** scans: queries filter
