@@ -49,7 +49,7 @@ from aglaia.workers.ImportHelpers import (
     enqueue_image_files,
     enqueue_pdf_files,
 )
-from aglaia.workers.PDFprocessor import create_pdf_from_db
+from aglaia.workers.PDFprocessor import OcrLayerError, create_pdf_from_db
 from aglaia.workers.md_export import write_markdown
 from aglaia.workers.cli import (
     CliConfig,
@@ -482,14 +482,19 @@ def _run_exports(
                     fail += 1
                     continue
                 print(f"Export PDF ({task.profile}) → {out}{tag}")
-                ok = create_pdf_from_db(
-                    conn,
-                    out,
-                    step_name=None,
-                    compression=task.profile or "auto",
-                    add_ocr_layer=ocr_layer,
-                    engine=ocr_engine,
-                )
+                try:
+                    ok = create_pdf_from_db(
+                        conn,
+                        out,
+                        step_name=None,
+                        compression=task.profile or "auto",
+                        add_ocr_layer=ocr_layer,
+                        engine=ocr_engine,
+                    )
+                except OcrLayerError as exc:
+                    print(f"  ! PDF export failed: {exc}", file=sys.stderr)
+                    fail += 1
+                    continue
             finally:
                 conn.close()
             if not ok:

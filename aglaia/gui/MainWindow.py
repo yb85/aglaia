@@ -23,7 +23,8 @@ from aglaia.gui.WebcamThread import WebcamThread
 from aglaia.workers.ProcessMonitor import ProcessMonitor
 from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.gui.ScanItemWidget import ScanItemWidget
-from aglaia.workers.PDFprocessor import create_pdf_from_images, create_pdf_from_db
+from aglaia.workers.PDFprocessor import (OcrLayerError, create_pdf_from_images,
+                                         create_pdf_from_db)
 from aglaia.workers.Calibrator import Calibrator, load_calibration, save_calibration
 
 from aglaia.workers.Initializer import load_pipeline_def, pipeline_step_descriptions
@@ -2800,6 +2801,8 @@ class MainWindow(QMainWindow):
     def _run_pdf_maker(self, step_name: Optional[str], output_path: Path,
                        compression: str = "auto", add_ocr_layer: bool = False,
                        ocr_engine: Optional[str] = None):
+        layer_error: Optional[OcrLayerError] = None
+        success = False
         try:
             with db_session(self.db_path) as conn:
                 success = create_pdf_from_db(
@@ -2807,6 +2810,10 @@ class MainWindow(QMainWindow):
                     compression=compression,
                     add_ocr_layer=add_ocr_layer, engine=ocr_engine,
                 )
+        except OcrLayerError as exc:
+            # #149: the text layer could not be written — say so instead of
+            # shipping a PDF that looks searchable and is not.
+            layer_error = exc
         finally:
             # Down before the send, which puts its own caption up. Nothing
             # repaints in between, so there is no flicker — and an exception
@@ -2822,8 +2829,13 @@ class MainWindow(QMainWindow):
         else:
             self._pending_send = ""
             self._discard_if_staged(output_path)
-            self.status_label.setText(self.tr("Failed to create PDF (no images)."))
-            self.toast(self.tr("PDF export failed."), 3000)
+            if layer_error is not None:
+                self.status_label.setText(self.tr("PDF not saved: {err}").format(
+                    err=str(layer_error)))
+                self.toast(self.tr("PDF export failed — OCR layer incomplete."), 6000)
+            else:
+                self.status_label.setText(self.tr("Failed to create PDF (no images)."))
+                self.toast(self.tr("PDF export failed."), 3000)
         QTimer.singleShot(3000, lambda: self.status_label.setText(self.tr("Ready.")))
 
     def _on_slim_down_in_place(self):

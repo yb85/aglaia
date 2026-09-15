@@ -142,6 +142,27 @@ def _ocr_results_for_rows(conn, rows, engine: str | None = None):
     return out
 
 
+class OcrLayerError(RuntimeError):
+    """An OCR layer was requested and could not be written (#149).
+
+    Raised instead of returning an OCR PDF whose layer is empty or partial:
+    such a file was accepted downstream as searchable, and corpus found three
+    of them with 0 readable pages. The incomplete file is removed before this
+    is raised. `missing` holds 1-based PDF page numbers."""
+
+    def __init__(self, expected: int, written: int, missing: list[int],
+                 reason: str = ""):
+        self.expected = int(expected)
+        self.written = int(written)
+        self.missing = list(missing)
+        shown = ", ".join(str(p) for p in missing[:20])
+        more = "…" if len(missing) > 20 else ""
+        super().__init__(
+            reason or f"OCR layer incomplete: {written} of {expected} pages "
+                      f"with OCR text were embedded (missing pages: "
+                      f"{shown}{more})")
+
+
 # ── public export entry point ────────────────────────────────────────
 
 def create_pdf_from_db(
@@ -173,18 +194,37 @@ def create_pdf_from_db(
 
     all_bw = all(r["type"] == "BW" for r in rows)
 
+    # Which rows actually became pages. Both builders skip rows (the bitonal
+    # one skips non-BW rows, the native one a row it cannot convert), and the
+    # OCR layer is laid page by page — so a list indexed by ROW put every page
+    # after a skipped one under the NEXT page's text (#149).
+    kept: list[int] = []
     ok: bool
     if compression in ("jbig2", "g4") or (compression == "auto" and all_bw):
         from aglaia.workers.pdf_export import build_bitonal_pdf
         bw_engine = "jbig2" if compression in ("auto", "jbig2") else "g4"
-        ok = build_bitonal_pdf(rows, output_path, engine=bw_engine)
+        ok = build_bitonal_pdf(rows, output_path, engine=bw_engine, pages=kept)
     else:
         from aglaia.workers.pdf_export import build_native_pdf
-        ok = build_native_pdf(rows, output_path)
+        ok = build_native_pdf(rows, output_path, pages=kept)
 
     if ok and add_ocr_layer:
         from aglaia.workers.pdf_export import inject_ocr_layer
-        inject_ocr_layer(output_path, _ocr_results_for_rows(conn, rows, engine))
+        ocr = _ocr_results_for_rows(conn, [rows[i] for i in kept], engine)
+        if not any(ocr):
+            # An OCR PDF was asked for and no page matches a completed run of
+            # that engine — the lookup-mismatch case. Refuse rather than ship a
+            # file named and trusted as searchable.
+            output_path.unlink(missing_ok=True)
+            raise OcrLayerError(len(kept), 0, list(range(1, len(kept) + 1)),
+                                reason=f"no completed OCR run"
+                                       f"{' for ' + engine if engine else ''} "
+                                       f"matches the exported pages")
+        stats = inject_ocr_layer(output_path, ocr)
+        if stats["written"] < stats["expected"]:
+            output_path.unlink(missing_ok=True)
+            raise OcrLayerError(stats["expected"], stats["written"],
+                                stats["missing"])
     return ok
 
 
