@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
@@ -56,6 +57,15 @@ from aglaia.gui.PipelineEditorWidget import (
 from aglaia.gui.PipelineStepsOutline import PipelineStepsOutline
 
 _NEW_KEY = "__new__"
+
+
+def _logical(pix: QPixmap) -> QPixmap:
+    """`lucide_pixmap` rasterises at 2x and leaves the ratio to the caller.
+    Without it a fixed-size label shows only the centre of the glyph. Copy
+    first: the pixmap is shared from the render cache."""
+    out = QPixmap(pix)
+    out.setDevicePixelRatio(2.0)
+    return out
 
 
 class _ModeCard(QFrame):
@@ -91,7 +101,8 @@ class _ModeCard(QFrame):
                 svg_pixmap_path(icon_path, color=icon_color, size=26))
         elif lucide is not None:
             from aglaia.gui.theme import lucide_pixmap
-            icon_lbl.setPixmap(lucide_pixmap(lucide, color=icon_color, size=lucide_size))
+            icon_lbl.setPixmap(_logical(
+                lucide_pixmap(lucide, color=icon_color, size=lucide_size)))
         h.addWidget(icon_lbl)
 
         name_lbl = QLabel(name)
@@ -301,7 +312,8 @@ class ModePickerPanel(QWidget):
                 svg_pixmap_path(icon_path, color=COLOR_FONT_PRIMARY, size=96))
         else:
             from aglaia.gui.theme import lucide_pixmap
-            self._big_icon.setPixmap(lucide_pixmap("layers", color=COLOR_FONT_MUTED, size=72))
+            self._big_icon.setPixmap(_logical(
+                lucide_pixmap("layers", color=COLOR_FONT_MUTED, size=72)))
         # blurb
         if mode is not None:
             self._blurb.setText(mode.description)

@@ -94,3 +94,62 @@ def test_a_non_svg_icon_is_shown_untinted(app, tmp_path):
 def test_a_missing_path_returns_an_empty_pixmap(app, tmp_path):
     assert svg_pixmap_path(None).isNull()
     assert svg_pixmap_path(tmp_path / "nope.svg").isNull()
+
+
+# ── size and aspect (regression of #114) ──────────────────────────────
+
+def _ink_bbox(pix):
+    """(x0, y0, x1, y1) of the drawn pixels, in device pixels."""
+    img = pix.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    arr = np.frombuffer(img.constBits(), np.uint8).reshape(
+        img.height(), img.width(), 4)
+    ys, xs = np.nonzero(arr[..., 3] > 16)
+    return xs.min(), ys.min(), xs.max(), ys.max()
+
+
+def test_mode_artwork_has_the_requested_logical_size(app):
+    """#114 swapped `QIcon.pixmap(96, 96)`, which returned 96 px, for a 2x
+    render with no device pixel ratio — 192 px reported, so a 96-px label
+    showed only the centre of the book. Every mode card came out cropped."""
+    for mode in MODES:
+        path = mode.icon_path()
+        if path is None or path.suffix != ".svg":
+            continue
+        pix = svg_pixmap_path(path, color="#ffffff", size=96)
+        assert pix.deviceIndependentSize().width() == pytest.approx(96)
+        assert pix.deviceIndependentSize().height() == pytest.approx(96)
+
+
+def test_non_square_artwork_keeps_its_aspect(app):
+    """A bare `QSvgRenderer.render(p)` stretches the viewBox to the square.
+    The mode artwork is not square — up to 1203 x 762 — so the ink must span
+    the full width and only part of the height, centred."""
+    wide = None
+    for mode in MODES:
+        path = mode.icon_path()
+        if path is not None and path.name == "book_flat_x2.svg":
+            wide = path              # viewBox 1203 x 762 — the widest one
+    if wide is None:
+        pytest.skip("book_flat_x2.svg not bundled")
+    pix = svg_pixmap_path(wide, color="#ffffff", size=96)
+    x0, y0, x1, y1 = _ink_bbox(pix)
+    w, h = x1 - x0 + 1, y1 - y0 + 1
+    side = pix.width()
+    assert h < side * 0.8                   # not stretched to fill the height
+    assert abs((y0 + y1) / 2 - side / 2) < side * 0.08   # vertically centred
+    # The ink does not fill its own viewBox (the artwork has margins), so
+    # compare against a reference render on a canvas of the viewBox's OWN
+    # aspect — where a plain render cannot stretch anything.
+    from PySide6.QtCore import QByteArray, Qt
+    from PySide6.QtGui import QPainter, QPixmap
+    from PySide6.QtSvg import QSvgRenderer
+    renderer = QSvgRenderer(QByteArray(wide.read_bytes()))
+    vb = renderer.viewBoxF()
+    ref = QPixmap(int(vb.width() / 4), int(vb.height() / 4))
+    ref.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(ref)
+    renderer.render(painter)
+    painter.end()
+    rx0, ry0, rx1, ry1 = _ink_bbox(ref)
+    ref_aspect = (rx1 - rx0 + 1) / (ry1 - ry0 + 1)
+    assert w / h == pytest.approx(ref_aspect, rel=0.05)
