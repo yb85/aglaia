@@ -537,6 +537,9 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
         <a href={GITHUB}>Source</a>
         <a href={KOFI}>Tip</a>
       </nav>
+      <small class="foot__legal">
+        <a href="/misc/oauth/privacy">Privacy policy</a> · <a href="/misc/oauth/tos">Terms of service</a>
+      </small>
     </footer>
 
     <script>
@@ -1204,6 +1207,8 @@ aglaia run ~/scans/*.jpg            # headless batch</code></pre>
       .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 40px clamp(20px,5vw,64px); border-top: 1px solid #161f2b; color: #6c7c90; font-size: .9rem; }
       .foot nav { display: flex; gap: 22px; }
       .foot a:hover { color: #cfe0f2; }
+      .foot__legal { flex-basis: 100%; font-size: .75rem; color: #4e5c6d; }
+      .foot__legal a { color: inherit; }
 
       /* Phones: don't force a full-viewport hero (the stacked vignettes
          already make it tall) and trim the big section paddings so there
