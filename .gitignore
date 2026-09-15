@@ -20,6 +20,8 @@ WINDOWS_CERT_PFX_BASE64.txt
 #data and misc
 data/
 misc/
+# …but site/public/misc/ is deliberate static content (served at aglaia.bibli.cc/misc/)
+!site/public/misc/
 
 #log and lock files
 *.log
