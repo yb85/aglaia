@@ -10,11 +10,12 @@ Single SQLite file per project: `<workspace>/<slug>.agl`.
 aglaia/storage/
   __init__.py          re-exports
   db.py                open_db / ensure_schema / PRAGMAs
-  schema/0001_initial.sql … 0013_manual_overrides.sql  (applied in order)
+  schema/0001_initial.sql … 0014_mistral_batch_outputs.sql  (applied in order)
   repo.py              ProjectRepo / PipelineRepo / CalibrationRepo /
                        ImageRepo / ThumbRepo / ScanRepo / NodeRepo /
                        BranchRepo / StepOverrideRepo /
-                       ManualOverrideRepo / OcrRepo / DebugRepo
+                       ManualOverrideRepo / OcrRepo / MistralBatchRepo /
+                       DebugRepo
   persister.py         encode_image / make_thumb / Persister
 ```
 
@@ -33,6 +34,8 @@ aglaia/storage/
 | `step_overrides` | Per-page-layout processor disable. A row `(scan_id, branch_path, step_idx, disabled)` makes the chain bypass that step for that layout. |
 | `manual_overrides` | Per-page-layout parameter override. One JSON payload per `(scan_id, branch_path)`: the value the user set where the pipeline would have estimated. |
 | `ocr_runs` | One row per OCR pass over a branch: engine, languages, status, `result_json`, timestamps. `is_stale` flags a result that no longer matches the branch's current node. |
+| `mistral_batch_jobs` | One row per submitted Mistral batch job: status, `run_ids` (page i of the output → `run_ids[i]`), `imported_at`. |
+| `mistral_batch_outputs` | The job's output JSONL **byte for byte** as downloaded (`raw`, `sha256`, `size`, `output_file_id`, `completed_at`), stored at import (#147). No FK to `mistral_batch_jobs`: deleting a job row keeps the paid result. Read with `MistralBatchRepo.output(job_id)` / `.outputs()`. |
 | `debug_artifacts` | Optional debug images attached to a node (e.g. PageDewarper span overlays). |
 
 ## Node tree shape

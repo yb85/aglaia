@@ -27,7 +27,7 @@ def block_mistral_api():
             "Stub run_pipeline / check_batch / cancel_batch instead."
         )
 
-    names = ("submit", "poll", "fetch_pages", "cancel")
+    names = ("submit", "poll", "fetch_pages", "fetch_output", "cancel")
     originals = {n: getattr(mb, n, None) for n in names}
     for n in names:
         if originals[n] is not None:

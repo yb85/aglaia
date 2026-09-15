@@ -133,7 +133,21 @@ def poll(api_key: str, job_id: str) -> tuple[str, Optional[str]]:
 def fetch_pages(api_key: str, job_id: str) -> list[dict]:
     """Download a SUCCESS job's output and return the per-page OCR objects
     (full OCR-4 structure: markdown + typed blocks / bboxes / confidence) in
-    page order. Raises if the job isn't SUCCESS or the output is unreadable."""
+    page order. Raises if the job isn't SUCCESS or the output is unreadable.
+
+    Importers use `fetch_output` + `pages_from_output` instead, so the raw
+    bytes can be stored in the project (#147)."""
+    raw, _info = fetch_output(api_key, job_id)
+    return pages_from_output(raw)
+
+
+def fetch_output(api_key: str, job_id: str) -> tuple[bytes, dict]:
+    """Download a SUCCESS job's output file, untouched.
+
+    Returns ``(raw, info)``: `raw` is the JSONL exactly as
+    `client.files.download` returned it, `info` carries ``output_file_id``
+    and ``completed_at`` (ISO 8601 or None). Raises if the job isn't SUCCESS
+    or has no output file."""
     client = _client(api_key)
     job = client.batch.jobs.get(job_id=job_id)
     status = _norm_status(getattr(job, "status", ""))
@@ -153,8 +167,18 @@ def fetch_pages(api_key: str, job_id: str) -> list[dict]:
         data = dl.text
     else:
         data = dl
-    text = data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else str(data)
-    pages: list[str] = []
+    raw = bytes(data) if isinstance(data, (bytes, bytearray)) else str(data).encode("utf-8")
+    done = getattr(job, "completed_at", None)
+    if done is not None and hasattr(done, "isoformat"):
+        done = done.isoformat()
+    return raw, {"output_file_id": str(out_id),
+                 "completed_at": str(done) if done else None}
+
+
+def pages_from_output(raw: bytes) -> list[dict]:
+    """Per-page OCR objects, in page order, from a batch output JSONL."""
+    text = raw.decode("utf-8")
+    pages: list[dict] = []
     for ln in text.splitlines():
         ln = ln.strip()
         if not ln:

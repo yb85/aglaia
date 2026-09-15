@@ -400,6 +400,18 @@ def _check_ocr(db_path: str) -> int:
     try:
         repo = MistralBatchRepo(conn)
         ocr = OcrRepo(conn)
+        # Jobs imported before #147 kept no raw output. Download it once more
+        # (a file download, not a new OCR) so the project holds the record.
+        for jid in repo.missing_outputs():
+            try:
+                raw, info = mistral_batch.fetch_output(api_key, jid)
+            except Exception as e:
+                print(f"  job {jid}: raw output not retrievable ({e})",
+                      file=sys.stderr)
+                continue
+            repo.store_output(jid, raw, **info)
+            print(f"  job {jid}: stored raw output ({len(raw)} bytes)")
+        conn.commit()
         pend = repo.pending()
         if not pend:
             print("No pending Mistral batch jobs.")
@@ -411,7 +423,9 @@ def _check_ocr(db_path: str) -> int:
             repo.set_status(jid, status, err)
             run_ids = MistralBatchRepo.run_ids_of(job)
             if status == "SUCCESS":
-                pages = mistral_batch.fetch_pages(api_key, jid)
+                raw, info = mistral_batch.fetch_output(api_key, jid)
+                repo.store_output(jid, raw, **info)
+                pages = mistral_batch.pages_from_output(raw)
                 for i, rid in enumerate(run_ids):
                     page = pages[i] if i < len(pages) else {}
                     row = conn.execute(

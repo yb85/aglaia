@@ -78,7 +78,7 @@ new project.
 | `--project-name NAME` | Name for a new project (default: from the input filename). |
 | `--parent-dir DIR` | Parent folder for a new project. |
 | `--input-dpi [force:]N` | Input DPI for imported images; `force:N` overrides every input. |
-| `--check-ocr` | Poll + import pending Mistral batch OCR jobs for the project, then exit. |
+| `--check-ocr` | Poll + import pending Mistral batch OCR jobs for the project (the raw output JSONL is stored in the `.agl`; jobs imported without it are backfilled), then exit. |
 | shared | `-p/--pipeline`, `--workers`, `--force-proc`. |
 
 ```bash

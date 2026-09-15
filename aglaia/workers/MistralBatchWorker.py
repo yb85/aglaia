@@ -119,7 +119,9 @@ class MistralBatchWorker(QThread):
                 run_ids = MistralBatchRepo.run_ids_of(job)
                 if status == "SUCCESS":
                     try:
-                        pages = mistral_batch.fetch_pages(api_key, jid)
+                        raw, info = mistral_batch.fetch_output(api_key, jid)
+                        repo.store_output(jid, raw, **info)
+                        pages = mistral_batch.pages_from_output(raw)
                     except Exception as e:
                         self.log_line.emit(
                             "error", f"[mistral_batch] fetch {jid} failed: "
