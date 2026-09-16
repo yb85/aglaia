@@ -422,12 +422,17 @@ class ExportTab(QWidget):
                 combo.addItem({"pdf": "PDF", "md": "Markdown",
                                "textpack": self.tr("Textpack (PDF + Markdown)")}[f], f)
             combo.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
+            # A card's extras are a footnote to the card, not a second
+            # control of equal weight: at full height this picker read louder
+            # than the destination it belongs to.
+            combo.setFixedHeight(24)
             row.addWidget(combo, 1)
         else:
             row.addStretch(1)
         btn = QPushButton(self.tr("Settings…"))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet("font-size: 10px; padding: 2px 8px;")
+        btn.setFixedHeight(24)
         btn.clicked.connect(
             lambda _=False, n=dest.name: self.destination_settings_requested.emit(n))
         row.addWidget(btn)

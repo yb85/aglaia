@@ -344,17 +344,26 @@ class PluginSettingsDialog(QDialog):
 
         entry = QHBoxLayout()
         entry.setSpacing(6)
+        # The caption says what the box is; the placeholder shows an
+        # example, which is the technique that actually transfers (see
+        # docs/ui-writing.md). Repeating the caption inside the box says
+        # nothing twice.
         name = QLineEdit()
-        name.setPlaceholderText(self.tr("Name"))
+        name.setPlaceholderText(self.tr("Example: X-Api-Token"))
         name.setToolTip(self.tr("The header's name, as the server expects it."))
         value = QLineEdit()
-        value.setPlaceholderText(self.tr("Value"))
+        value.setPlaceholderText(self.tr("Kept secret"))
         value.setEchoMode(QLineEdit.EchoMode.Password)
-        value.setToolTip(self.tr("Kept secret, and never shown again."))
+        value.setToolTip(self.tr("Stored in your keychain, and never shown "
+                                 "again."))
+        for edit_box in (name, value):
+            edit_box.setFixedHeight(24)
         add = QPushButton(self.tr("Add"))
+        add.setFixedHeight(24)
+        add.setStyleSheet("font-size: 11px; padding: 2px 10px;")
         # Two unlabelled boxes are a guessing game — the first screenshot of
         # this field asked "what is key, what is value". Each box carries its
-        # own caption above it, and the placeholder repeats it inside.
+        # own caption above it.
         entry.addWidget(self._captioned(self.tr("Name"), name), 2)
         entry.addWidget(self._captioned(self.tr("Value"), value), 3)
         entry.addWidget(add)
