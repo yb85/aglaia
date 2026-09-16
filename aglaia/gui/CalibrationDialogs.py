@@ -472,16 +472,20 @@ class DpiCalibrationDialog(QDialog):
         self._show_live_buttons()
 
     def _on_method_ruler(self) -> None:
-        frame = self._live_frame
-        if frame is None:
+        if self._live_frame is None:
             self._set_status(
                 self.tr("No camera frame yet — wait a moment, then retry."),
                 _COLOR_HINT_WARN)
             return
+        frame = self._grab_measure_frame()  # measure the ruler on full-res pixels
+        if frame is None:
+            self._set_status(
+                self.tr("Phone didn't answer — try again."), _COLOR_HINT_WARN)
+            return
         self._method = "ruler"
         self._detect_timer.stop()
         self._preview_timer.stop()      # freeze the frame to measure on
-        self._captured_frame = frame.copy()
+        self._captured_frame = frame
         self._ruler.set_frame(self._captured_frame)
         self._dist_edit.clear()
         self._show_ruler()
@@ -545,11 +549,43 @@ class DpiCalibrationDialog(QDialog):
     def _tick_preview(self) -> None:
         if self._webcam is None:
             return
-        frame = self._webcam.get_frame()
+        # A bridge (phone) source exposes get_preview_frame() = the low-res
+        # stream, so the 60 ms live tick never triggers a remote still. A local
+        # webcam has no such method → get_frame() (already an instant full-res
+        # copy). Measurement (below) always uses the full-res frame.
+        src = getattr(self._webcam, "get_preview_frame", None) or self._webcam.get_frame
+        frame = src()
         if frame is None:
             return
         self._live_frame = frame
         self._live_preview.set_frame(frame)
+
+    def _measure_scale(self) -> float:
+        """full-res-still / live-preview long-edge ratio, so the live ≈dpi
+        readout — detected on the low-res bridge preview — approximates the real
+        scan DPI. 1.0 for a local webcam (its live frame is already full-res)."""
+        wt = self._webcam
+        if wt is None or not hasattr(wt, "get_preview_frame") or self._live_frame is None:
+            return 1.0
+        dims = getattr(wt, "still_dims", None)
+        if not dims:
+            return 1.0
+        prev_long = max(self._live_frame.shape[:2])
+        return float(max(dims)) / prev_long if prev_long > 0 else 1.0
+
+    def _grab_measure_frame(self) -> Optional[np.ndarray]:
+        """Full-res frame to MEASURE on. For a local webcam this is an instant
+        copy; for a phone bridge it triggers one remote full-res still (blocking
+        ~0.5–2 s). Card DPI is always computed on these sensor pixels, never on
+        the downscaled preview. Returns ``None`` if the phone didn't answer."""
+        wt = self._webcam
+        if wt is None:
+            return None
+        if hasattr(wt, "get_preview_frame"):
+            self._set_status(
+                self.tr("Capturing full-res still from the phone…"), COLOR_FONT_PRIMARY)
+            self._status.repaint()  # paint before the blocking call, no event re-entrancy
+        return wt.get_frame()
 
     def _tick_detect(self) -> None:
         if self._live_frame is None:
@@ -575,7 +611,10 @@ class DpiCalibrationDialog(QDialog):
             return
 
         if dpi and dpi > 0:
-            self._live_dpi_samples.append(float(dpi))
+            # On a bridge preview the detected DPI is preview-scale; lift it to
+            # approximate the real scan DPI. Scale-invariant, so the stability
+            # gate (coeff. of variation) is unaffected.
+            self._live_dpi_samples.append(float(dpi) * self._measure_scale())
         med = self._median_live_dpi()
 
         # Geometry guidance — is this frame good enough to measure from?
@@ -667,9 +706,17 @@ class DpiCalibrationDialog(QDialog):
         if self._live_frame is None:
             self._status.setText(self.tr("No frame from camera."))
             return
-        self._captured_frame = self._live_frame.copy()
-        # Use the latest live detect — re-run detect on the captured
-        # frame so we're refining the exact pixels we measured against.
+        frame = self._grab_measure_frame()  # full-res (remote still for a bridge)
+        if frame is None:
+            self._auto_fired = False  # let auto-capture retry
+            self._steady_ticks = 0
+            self._set_status(
+                self.tr("Phone didn't answer — hold the card steady and retry."),
+                _COLOR_HINT_WARN)
+            return
+        self._captured_frame = frame
+        # Re-run detect on the captured full-res frame so we refine the exact
+        # sensor pixels we measure the DPI against (never the preview scale).
         try:
             from aglaia.workers.CreditCardDPI import detect_card_dpi
             _dpi, quad = detect_card_dpi(self._captured_frame)
@@ -687,7 +734,12 @@ class DpiCalibrationDialog(QDialog):
         if self._live_frame is None:
             self._status.setText(self.tr("No frame from camera."))
             return
-        self._captured_frame = self._live_frame.copy()
+        frame = self._grab_measure_frame()  # full-res (remote still for a bridge)
+        if frame is None:
+            self._set_status(
+                self.tr("Phone didn't answer — try again."), _COLOR_HINT_WARN)
+            return
+        self._captured_frame = frame
         # Stop the live + detect timers so the preview freezes and the
         # CPU isn't double-using SIFT/Vision on a frame we're not
         # showing any more.
