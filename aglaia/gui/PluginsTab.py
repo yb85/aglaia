@@ -834,6 +834,12 @@ class PluginsTab(QWidget):
             it = self._body_layout.takeAt(0)
             w = it.widget()
             if w is not None:
+                # `deleteLater` alone is not enough: the destruction waits
+                # for the event loop, and until then the widget keeps its
+                # parent and paints — so a rebuild drew the new cards ON TOP
+                # of the old ones (every line doubled after an update).
+                # Unparenting hides it now; deleteLater still frees it.
+                w.setParent(None)
                 w.deleteLater()
 
     def _heading(self, text: str) -> QLabel:
@@ -954,7 +960,12 @@ class PluginsTab(QWidget):
             cfg.clicked.connect(lambda _=False, s=slug: self._configure(s))
             row.addWidget(cfg)
         if newer:
-            up = QPushButton(self.tr("Update to {v}").format(v=newer.version))
+            # "Update to 1.3.1" did not fit beside Settings… and Uninstall:
+            # the card has a fixed width, so the label was cut mid-word
+            # ("date to 1."). The version goes to the tooltip, where a long
+            # string costs nothing.
+            up = QPushButton(self.tr("Update"))
+            up.setToolTip(self.tr("Update to {v}").format(v=newer.version))
             up.setStyleSheet("font-weight: 600;")
             up.clicked.connect(lambda _=False, e=newer: self._update(e))
             row.addWidget(up)

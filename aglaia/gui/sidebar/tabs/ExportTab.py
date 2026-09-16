@@ -420,12 +420,22 @@ class ExportTab(QWidget):
             combo = QComboBox()
             for f in formats:
                 combo.addItem({"pdf": "PDF", "md": "Markdown",
-                               "textpack": self.tr("Textpack (PDF + Markdown)")}[f], f)
+                               "textpack": self.tr("Textpack")}[f], f)
             combo.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 10px;")
             # A card's extras are a footnote to the card, not a second
             # control of equal weight: at full height this picker read louder
             # than the destination it belongs to.
             combo.setFixedHeight(24)
+            # And it must not set the sidebar's width. A combo sizes itself
+            # to its longest item by default, so one long label pushed a
+            # minimum width through the whole panel and every card was
+            # clipped on the right.
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(6)
+            combo.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                QSizePolicy.Policy.Fixed)
+            combo.setToolTip(self.tr("What this destination is given."))
             row.addWidget(combo, 1)
         else:
             row.addStretch(1)
