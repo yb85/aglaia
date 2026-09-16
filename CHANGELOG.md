@@ -4,7 +4,12 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0rc6] — 2026-09-16
+
+The OCR chain a library can trust end to end (milestone M11): a PDF text
+layer that is searchable or says it is not, the paid OCR response kept in
+the project, and one archive — the **OCR textpack** — that carries the
+searchable PDF, its Markdown page by page and that raw response to corpus.
 
 ### Added
 
@@ -762,6 +767,7 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0rc6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc6
 [0.1.0rc5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc5
 [0.1.0rc4]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc4
 [0.1.0rc3]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc3
