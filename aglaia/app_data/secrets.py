@@ -97,6 +97,44 @@ def _write_env_file(values: dict[str, str]) -> None:
         pass
 
 
+# ── where a secret is written ─────────────────────────────────────────
+
+#: Env var forcing the plaintext store (``1``) or the keychain (``0``).
+ENV_PLAINTEXT = "AGLAIA_SECRETS_PLAINTEXT"
+
+#: Set by the CLI for every non-GUI command (see ``aglaia/cli``).
+_PLAINTEXT_DEFAULT = False
+
+
+def use_plaintext_store(on: bool = True) -> None:
+    """Write secrets to ``APP_DATA/.env`` rather than the OS keychain.
+
+    The CLI turns this on for every headless command. A keychain is a
+    *session* service: on Linux it needs a logged-in desktop to unlock, so a
+    key stored by a terminal run — or worse, by a GUI run — is unreadable to
+    the cron job, the ssh session or the systemd unit that has to use it, and
+    the failure looks like a wrong key. A batch install therefore keeps its
+    secrets in the 0600 ``.env`` next to the project data, which is readable
+    by exactly the account that runs the batch.
+
+    Reading is unaffected: env var → ``.env`` → keychain, always. Nothing
+    already in a keychain becomes unreachable.
+    """
+    global _PLAINTEXT_DEFAULT
+    _PLAINTEXT_DEFAULT = bool(on)
+
+
+def plaintext_store() -> bool:
+    """True when secrets must go to ``.env``. ``AGLAIA_SECRETS_PLAINTEXT``
+    overrides the mode the process set for itself."""
+    forced = os.environ.get(ENV_PLAINTEXT, "").strip().lower()
+    if forced in ("1", "true", "yes", "on"):
+        return True
+    if forced in ("0", "false", "no", "off"):
+        return False
+    return _PLAINTEXT_DEFAULT
+
+
 # ── public API ────────────────────────────────────────────────────────
 
 def get_mistral_api_key() -> str:
@@ -134,6 +172,22 @@ def set_mistral_api_key(value: str) -> str:
     store wins, the *other* store's copy is cleared so there's a single
     source of truth and no stale secret left behind."""
     value = (value or "").strip()
+
+    # 0. Headless: the .env is the store, and the keychain copy is cleared
+    #    so there is one source of truth (see `use_plaintext_store`).
+    if plaintext_store():
+        try:
+            import keyring
+            keyring.delete_password(_SERVICE, _ACCOUNT_MISTRAL)
+        except Exception:
+            pass
+        values = _read_env_file()
+        if value:
+            values[ENV_MISTRAL] = value
+        else:
+            values.pop(ENV_MISTRAL, None)
+        _write_env_file(values)
+        return "env_file" if value else ""
 
     # 1. Try the OS keychain.
     try:

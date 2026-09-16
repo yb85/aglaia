@@ -46,6 +46,29 @@ SQLite, created + seeded on first connect (`aglaia/app_data/db.py`). Tables:
   plugins (trust gate; see [processors.md](./processors.md)).
 
 This is distinct from the **project** store — each `.agl` project is its
-own SQLite DB (see [storage.md](./storage.md)). Secrets (e.g. the Mistral
-API key) go to the OS keychain via `keyring`, not this DB (see
+own SQLite DB (see [storage.md](./storage.md)). Secrets (the Mistral API
+key, a plugin's password or token) never go in this DB (see
 [ocr.md](./ocr.md)).
+
+## Where a secret is written
+
+| Run | Store |
+|---|---|
+| the GUI (`aglaia` / `aglaia gui`) | the **OS keychain** via `keyring` |
+| every other command (`run`, `ocr`, `plugins`, `server`, `setup`, …) | **`<APP_DATA>/.env`**, mode 0600 |
+
+A keychain is a *session* service: on Linux it needs a logged-in desktop to
+unlock it, so a key stored there is unreadable to the cron job, the ssh
+session or the systemd unit that has to use it — and the failure looks like a
+wrong key, which sends the user to rotate one that was fine. A headless
+install therefore keeps its secrets in a file owned by the account that runs
+the batch. `aglaia/cli` sets this for every command but `gui`
+(`secrets.use_plaintext_store`); `AGLAIA_SECRETS_PLAINTEXT=0` or `=1` forces
+either store.
+
+**Reading is unaffected and checks all of them**: the environment variable
+first, then `.env`, then the keychain — so a key stored by the GUI keeps
+working in a batch on the same machine, and nothing already stored becomes
+unreachable. Plugin secrets are namespaced per plugin: the keychain account
+is `<slug>:<key>`, the `.env` line is
+`AGLAIA_PLUGIN_<SLUG>_<KEY>=…`.

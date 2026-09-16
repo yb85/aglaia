@@ -172,18 +172,24 @@ def test_without_a_keychain_it_still_works_and_admits_it(ctxmod, monkeypatch):
 
 def test_the_plaintext_copy_is_dropped_once_a_keychain_takes_it(
         ctxmod, monkeypatch):
-    """A stale plaintext copy is exactly what a keychain was meant to avoid."""
+    """A stale plaintext copy is exactly what a keychain was meant to avoid.
+
+    The plaintext store is `APP_DATA/.env` (the file a headless run uses);
+    it was the config DB until secrets moved there."""
     pytest.importorskip("keyring")
+    from aglaia.app_data.secrets import _read_env_file
     monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring", lambda self: None)
     cfg = ctxmod.PluginConfig("a-plugin")
     s = ctxmod.PluginSecrets("a-plugin", cfg)
     s.set("api_key", "sk-plain")
-    assert cfg._raw_get("__secret__.api_key") == "sk-plain"
+    line = "AGLAIA_PLUGIN_A_PLUGIN_API_KEY"
+    assert _read_env_file().get(line) == "sk-plain"
     _fake_keyring(monkeypatch, {})
     import keyring
     monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring",
                         lambda self: keyring)
     s.set("api_key", "sk-kept")
+    assert line not in _read_env_file()
     assert cfg._raw_get("__secret__.api_key") is None
     assert s.get("api_key") == "sk-kept"
 

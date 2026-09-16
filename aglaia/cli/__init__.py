@@ -102,6 +102,20 @@ def _prepare_args(argv: Optional[list[str]]) -> list[str]:
 def run(argv: Optional[list[str]] = None) -> int:
     """Dispatch the CLI and return a process exit code."""
     args = _prepare_args(argv)
+    # Every command but `gui` is headless, and a headless install must not
+    # depend on a keychain: on Linux it is a session service that a cron job,
+    # an ssh session or a systemd unit cannot unlock, so a key written there
+    # is unreadable exactly where the batch needs it — and the failure looks
+    # like a wrong key. Those commands therefore write secrets to the 0600
+    # `APP_DATA/.env`. Reading still checks the env var, the file and the
+    # keychain, so a key stored by the GUI keeps working.
+    # `AGLAIA_SECRETS_PLAINTEXT=0` forces the keychain back.
+    if args and args[0] != "gui":
+        try:
+            from aglaia.app_data.secrets import use_plaintext_store
+            use_plaintext_store(True)
+        except Exception:
+            pass
     command = typer.main.get_command(app)
     try:
         command(args=args, standalone_mode=False)

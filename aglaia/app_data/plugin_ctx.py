@@ -219,7 +219,23 @@ class PluginSecrets:
         self._config = config if config is not None else PluginConfig(slug)
 
     # -- backend -------------------------------------------------------
+    def _env_key(self, key: str) -> str:
+        """This secret's name in ``APP_DATA/.env``. Namespaced by slug, and
+        uppercased like every other line in that file."""
+        import re
+        safe = re.sub(r"[^A-Za-z0-9]+", "_", f"{self.slug}_{key}")
+        return f"AGLAIA_PLUGIN_{safe.upper()}"
+
     def _keyring(self):
+        # Headless runs keep secrets in the 0600 .env, not in a keychain a
+        # cron job or systemd unit cannot unlock (see
+        # `aglaia.app_data.secrets.use_plaintext_store`).
+        try:
+            from aglaia.app_data.secrets import plaintext_store
+            if plaintext_store():
+                return None
+        except Exception:
+            pass
         try:
             import keyring
             from keyring.backends.fail import Keyring as _Fail
@@ -241,6 +257,14 @@ class PluginSecrets:
 
     # -- api -----------------------------------------------------------
     def get(self, key: str) -> Optional[str]:
+        # Order mirrors the app's own key lookup: the plaintext file first,
+        # so a headless box reads what it wrote, then the keychain, then the
+        # legacy config-DB fallback — nothing stored by an older build
+        # becomes unreachable.
+        from aglaia.app_data.secrets import _read_env_file
+        env = _read_env_file().get(self._env_key(_check_key(key)))
+        if env:
+            return env
         kr = self._keyring()
         if kr is not None:
             try:
@@ -262,14 +286,26 @@ class PluginSecrets:
             try:
                 kr.set_password(SECRET_SERVICE, self._username(key),
                                 str(value))
-                # One home only: a stale plaintext copy is exactly the thing
-                # a keychain was meant to prevent.
+                # One home only: a stale plaintext copy is exactly the
+                # thing a keychain was meant to prevent — clear both the
+                # .env line and the legacy config-DB row.
                 self._config._raw_delete(self._FALLBACK_PREFIX + key)
+                from aglaia.app_data.secrets import (_read_env_file,
+                                                     _write_env_file)
+                values = _read_env_file()
+                if values.pop(self._env_key(key), None) is not None:
+                    _write_env_file(values)
                 self._remember(key)
                 return
             except Exception:
                 pass
-        self._config._raw_set(self._FALLBACK_PREFIX + key, str(value))
+        # No keychain (or a headless run): the 0600 .env in APP_DATA, the
+        # same file the Mistral key falls back to.
+        from aglaia.app_data.secrets import _read_env_file, _write_env_file
+        values = _read_env_file()
+        values[self._env_key(key)] = str(value)
+        _write_env_file(values)
+        self._config._raw_delete(self._FALLBACK_PREFIX + key)
         self._remember(key)
 
     def delete(self, key: str) -> None:
@@ -280,6 +316,10 @@ class PluginSecrets:
                 kr.delete_password(SECRET_SERVICE, self._username(key))
             except Exception:
                 pass
+        from aglaia.app_data.secrets import _read_env_file, _write_env_file
+        values = _read_env_file()
+        if values.pop(self._env_key(key), None) is not None:
+            _write_env_file(values)
         self._config._raw_delete(self._FALLBACK_PREFIX + key)
         self._forget(key)
 

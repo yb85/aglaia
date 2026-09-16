@@ -214,7 +214,7 @@ imports = ["numpy", "cv2"]     # third-party modules it will import (§6)
 
 [capabilities]                 # each one appears in the install dialog
 config  = true                 # wants its own settings store
-secrets = false                # wants the namespaced keychain
+secrets = false                # wants the namespaced secret store
 network = false                # will open network connections
 files   = false                # will read/write outside its own directory
 ```
