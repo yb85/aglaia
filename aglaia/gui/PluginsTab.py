@@ -274,6 +274,14 @@ class PluginSettingsDialog(QDialog):
             cur = str(self.dest.conf(field.key, field.default) or "")
             if cur in field.choices:
                 w.setCurrentText(cur)
+        elif field.kind not in ("str", "secret"):
+            # A plugin written for a newer Aglaïa. An empty box the user
+            # cannot fill in — and whose content this build would not store
+            # correctly — is worse than none: say which version is needed.
+            w = QLineEdit()
+            w.setEnabled(False)
+            w.setPlaceholderText(
+                self.tr("This setting needs a newer version of Aglaïa."))
         else:
             w = QLineEdit()
             if is_secret:
@@ -301,6 +309,19 @@ class PluginSettingsDialog(QDialog):
         self._widgets[field.key] = (field, w, is_secret)
         return wrap
 
+    @staticmethod
+    def _captioned(text: str, w: QWidget) -> QWidget:
+        """`w` under a small caption, so a bare box never has to be guessed."""
+        wrap = QWidget()
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        cap = QLabel(text)
+        cap.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+        col.addWidget(cap)
+        col.addWidget(w)
+        return wrap
+
     # ── "headers" field: a list the user grows ────────────────────────
     def _headers_row(self, field) -> QWidget:
         """Name + value + Add, over one removable tag per stored header.
@@ -324,13 +345,18 @@ class PluginSettingsDialog(QDialog):
         entry = QHBoxLayout()
         entry.setSpacing(6)
         name = QLineEdit()
-        name.setPlaceholderText(self.tr("Header name"))
+        name.setPlaceholderText(self.tr("Name"))
+        name.setToolTip(self.tr("The header's name, as the server expects it."))
         value = QLineEdit()
         value.setPlaceholderText(self.tr("Value"))
         value.setEchoMode(QLineEdit.EchoMode.Password)
+        value.setToolTip(self.tr("Kept secret, and never shown again."))
         add = QPushButton(self.tr("Add"))
-        entry.addWidget(name, 2)
-        entry.addWidget(value, 3)
+        # Two unlabelled boxes are a guessing game — the first screenshot of
+        # this field asked "what is key, what is value". Each box carries its
+        # own caption above it, and the placeholder repeats it inside.
+        entry.addWidget(self._captioned(self.tr("Name"), name), 2)
+        entry.addWidget(self._captioned(self.tr("Value"), value), 3)
         entry.addWidget(add)
         col.addLayout(entry)
 
