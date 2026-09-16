@@ -107,7 +107,7 @@ To achieve it, it relies on :
 > DMG, Apple Silicon), **Windows** (installer) and **Linux** (AppImage), plus
 > `pip install aglaia` on any platform. On macOS, Apple Vision powers page
 > detection and on-device OCR; off macOS, Aglaïa falls back to EAST/DBnet for
-> layout and to Surya / PaddleOCR-VL / Mistral for OCR. Voice control (Vosk)
+> layout and to Surya / GLM-OCR / Mistral for OCR. Voice control (Vosk)
 > is offline and cross-platform.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -125,10 +125,10 @@ It's free. [Donations are appreciated](https://ko-fi.com/yb_85) to help cover de
 * **page-dewarp + JAX / MLX** — cubic-sheet page dewarp (MLX on Apple Silicon). The original project has been highly modified and extended
 * **doxapy** — binarization (Wolf / Sauvola)
 * **pikepdf · pypdfium2** — PDF I/O
-* **Apple Vision · Speech** (pyobjc, macOS) — OCR, layout, with EAST/DBnet fallbacks
-* **Surya · PaddleOCR-VL · Mistral Document AI** — cross-platform OCR engines
+* **Apple Vision · Apple Document** (pyobjc, macOS) — OCR and layout, with EAST/DBnet fallbacks
+* **Surya 2 · GLM-OCR · Unlimited-OCR · Mistral Document AI** — cross-platform OCR engines (local VLMs via MLX or vLLM; Mistral in the cloud, synchronous or batch)
 * **Vosk** — offline voice control (cross-platform)
-* **SQLite (FTS5)** — project + full-text store
+* **SQLite** — one `.agl` file per project: images, every pipeline step, OCR results, per-page corrections
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -171,12 +171,12 @@ MLX-served local VLM OCR — GLM-OCR / Unlimited-OCR / Surya), `--extra cuda`
 (NVIDIA: vLLM-served local VLM OCR), `--extra voice` (Vosk), `--extra server`
 (FastAPI + uvicorn HTTP job server).
 
-**Local VLM OCR** (`--ocr glm` / `--ocr unlimited`, also PaddleOCR-VL) serves
+**Local VLM OCR** (`--ocr glm` / `--ocr unlimited` / `--ocr surya`) serves
 through a bundled-by-platform backend: `--extra macos` ships the MLX backend
 (Apple Silicon), `--extra cuda` ships vLLM (Linux, GPU or CPU). So on a Mac the
 GUI install (`--extra gui --extra macos`) already includes local VLM OCR; on a
-Linux GPU box use `--extra cuda`. (`surya` and `cuda` are mutually exclusive —
-incompatible torch/openai pins.)
+Linux GPU box use `--extra cuda`. Surya 2 goes through that same backend —
+there is no `surya` extra any more.
 
 **First run (CLI-only installs):** run the one-time setup to pick and download
 the offline models, seed the default pipelines, and bootstrap the config:
@@ -221,12 +221,14 @@ Commands:
 | Command | What it does |
 |---|---|
 | `gui [PROJECT]` | Capture GUI (default). `--camera-id N`, `--diagnose-memory`. |
-| `run PATHS…` | Headless batch over images, PDFs, or one `.agl`. `--ocr ENGINE[:opt…]` (now needs a value — use `--ocr auto`), `--ocr-lang`, `--export`, `--md-refine`, `--project-name`, `--parent-dir`, `--input-dpi [force:]N`, `--check-ocr`. |
+| `run PATHS…` | Headless batch over images, PDFs, or one `.agl`. `--ocr ENGINE[:opt…]` (now needs a value — use `--ocr auto`), `--ocr-lang`, `--export` (`pdf`, `md`, `textpack`), `--md-refine`, `--send-to SLUG[+SLUG…]`, `--project-name`, `--parent-dir`, `--input-dpi [force:]N`, `--check-ocr`. |
 | `ocr PATHS…` | OCR PDFs/images (or re-OCR a `.agl`) with **no** processing chain — for already-clean docs. Same OCR/export options as `run`, minus `--pipeline`/`--workers`/`--force-proc`. Engine defaults to `auto`. |
 | `setup` | Interactive first-run setup (choose/download models, seed config). |
-| `list pipelines\|ocr\|exports` | Introspect available pipelines, OCR engines, exporters. |
+| `list pipelines\|ocr\|exports\|destinations` | Introspect available pipelines, OCR engines, export formats, installed destinations. |
+| `plugins …` | The plugin store from the terminal: `list`, `search`, `install`, `update`, `toggle`, `remove`, `config`. |
 | `server` | HTTP job server (see below). |
 | `version` | Print the version (`--version` also works). |
+| `skill` | Print the agent skill file that documents this CLI. |
 
 Shared options (on `gui` and `run`): `-p/--pipeline NAME|PATH`
 (`book_curved_x2` resolves to the bundled pipeline, or pass a `.yaml`),

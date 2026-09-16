@@ -28,6 +28,7 @@ const SKIP = new Set([
   'development.md',    // dev setup — not user-facing public reference
   'distribution.md',   // release/CI internals — not user-facing reference
   'subcommand-cli.md', // internal CLI-redesign plan, not user reference
+  'processors-review.md', // an architecture review of a given day, not reference
 ]);
 
 function titleFrom(md, fallback) {

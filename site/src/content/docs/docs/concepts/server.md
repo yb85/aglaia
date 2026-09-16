@@ -33,7 +33,7 @@ Useful flags:
 On startup the server prints an **admin panel** link with a one-time secret:
 `http://HOST:PORT/admin?secret=…`.
 
-For the best OCR on hard pages, pair it with the `cloud` extra — Mistral
+For the best OCR on hard pages, pair it with a Mistral API key — Mistral
 Document AI runs as a **batch** job (polled with exponential backoff), and the
 completion email carries the download links.
 

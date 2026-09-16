@@ -13,7 +13,7 @@ flowchart LR
     Import["IMPORT<br/>images / PDF / webcam frame"]
     Pipeline["PIPELINE PROCESSING<br/>DPI · deskew · page · dewarp · binarize …"]
     OCR["OCR<br/>recognise text lines"]
-    Export["EXPORT<br/>searchable PDF / Markdown"]
+    Export["EXPORT<br/>searchable PDF / Markdown / OCR textpack"]
     AGL["one &lt;slug&gt;.agl SQLite project file<br/>(raw scans · every step · branches · OCR)"]
     Import --> Pipeline --> OCR --> Export
     Import --> AGL
@@ -37,9 +37,14 @@ flowchart LR
    such as headings and tables). This runs off the pipeline, on the image
    the user selected for each page.
 4. **[Export](/docs/concepts/export)** — the chosen page outputs are
-   assembled into a searchable PDF (image + invisible OCR text layer)
-   and/or a Markdown document. You can also export a *slim* copy of the
-   project itself.
+   assembled into a searchable PDF (image + invisible OCR text layer),
+   a Markdown document, or an **OCR textpack** carrying both plus the raw
+   OCR response. An installed destination can take the finished file
+   straight to a Kindle, a Calibre library, a folder or a corpus
+   (`--send-to`). You can also export a *slim* copy of the project itself.
+
+A page that needs no cleaning can skip stages 2 and 3 of the pipeline
+entirely: `aglaia ocr` ingests each page as it is and OCRs it directly.
 
 ## One file holds everything
 
@@ -57,12 +62,15 @@ identical results.
 | Entry | `aglaia [PROJECT]` (the default command) | `aglaia run PATHS…` |
 | Import | live webcam + import panel | image / PDF / `.agl` arguments |
 | Processing | identical `IntegratedProcessingChain` | identical |
-| OCR / export | tabs + buttons | `--ocr` / `--export` flags |
+| OCR / export | tabs + buttons | `--ocr`, `--export`, `--send-to`, `--check-ocr` |
+| Correcting one page | drag its crop, corners, rotation or dewarp sliders | `step_overrides` / `manual_overrides` already stored in the project are honoured |
 | Use when | scanning interactively | batching, automation |
 
-> The CLI is organised into subcommands — `aglaia run` (batch),
-> `aglaia setup`, `aglaia list`, `aglaia server`, `aglaia version`. Running
-> `aglaia` (or `aglaia ~/book.agl`) with no subcommand opens the GUI.
+> The CLI is organised into subcommands — `aglaia run` (batch), `aglaia ocr`
+> (OCR with no pipeline, for pages that need no cleaning), `aglaia setup`,
+> `aglaia list`, `aglaia plugins`, `aglaia server`, `aglaia version`,
+> `aglaia skill`. Running `aglaia` (or `aglaia ~/book.agl`) with no
+> subcommand opens the GUI.
 
 ## Related resources
 

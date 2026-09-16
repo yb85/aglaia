@@ -40,7 +40,7 @@ content `QStackedWidget` are assembled in `aglaia/gui/sidebar/SidebarPanel.py`.
 - **MainWindow** runs on the Qt main thread.
 - **WebcamThread** (`aglaia/gui/WebcamThread.py`) — QThread, `cv2.VideoCapture`, applies rotation/mirror/flip per frame, emits `change_pixmap_signal`. `get_frame()` returns the latest BGR frame on demand. 30 FPS cap.
 - **ProcessMonitor** (`aglaia/workers/ProcessMonitor.py`) — QThread that blocks on `log_queue.get(timeout=0.1)` and re-emits messages as Qt signals on the main thread. Handles `image_event`, `worker_started`, `log_info/warning`, `error`, and `timing` (printed via Rich).
-- **VoiceWorker** (`aglaia/gui/VoiceWorker.py`) — QThread, Apple `SFSpeechRecognizer` + `AVAudioEngine`. Emits `command_detected(action)` and `transcription_update(text)`. Skipped if `pyobjc Speech` import fails.
+- **VoiceWorkerVosk** (`aglaia/gui/VoiceWorkerVosk.py`) — QThread running Vosk offline against a constrained grammar, on every platform. Emits `command_detected(action)` and `transcription_update(text)`. Skipped when the `voice` extra or the model is absent. (Apple Speech drove this until 2026-08; it is gone.)
 - **Processing chain** — separate worker processes started by `IntegratedProcessingChain.start()`. Workers persist each step directly to the project `.agl` SQLite DB (no separate writer process).
 
 ## Workflow
@@ -48,7 +48,7 @@ content `QStackedWidget` are assembled in `aglaia/gui/sidebar/SidebarPanel.py`.
 Projects are a single SQLite `<slug>.agl` file — there are no per-step output directories on disk. Raw captures and imports become `scans` rows plus a raw root `nodes` row pointing at a `COLOR` image blob (`aglaia/storage/persister.py` `Persister`); every pipeline result is persisted as a further node. The only sibling files are slug-prefixed debug dirs and the export target.
 
 1. `initialize(mode="capture")` (`aglaia/workers/Initializer.py`) parses args/config and builds `args.options`. For capture mode `args.options["paths"]` holds only `root`, `debug_prefix`, and `export` — no `raw`/`output` dirs.
-2. `load_calibration()` reads `config/camera_params.json`. If present, `cv2.getOptimalNewCameraMatrix` is computed at capture time and each grabbed frame is undistorted before it is persisted (no on-disk save).
+2. `load_calibration()` reads `<APP_DATA>/camera_params.json`. If present, `cv2.getOptimalNewCameraMatrix` is computed at capture time and each grabbed frame is undistorted before it is persisted (no on-disk save).
 3. `create_processing_chain(args, log_queue, db_path=…)` builds the `IntegratedProcessingChain` (`aglaia/workers/Initializer.py`). `chain.start()` spawns the multiprocessing workers — they persist each step straight to the project DB (no separate writer process).
 4. `load_existing_scans` rebuilds the right-hand panel **from the SQLite DB** (`ScanRepo.list_active` → `NodeRepo`), replaying every persisted node into its `ScanItemWidget` and seeding `current_idx` from the highest scan idx.
 5. `WebcamThread`, `ProcessMonitor`, `VoiceWorker` start.
@@ -67,8 +67,8 @@ Projects are a single SQLite `<slug>.agl` file — there are no per-step output 
 
 - `raw` thumb → one thumb per pipeline step (`pipeline_steps` = the `instance_name`s computed in `MainWindow.__init__`).
 - `output` thumb is the latest persisted result for the scan.
-- Refresh timer polls every 2s for files that appeared on disk without an `image_event` (defensive against missed events).
-- `restore_state(path, type)` is called on startup for every file that was already on disk.
+- A 200 ms single-shot timer coalesces the refreshes triggered by a burst of `image_event`s into one repaint.
+- On startup the widget is rebuilt from the project DB (`load_existing_scans` → `ScanRepo` / `NodeRepo`), not from files on disk.
 
 ## Per-page processor disable
 
@@ -307,7 +307,7 @@ and it is one SQLite round-trip each — and the cache is dropped on
 
 ## Calibration buttons
 
-- **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `config/camera_params.json`. Restart capture to pick up the new calibration.
+- **Full Calibration** — guides the user through capturing `calnum` (default 10) chessboard frames. Last sample is taken with board flat at "book distance" → its measured px-per-square sets the DPI. Calls `Calibrator.finalize_calibration` → `save_calibration(...)` → writes `<APP_DATA>/camera_params.json`. Restart capture to pick up the new calibration.
 - **Calibrate DPI** — single-sample, updates only the DPI field while keeping the existing camera matrix.
 
 Print `assets/calibration/calibration-chessboard_A4_7x10sq_25mm.pdf` on real A4 (at 100%) as the calibration target — generate it with `scripts/gen_calibration_board.py`. Default board is 6×9 inner corners at 25mm squares (see `docs/calibration.md`).
@@ -419,16 +419,18 @@ Engine cards:
   document tree (`meta.document`) plus a flat-line confidence pass. Lines
   Apple Vision can't read (non-Latin scripts like Greek — per-line
   confidence below the **confidence gate**) are cropped and re-OCR'd by a
-  **complement** engine chosen in the card's *Complement engine* dropdown
-  (**Surya** default, Paddle, or None). Fail-open: if the complement is
+  **complement** engine chosen in the card's *Complement engine* dropdown,
+  filled from the registry (`direct_block_engines()`; **Surya** default, or
+  None). Fail-open: if the complement is
   unavailable the Vision text is kept. The gate is a system param (default
   **0.7**): env `AGLAIA_OCR_CONFIDENCE_GATE` → SQLite `KEY_OCR_CONFIDENCE_GATE`
   → default, resolved by `resolve_confidence_gate()`. Raise it to offload more
   lines, lower it to offload fewer. See `aglaia/workers/ocr/apple_docs.py`.
 - **Apple Vision** (`apple_vision`) — the flat `VNRecognizeTextRequest`
   path with the geometric Markdown heuristics.
-- **Surya** / **PaddleOCR-VL** — standalone VLM engines (needed off-mac and
-  for full-page VLM runs).
+- **Surya 2** / **GLM-OCR** / **Unlimited-OCR** — local VLM engines, served
+  by MLX on Apple Silicon and vLLM on CUDA (needed off-mac and for full-page
+  VLM runs). PaddleOCR-VL was dropped in 2026-07.
 - **Cloud OCR (Mistral)** (`mistral_cloud`) — **whole-document** engine. The
   selected pages are assembled into **one PDF** (bitonal scans → CCITT G4, the
   same codec as our exports; colour/grey → JPEG), uploaded once to Mistral's
@@ -441,8 +443,8 @@ Engine cards:
   that fit, OCRs those, and leaves the rest *pending* (flagged
   `meta.truncated` → `OcrWorker` `fail()`s them); a Log-tab advisory tells
   the user to **run OCR again** to continue. Page mapping is positional
-  (Mistral page *i* → the *i*-th selected scan). Needs the `cloud` extra
-  and an API key. See
+  (Mistral page *i* → the *i*-th selected scan). Needs an API key; the SDK
+  and the keychain are base dependencies. See
   `aglaia/workers/ocr/mistral_cloud.py`.
 
   *API key* — set via the card's **Set API key…** button (masked dialog).
@@ -465,8 +467,8 @@ Engine cards:
   *When there is no keychain* — the key falls back to a plaintext
   `APP_DATA/.env` (0600). `secrets.keychain_backend()` says which of the two
   reasons applies, and both the key dialog and the post-save message name it:
-  `not_installed` (the `keyring` package is absent — it ships in the **cloud**
-  extra, which `uv sync --extra dev --extra gui --extra macos` leaves out) or
+  `not_installed` (the `keyring` package is absent — a damaged environment,
+  since it is a base dependency) or
   `no_backend` (keyring is there, nothing answered — headless Linux, bare
   Windows). Reporting the second for the first read as a broken macOS
   Keychain on a machine whose Keychain was fine (#107).
@@ -479,8 +481,9 @@ needs **no** Apple Intelligence.
 
 ## Export
 
-The sidebar **Export** tab (`aglaia/gui/sidebar/tabs/ExportTab.py`) shows three
-format cards picked via a radio group, then one **Export** button dispatched by
+The sidebar **Export** tab (`aglaia/gui/sidebar/tabs/ExportTab.py`) shows four
+built-in format cards — plus one card per installed export destination — picked
+via a radio group, then one **Export** button dispatched by
 `MainWindow._on_export_clicked` on the selected key:
 
 - **PDF** — `make_pdf("output")` → `create_pdf_from_db` assembles the chosen
@@ -489,12 +492,28 @@ format cards picked via a radio group, then one **Export** button dispatched by
 - **Markdown** — `_export_markdown` → `write_markdown` (see
   [markdown_export.md](./markdown_export.md)). Card is disabled until OCR data
   exists (`set_markdown_available`).
+- **OCR textpack** — `_export_textpack` → `write_textpack` (see
+  [export.md](./export.md#ocr-textpack)): the searchable PDF, its Markdown page
+  by page and the raw OCR response in one archive for a library. Disabled until
+  OCR data exists, like Markdown (`set_markdown_available` gates both cards).
 - **Slim Aglaïa project** — `_export_slim_project` → `slim_export`, a pruned
   *copy* of the project DB (raw captures + chosen pages + their OCR only).
+- **One card per destination** (`refresh_destinations`, key `send:<slug>`): an
+  installed export plugin is an export like any other. Its card carries an
+  *Export as* picker when it accepts more than one of the formats Aglaïa
+  writes. See [destinations.md](./destinations.md).
 
-All three prompt for a destination with `QFileDialog.getSaveFileName`
-(defaulting to the workspace dir + engine/DPI-tagged filename) and reveal the
-written file in Finder on success (`_reveal_in_finder`).
+A card that writes a file prompts for a name with
+`QFileDialog.getSaveFileName` (defaulting to the workspace dir + an
+engine/DPI-tagged filename) and reveals the written file on success
+(`_reveal_in_finder`). A **destination** card prompts for nothing: the export
+goes to a private staging directory and is handed to the plugin, because the
+file is a courier, not a deliverable.
+
+**A PDF export can fail, and says so.** With the OCR-layer toggle on,
+`create_pdf_from_db` raises `OcrLayerError` and deletes the file when the text
+layer cannot be written (#149); the status bar carries the message, naming the
+pages that got no text. A page with no OCR run is not a failure.
 
 ## Menu bar
 

@@ -15,7 +15,7 @@ Per `(scan, branch)` the latest `done` run is selected, then classified:
 
 | Source | Origin | Handling |
 |---|---|---|
-| `meta.markdown` | PaddleOCR-VL — fully assembled, page-aware MD per page | emitted verbatim |
+| `meta.markdown` | Mistral and the local VLMs — fully assembled, page-aware MD per page | emitted verbatim (Mistral pages are post-processed first: footnotes, header/footer) |
 | `meta.structure` | Surya — per-block `label`/`html`/`reading_order` | `_render_structure` → headings / lists / quotes / tables / formulas |
 | `meta.document` | Apple Document engine (`apple_docs`) — reading-ordered typed-block tree (paragraph / list / table) | `_render_document` → titles → `#`/`##`, lists → `-`, tables → MD tables, paragraphs → prose |
 | `lines` | Apple Vision &c — only `(text, bbox, confidence)` per line | geometric inference (below) |

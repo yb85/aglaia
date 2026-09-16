@@ -160,8 +160,8 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
    Hidden ids live in the app-data config DB
    (`KEY_MISTRAL_JOBS_DISMISSED`) — per user, not per project.
 
-The key + SDK are the same `[cloud]` extra as the synchronous path; only
-the submit/poll/fetch calls differ.
+The key and the SDK are the same as for the synchronous path — both are base
+dependencies (see above); only the submit / poll / fetch calls differ.
 
 **Raw output.** A job id is not a durable record of a paid OCR — Mistral
 does not promise to keep output files — and the OCR textpack ships the raw

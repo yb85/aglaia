@@ -54,7 +54,7 @@ In the GUI, click **Full Calibration 🏁** with the chessboard visible to the c
 1. The button text updates per sample. Move the board between captures (rotate/tilt) to cover the FOV.
 2. For sample `N - 1` (penultimate), the button text says **"Last one: put the board flat, at book distance"** — the **last sample's measured DPI** is the one persisted. Make sure the board is at the same height/distance you'll be scanning books at.
 3. After `calnum` samples, `cv2.calibrateCamera` runs and `cv2.getOptimalNewCameraMatrix` produces the undistortion matrix.
-4. Result is written to `config/camera_params.json`:
+4. Result is written to `<APP_DATA>/camera_params.json`:
 
 ```json
 {
@@ -70,7 +70,7 @@ In the GUI, click **Full Calibration 🏁** with the chessboard visible to the c
 
 ## Workflow (DPI-only)
 
-Click **Calibrate DPI 📏** with the chessboard visible at book distance for a single sample. Updates **only** the DPI field in `config/camera_params.json`, keeping existing matrix/dist coeffs.
+Click **Calibrate DPI 📏** with the chessboard visible at book distance for a single sample. Updates **only** the DPI field in `<APP_DATA>/camera_params.json`, keeping existing matrix/dist coeffs.
 
 Useful when you've moved the camera vertically (changing scale) but not the lens.
 
@@ -87,7 +87,7 @@ dpi = (avg_px_per_square / square_size_mm) * 25.4
 
 ## At capture time
 
-If `config/camera_params.json` exists, `MainWindow.capture()`:
+If `<APP_DATA>/camera_params.json` exists, `MainWindow.capture()`:
 
 1. `cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))`.
 2. `cv2.undistort(frame, mtx, dist, None, newcameramtx)`.
@@ -126,7 +126,7 @@ If no calibration is available, the default `focal_length: 1.3` (`DewarpOption.f
 
 ## Manual edit
 
-`config/camera_params.json` is a plain JSON file. Safe to edit by hand if you have measurements from another source. Required keys: `camera_matrix`, `dist_coeffs`, `dpi`, `resolution`. Optional: `new_camera_matrix`.
+`<APP_DATA>/camera_params.json` is a plain JSON file. Safe to edit by hand if you have measurements from another source. Required keys: `camera_matrix`, `dist_coeffs`, `dpi`, `resolution`. Optional: `new_camera_matrix`.
 
 Delete the file to force the GUI to ignore calibration on next start.
 

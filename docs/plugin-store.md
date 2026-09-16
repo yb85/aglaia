@@ -1,6 +1,8 @@
 # Plugin store — design
 
-Status: **design, not built.** Tracked by milestone *M10 — Plugin store*.
+Status: **shipping.** The registry, both install paths, update in place, the
+Plugins tab and the `aglaia plugins` commands are built — §1b says exactly
+what exists. Milestone *M10 — Plugin store* tracks what is left.
 
 Aglaïa already takes drop-in plugins: a `.py` file in
 `<APP_DATA>/plugins/{processors,ocr}/`, gated by a trust popup
@@ -52,8 +54,9 @@ Built and shipping:
 
 * `aglaia.plugin_api` — the façade of §5, at `API_VERSION = 1`.
 * `PluginContext` — per-plugin settings, namespaced secrets, scratch dir (§7-8).
-* The `destinations` kind, and three first-party destinations in registry
-  layout under `aglaia/plugins/destinations/` (see `docs/destinations.md`).
+* The `destinations` kind. No destination ships inside the app any more: the
+  four (folder, calibre, Kindle, corpus) live in the registry repository
+  (see `docs/destinations.md`).
 * The manifest reader and the import scan (§4, §6) —
   `aglaia/app_data/plugin_manifest.py`.
 * The registry client, both install paths, uninstall/disable
@@ -90,7 +93,9 @@ release step. Until then the index is fetched over HTTPS and every file is
 verified against the sha256 the index gives for it, and `IndexResult.signed`
 is `False` so the tab can say which guarantee the user is actually getting —
 a smaller promise honestly labelled, rather than a bigger one quietly unmet.
-Also not built: the update flow and the revocation refresh (§10).
+The update flow is built (`aglaia plugins update [SLUG|--all]`, and the
+Plugins tab replaces a plugin in place). Not built: the revocation refresh
+(§10).
 
 ## 2. Trust tiers
 

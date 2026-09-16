@@ -64,7 +64,7 @@ Verification: `tests/workers/test_pdf_ocr_layer.py` reads the text with
 `pdftotext`). An unbounded read passes on text drawn off the page.
 
 > JBIG2 ships only when the build env was synced with `--extra jbig2`
-> (it compiles the Rust crate). See [distribution.md](./distribution.md);
+> (it compiles the Rust crate). See [distribution.md](https://github.com/yb85/aglaia/blob/main/docs/distribution.md);
 > the encoder is credited in [../ABOUT.md](../ABOUT.md).
 
 ## Markdown

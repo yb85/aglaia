@@ -110,7 +110,7 @@ args.options = {
 
 ## Calibration injection
 
-After `initialize`, `aglaia` overwrites `args.options["calibration"]["camera_matrix"]` and `["camera_matrix_resolution"]` from `config/camera_params.json`. `create_processing_chain` then injects those into every `PageDewarper` step's options.
+After `initialize`, `aglaia` overwrites `args.options["calibration"]["camera_matrix"]` and `["camera_matrix_resolution"]` from `<APP_DATA>/camera_params.json`. `create_processing_chain` then injects those into every `PageDewarper` step's options.
 
 ## Example: headless run
 

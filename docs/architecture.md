@@ -50,7 +50,7 @@ flowchart TD
 ### Initializer (`aglaia/workers/Initializer.py`)
 
 - `initialize(mode)` — `mode` is `"capture"` or `"pdf"`. Builds `args` with merged defaults and CLI overrides. Populates `args.options` (dict structure used by GUI/workers) and `args.config` (keybindings, voice, paths, calibration scaffolding).
-- `create_processing_chain(args, log_queue, queue_factory=multiprocessing.Queue, find_page_numbers=True)` — loads pipeline YAML at `args.pipeline` (default `config/pipelines/book_curved_x2.yaml`), instantiates option dataclasses, applies CLI overrides (debug, max_pages, camera_matrix injection for PageDewarper), returns an `IntegratedProcessingChain`.
+- `create_processing_chain(args, log_queue, queue_factory=multiprocessing.Queue, find_page_numbers=True)` — loads pipeline YAML at `args.pipeline` (default `aglaia/config/pipelines/book_curved_x2.yaml`), instantiates option dataclasses, applies CLI overrides (debug, max_pages, camera_matrix injection for PageDewarper), returns an `IntegratedProcessingChain`.
 - `load_pipeline_def(path)` — YAML loader with template substitution. Strings starting with `t:` become `TemplateEvaluator(rest)` so they can be evaluated lazily with image context (`$dpi`, `$x`, `$y`, `$type`). `TemplateEvaluator` is a picklable callable; lambdas can't cross process boundaries.
 - Option dataclasses for each YAML `options:` block come from the processor registry (`aglaia/processors/registry.py:option_classes()`) — auto-discovered, not a hand-maintained map.
 
@@ -140,7 +140,7 @@ Headless mode (`aglaia run …`):
 
 ```mermaid
 flowchart TD
-    Root["aglaia run book.agl -p config/pipelines/book_curved_x2.yaml"]
+    Root["aglaia run book.agl -p aglaia/config/pipelines/book_curved_x2.yaml"]
     Main["main / log_queue drain (aglaia/workers/headless.py)"]
     W0["Worker-Integrated-0 (Process, daemon)"]
     WN["Worker-Integrated-N (Process, daemon)"]

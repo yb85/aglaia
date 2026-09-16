@@ -1,6 +1,6 @@
 # Pipeline YAML
 
-Pipelines live in `config/pipelines/*.yaml`. Default: `config/pipelines/book_curved_x2.yaml`. Override with `-p path/to/pipeline.yaml`.
+Pipelines live in `aglaia/config/pipelines/*.yaml`. Default: `aglaia/config/pipelines/book_curved_x2.yaml`. Override with `-p path/to/pipeline.yaml`.
 
 ## Schema
 
@@ -43,7 +43,7 @@ Some CLI flags override pipeline options at chain-build time (see `create_proces
 |---|---|
 | `--debug` | Sets `step_opts["debug"] = True` on any step that already has a `debug` key |
 | `--max-pages N` | Overrides `PageDetector.max_pages` |
-| Camera calibration | If a `config/camera_params.json` exists, its matrix is injected into every `PageDewarper` step as `camera_matrix` + `camera_matrix_resolution` |
+| Camera calibration | If a `<APP_DATA>/camera_params.json` exists, its matrix is injected into every `PageDewarper` step as `camera_matrix` + `camera_matrix_resolution` |
 
 ## Processors and their option dataclasses
 
@@ -63,7 +63,7 @@ Unknown processor names print a warning and are skipped.
 
 ## The default pipeline (annotated)
 
-`config/pipelines/book_curved_x2.yaml`:
+`aglaia/config/pipelines/book_curved_x2.yaml`:
 
 ```yaml
 name: "Standard Pipeline"
@@ -168,6 +168,6 @@ them. Result: equivalent to the forward pipeline but at higher fidelity
 
 ## Authoring a new pipeline
 
-1. Copy `config/pipelines/book_curved_x2.yaml`.
+1. Copy `aglaia/config/pipelines/book_curved_x2.yaml`.
 2. Reorder / add / remove steps. Use unique `name:` fields.
 3. Pass it with `-p path/to/new.yaml`.

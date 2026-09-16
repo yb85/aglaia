@@ -12,8 +12,8 @@ uv run python -c "import cv2, jax, doxapy, PySide6, pikepdf"   # sanity check
 
 ## Runtime requirements
 
-- **macOS** at runtime for any flow that uses `PageDetector` (Apple Vision) or `VoiceWorker` (Apple Speech). The default pipeline includes `PageDetector`, so cross-platform runs need a pipeline that omits it.
-- **Dewarp backend**: MLX on arm64 macOS, JAX (CPU) elsewhere — `.jax_cache/` is created on first JAX dewarp run (gitignored). CUDA wheels via `--extra cuda`.
+- **macOS** at runtime only for the `apple_vision` page-detector backend and the Apple OCR engines. Voice control is Vosk, offline and cross-platform. Off macOS, `PageDetector` resolves to DBnet or EAST, so the default pipeline runs — install a layout model first (`aglaia setup`).
+- **Dewarp backend**: MLX on arm64 macOS, JAX (CPU) elsewhere — `.jax_cache/` is created on first JAX dewarp run (gitignored). `backend: auto` resolves to the LM solver, which fits a sheet on CPU in about 0.25 s; the CUDA build target was removed in 2026-09 because of it, and `--extra cuda` survives for a local build and for vLLM-served VLM OCR.
 - **`model/` / `models/`** dirs hold downloaded ML weights (Surya / EAST / DBNet). Gitignored; managed via the `models_dir` config key (Settings → Models), default `<APP_DATA>/models`.
 
 ## Running
@@ -34,7 +34,7 @@ Headless batch (PDF import lives in the GUI import panel; CLI batch
 reprocesses an existing project):
 
 ```bash
-uv run aglaia run /tmp/test_scans.agl -p config/pipelines/book_curved_x2.yaml
+uv run aglaia run /tmp/test_scans.agl -p book_curved_x2
 ```
 
 ## Module map (quick reference)
@@ -53,7 +53,15 @@ uv run aglaia run /tmp/test_scans.agl -p config/pipelines/book_curved_x2.yaml
 | GUI main window | `aglaia/gui/MainWindow.py` |
 | GUI per-scan widget | `aglaia/gui/ScanItemWidget.py` |
 | Webcam thread | `aglaia/gui/WebcamThread.py` |
-| Voice recognition | `aglaia/gui/VoiceWorker.py` |
+| Voice recognition | `aglaia/gui/VoiceWorkerVosk.py` |
+| CLI (Typer app + subcommands) | `aglaia/cli/` |
+| Project database | `aglaia/storage/` (schema in `schema/*.sql`) |
+| Per-user dirs, config DB, plugins | `aglaia/app_data/` |
+| Plugin façade (the only public API) | `aglaia/plugin_api.py` |
+| Export destinations | `aglaia/workers/destinations.py` |
+| OCR textpack export | `aglaia/workers/textpack_export.py` |
+| Capture shortcuts | `aglaia/gui/keybindings.py`, `KeybindingDialog.py` |
+| Per-page manual tuning | `aglaia/gui/DebugViewerTab.py`, `DebugEditCanvas.py` |
 
 ## Adding a processor
 
@@ -200,7 +208,7 @@ Vision / Speech recognition output, true macOS compositing.
 
 ```bash
 # Print effective pipeline definition (with templates resolved literally)
-uv run python -c "from aglaia.workers.Initializer import load_pipeline_def; from pprint import pp; pp(load_pipeline_def('config/pipelines/book_curved_x2.yaml'))"
+uv run python -c "from aglaia.workers.Initializer import load_pipeline_def; from pprint import pp; pp(load_pipeline_def('aglaia/config/pipelines/book_curved_x2.yaml'))"
 
 # Dump current calibration
 uv run python -c "from aglaia.workers.Calibrator import load_calibration; from pprint import pp; pp(load_calibration())"

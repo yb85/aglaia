@@ -6,7 +6,8 @@ description: What an Aglaïa project file contains, the slimmed variant, and how
 An Aglaïa project is a **single file**: `<slug>.agl`. It is an ordinary
 **SQLite database** — no sidecar files, no proprietary format. Everything a
 project knows lives in it: the raw scans, every pipeline step, the branch
-choices, the OCR text, and the calibration + pipeline snapshots used to
+choices, the OCR text, the corrections you made by hand on a page, the raw
+answer of a paid cloud OCR, and the calibration + pipeline snapshots used to
 produce them.
 
 ## What it contains
@@ -23,6 +24,10 @@ produce them.
 | `branches` | per-branch chosen output (e.g. the A / B halves of a spread) |
 | `ocr_runs` | OCR results attached to a node |
 | `debug_artifacts` | optional debug overlays attached to a node |
+| `step_overrides` | per page layout: skip this pipeline step for this page |
+| `manual_overrides` | per page layout: the value you set by hand where the pipeline estimated one (rotation, crop, page corners, dewarp) |
+| `mistral_batch_jobs` | submitted cloud batch jobs and the pages each covers |
+| `mistral_batch_outputs` | each job's answer, byte for byte, so the text can be rebuilt without paying for the OCR again |
 
 Because images are content-hashed in `images`, the same pixels are stored
 once however many nodes point at them, and re-importing a file does not
@@ -40,7 +45,9 @@ delivery needs:
 
 All other images, thumbnails, intermediate nodes, debug artifacts, and
 orphaned OCR runs are dropped, then the file is `VACUUM`ed so its on-disk
-size reflects the reduced content.
+size reflects the reduced content. The stored raw answers of a cloud OCR are
+kept: they are what lets the text be rebuilt without paying again. The stored raw answers of a cloud OCR are
+kept: they are what lets the text be rebuilt without paying again.
 
 Two ways to produce one (GUI Export tab / project menu):
 

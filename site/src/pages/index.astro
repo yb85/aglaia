@@ -31,7 +31,7 @@ const steps = [
     svg: '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>' },
   { n: '03', t: 'Read', d: 'Fast and coarse or slow and precise; local (Apple Vision, Apple Document AI, Surya, GLM-OCR) or cloud-based (Mistral OCR) — use the OCR that suits your project.',
     svg: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/>' },
-  { n: '04', t: 'Export', d: 'A clean, searchable PDF for your digital archives or printouts? A well-structured Markdown file to feed your favorite LLM workflows? Aglaïa gives you what you need.',
+  { n: '04', t: 'Export', d: 'A clean, searchable PDF for your digital archives or printouts? A well-structured Markdown file to feed your favorite LLM workflows? Both at once, with the OCR provenance, in one textpack archive for your library? Aglaïa gives you what you need — and a text layer it checks, rather than a PDF that only looks searchable.',
     fill: true, svg: '<path d="m16.95 5.968l-1.414 1.414L13 4.846v12.196h-2V4.847L8.465 7.382L7.05 5.968L12 1.018z"/><path d="M5 20.982v-10h4v-2H3v14h18v-14h-6v2h4v10z"/>' },
 ];
 
@@ -39,9 +39,9 @@ const steps = [
 const powers = [
   { t: 'Full CLI automation', d: 'Run the end-to-end pipeline from the command line.',
     svg: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/>' },
-  { t: 'Versatile plugin system', d: 'The task at hand gets specific? Build your own processing elements in Python.',
+  { t: 'A plugin store', d: 'Install a processing step, an OCR engine or an export destination in one click — or write your own in Python, for the task at hand.',
     svg: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>' },
-  { t: 'Freedom to choose', d: 'Have a favorite OCR provider? Need to export to cloud storage? Write your own adapters.',
+  { t: 'Freedom to choose', d: 'Your OCR engine, your destination: send a finished export to Kindle, to Calibre, to a folder, or to your own library — and tune any page by hand when the automatic answer is not the one you wanted.',
     svg: '<rect width="7" height="7" x="14" y="3" rx="1"/><path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H7"/>' },
 ];
 ---
@@ -212,7 +212,7 @@ const powers = [
       <section class="compare">
         <div class="compare__head reveal">
           <h2><span>3</span> scanning challenges,<br /><span>1</span> standard pipeline to rule them all…</h2>
-          <p class="compare__note">The following examples were all run with default settings. No fiddling needed.</p>
+          <p class="compare__note">The following examples were all run with default settings. No fiddling needed — and when one page needs it, you can still edit that page's crop, rotation and dewarp by hand.</p>
         </div>
         <div class="compare__grid compare__grid--3">
           <figure class="ba-item reveal">

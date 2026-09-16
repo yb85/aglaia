@@ -48,6 +48,19 @@ by the **replay pass**, which recomposes the page from the nearest stored
 image with the fewest interpolations — so a page can be replayed from any
 point without re-capturing it.
 
+## When one page needs something else
+
+Two per-page corrections live in the project itself, keyed by page layout, and
+the chain honours them on every run:
+
+- **Skip a step for this page** — the step is bypassed for that page only.
+- **Set a value by hand** — rotation, crop, page corners or dewarp, replacing
+  what the pipeline estimated. Pages you have edited are marked in the list,
+  the gallery and the table.
+
+Both survive a reprocess, and both are stored in the `.agl`
+(`step_overrides`, `manual_overrides`).
+
 ## Related resources
 
 - [How Aglaïa works](/docs/concepts/workflow) — the full import → export path

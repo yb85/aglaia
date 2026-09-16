@@ -1,21 +1,28 @@
 ---
 title: Install
-description: Download the macOS app or build Aglaïa from source.
+description: Download Aglaïa for macOS, Windows or Linux, or build it from source.
 ---
 
-## Download (macOS, Apple Silicon)
+## Download
 
-Grab the latest signed, notarized DMG from the
-[GitHub Releases page](https://github.com/yb85/aglaia/releases/latest),
-open it, and drag **Aglaïa** to Applications.
+Every release publishes a build per platform, under a fixed name — these
+links always point at the newest one:
 
-:::note[macOS only]
-Aglaïa depends on Apple Vision (page + OCR) and Speech (voice control),
-and on Apple Silicon for the MLX-accelerated page dewarper. There is no
-Windows or Linux build of the capture app.
-:::
+| Platform | Download | Notes |
+|---|---|---|
+| **macOS** (Apple Silicon) | [`Aglaia-macos-arm64.dmg`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-macos-arm64.dmg) | Signed and notarized. Open it, drag **Aglaïa** to Applications. |
+| **Windows** (x64) | [`Aglaia-windows-x64-setup.exe`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-windows-x64-setup.exe) | Installer; it registers the `.agl` file type. Not code-signed, so SmartScreen warns on first run: **More info → Run anyway**. |
+| **Linux** (x86_64) | [`Aglaia-x86_64.AppImage`](https://github.com/yb85/aglaia/releases/latest/download/Aglaia-x86_64.AppImage) | `chmod +x`, then run. Needs FUSE (`fuse2`). |
 
-Each release ships a `SHA256SUMS.txt`; verify with:
+All three carry the capture GUI and the full pipeline. What is macOS-only
+is what Apple supplies: Vision (page detection and on-device OCR) and the
+MLX-accelerated dewarp on Apple Silicon. Elsewhere, page detection uses
+DBnet or EAST, OCR uses a cross-platform engine (Surya, GLM-OCR, Mistral),
+the dewarp runs on CPU, and voice control uses Vosk, which is
+cross-platform.
+
+Each release ships its checksums — `SHA256SUMS.txt` (macOS),
+`SHA256SUMS-windows.txt`, `SHA256SUMS-linux.txt`:
 
 ```bash
 shasum -a 256 -c SHA256SUMS.txt
@@ -47,6 +54,7 @@ GUI-free:
 
 ```bash
 pip install aglaia                  # lean base: headless batch pipeline, no Qt
+pip install "aglaia[gui]"           # Windows / Linux capture GUI (Qt)
 pip install "aglaia[gui,macos]"     # macOS capture GUI: Vision, Speech, MLX dewarp
 pip install "aglaia[server]"        # the HTTP job API — `aglaia server`
 aglaia run ~/scans/*.jpg --ocr auto --export pdf:g4+md   # headless batch
@@ -64,19 +72,23 @@ and it pulled in paddleocr + paddlepaddle + opencv-contrib for little gain.
 
 ```bash
 pip install "aglaia[macos]"         # Apple Vision + Apple Document + MLX VLMs
-pip install "aglaia[cloud]"         # Mistral cloud OCR (+ OS-keychain storage)
 ```
 
 Apple Vision and Apple Document OCR need no extra; they ship with `[macos]`.
+Mistral cloud OCR needs none either: the SDK and the OS-keychain storage are
+base dependencies, so the Cloud OCR card works in every build. `[cloud]`
+survives as an empty alias, so older commands keep working.
 
 ## Build from source
 
 ```bash
 git clone https://github.com/yb85/aglaia
 cd aglaia
-uv sync --extra gui --extra macos
+uv sync --extra gui --extra macos   # macOS
+uv sync --extra gui                 # Windows / Linux
+uv sync                             # headless: pipeline only, no Qt
 uv run aglaia ~/scans/my-book
 ```
 
-To build the `.app` bundle yourself, see
-[Distribution](/docs/reference/distribution).
+To build the installers yourself, see `docs/distribution.md` in the
+repository.

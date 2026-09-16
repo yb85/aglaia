@@ -5,8 +5,10 @@ description: The text-recognition backends Aglaïa can drive, and when to pick e
 
 Aglaïa runs OCR through a pluggable **engine** abstraction: every backend
 implements the same `recognize(image, languages)` contract, so you can
-switch engines per document without changing anything else. Five ship in
-the box, and you can [drop in your own](/docs/reference/processors).
+switch engines per document without changing anything else. Several ship in
+the box, you can install another from the
+[plugin store](/docs/reference/plugin-store), and you can
+[write your own](/docs/reference/processors).
 
 ## Background
 
@@ -22,7 +24,7 @@ re-reads the low-confidence lines.
 - **Clean Latin text** → Apple Vision (or Apple Document), near-instant.
 - **Mixed or non-Latin scripts** → a VLM engine for accuracy.
 - **Tricky historical type** → Mistral Document AI in the cloud.
-- **Bulk, offline** → keep everything on-device; nothing leaves the Mac.
+- **Bulk, offline** → keep everything on-device; nothing leaves the machine.
 
 ## Comparison of OCR engines
 
@@ -32,7 +34,7 @@ re-reads the low-confidence lines.
 | **Apple Vision** | on-device | fast | good | line-based, Latin-first, **no page** — for the searchable-**PDF** text layer, not Markdown; **default** |
 | **Surya 2** | on-device (local VLM) | slow | gold | Qwen3.5-VL via the shared VLM backend — MLX on Apple Silicon, vLLM on CUDA |
 | **GLM-OCR** | on-device (local VLM) | slow | high | same backend; a second opinion on hard pages |
-| **Mistral Document AI** | cloud | network-bound | gold | reads any script; key in the OS keychain |
+| **Mistral Document AI** | cloud | network-bound | gold | reads any script; key in the OS keychain; runs synchronously or as a cheaper **batch** job |
 
 A unified **OCR DPI** knob downsamples the page to a sweet spot
 (≈150 dpi) before inference, regardless of engine.
@@ -48,5 +50,7 @@ available with `aglaia list ocr`.
 ## Related resources
 
 - [Processors](/docs/reference/processors) — add a drop-in OCR engine plugin
+- [Plugin store](/docs/reference/plugin-store) — install one instead of writing it
+- [Export](/docs/concepts/export) — what the OCR text becomes
 - [Markdown export](/docs/reference/markdown_export) — structured output from OCR
 - [Configuration](/docs/reference/configuration) — the OCR DPI and confidence-gate keys

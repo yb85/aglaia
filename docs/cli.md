@@ -15,16 +15,17 @@ aglaia ~/book.agl      # → aglaia gui ~/book.agl (open that project)
 ```
 
 Commands: [`gui`](#gui), [`run`](#run), [`ocr`](#ocr), [`setup`](#setup),
-[`list`](#list), [`server`](#server), [`version`](#version). `aglaia --help` and
-`aglaia <command> --help` print the live usage.
+[`list`](#list), [`plugins`](#plugins), [`server`](#server),
+[`version`](#version), and `skill` (print the agent skill file that documents
+this CLI). `aglaia --help` and `aglaia <command> --help` print the live
+usage.
 
 > `aglaia` is a console script (`pip install aglaia`); from source use
 > `uv run aglaia …`. Entry path: `aglaia/__main__.py:run` → `aglaia/cli:run`
 > (a Typer app); the commands live in `aglaia/cli/commands/`. The internal
 > config layer they build (`CliConfig`, the `--ocr`/`--export` spec parsers) is
-- `--send-to SLUG[+SLUG…]` — after the exports, hand the written files to these export plugins (`aglaia list destinations` shows what is installed). Each plugin gets every file whose format it accepts; a plugin that is not installed or not configured fails the run and names the fix (`aglaia plugins install …` / `aglaia plugins config …`) — a batch that "succeeded" without sending is the expensive kind of success.
 > documented in [configuration.md](configuration.md); the implementation plan is
-> [subcommand-cli.md](subcommand-cli.md).
+> [subcommand-cli.md](https://github.com/yb85/aglaia/blob/main/docs/subcommand-cli.md).
 
 ## Shared options
 
@@ -79,6 +80,7 @@ new project.
 | `--parent-dir DIR` | Parent folder for a new project. |
 | `--input-dpi [force:]N` | Input DPI for imported images; `force:N` overrides every input. |
 | `--check-ocr` | Poll + import pending Mistral batch OCR jobs for the project (the raw output JSONL is stored in the `.agl`; jobs imported without it are backfilled), then exit. |
+| `--send-to SLUG[+SLUG…]` | After the exports, hand the written files to these export plugins (`aglaia list destinations` shows what is installed). Each plugin gets every file whose format it accepts. A plugin that is missing or unconfigured **fails the run** and names the fix (`aglaia plugins install …` / `aglaia plugins config …`): a batch that "succeeded" without sending is the expensive kind of success. |
 | shared | `-p/--pipeline`, `--workers`, `--force-proc`. |
 
 ```bash
@@ -120,7 +122,9 @@ poll its pending Mistral batch jobs).
 Same options as `run` **minus** `-p/--pipeline`, `--workers`, `--force-proc`
 (there is nothing to process): `--ocr` (defaults to `auto` if omitted — OCR is
 the point), `--ocr-lang`, `--export`, `--md-refine`, `--project-name`,
-`--parent-dir`, `--input-dpi`, `--check-ocr`.
+`--parent-dir`, `--input-dpi`, `--check-ocr`, `--send-to` — plus one of its
+own, `--ocr-dpi`, which overrides the DPI each page is downsampled to before
+inference.
 
 ```bash
 # OCR a clean PDF straight to a searchable PDF + Markdown
@@ -145,15 +149,45 @@ Interactive first-run setup (CLI-only installs): language, models, defaults.
 ## `list`
 
 ```
-aglaia list {pipelines|ocr|exports}
+aglaia list {pipelines|ocr|exports|destinations}
 ```
 
-List available pipelines, OCR engines, or export formats.
+List available pipelines, OCR engines, export formats (`pdf`, `md`,
+`textpack`), or installed export destinations with their state (`ready`, or
+the settings each still needs).
 
 ```bash
 aglaia list pipelines
 aglaia list ocr
 aglaia list exports
+```
+
+## `plugins`
+
+```
+aglaia plugins list [--kind KIND]
+aglaia plugins search TERM
+aglaia plugins install SLUG_OR_PATH [--kind KIND]
+aglaia plugins update [SLUG | --all]
+aglaia plugins toggle SLUG [--on|--off]
+aglaia plugins remove SLUG
+aglaia plugins config SLUG [KEY=VALUE…]
+```
+
+Manage plugins without the GUI, in the three kinds a plugin can have:
+`processors` (pipeline steps), `ocr` (engines) and `destinations` (where a
+finished export goes). `install` takes a registry slug or a local archive;
+`update` replaces a plugin in place when the registry has a newer version;
+`config` reads and writes its settings, secrets included — the secret goes to
+the OS keychain, never to a file. Nothing ships inside the app, so a fresh
+install has no plugins at all. See [plugin-store.md](plugin-store.md) and
+[destinations.md](destinations.md).
+
+```bash
+aglaia plugins install send-to-corpus
+aglaia plugins config send-to-corpus base_url=https://corpus.example.org
+aglaia run ~/scans/book.agl --ocr mistral:batch --export textpack \
+  --send-to send-to-corpus
 ```
 
 ## `server`

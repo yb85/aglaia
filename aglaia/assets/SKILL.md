@@ -122,13 +122,13 @@ flag because `run` is always headless.
 | `--force-proc` | Reprocess every active scan from the raw capture (wipes intermediates and per-page manual edits). |
 | `--ocr ENGINE[:opt…]` | Run OCR. **Needs a value**: `--ocr auto` = Apple Vision → Surya. Engines: `aglaia list ocr`. |
 | `--ocr-lang CODES` | `+`-joined BCP-47, e.g. `fr-FR+en-US`; default `auto`. |
-| `--export SPECS` | `+`-joined: `pdf`, `pdf:g4`, `pdf:jbig2`, `pdf:native`, `md`, `md:refine=apple_fm`. e.g. `pdf:g4+md`. |
+| `--export SPECS` | `+`-joined: `pdf`, `pdf:g4`, `pdf:jbig2`, `pdf:native`, `md`, `md:refine=apple_fm`, `textpack[:profile][:zlib=ID]`. e.g. `pdf:g4+md`. |
 | `--md-refine BACKEND` | On-device LLM cleanup of the Markdown (`apple_fm`). Same as `md:refine=…`. |
 | `--send-to SLUGS` | After exporting, hand the files to these export plugins, `+`-joined (`send-to-kindle+send-to-corpus`). Installed ones: `aglaia list destinations`. |
 | `--project-name NAME` | New project's name (default: from the input filename). |
 | `--parent-dir DIR` | Folder in which the new `NAME.agl` is created. |
 | `--input-dpi [force:]N` | DPI for imported images that carry none; `force:N` overrides every input, even ones with metadata. |
-| `--check-ocr` | Poll + import pending Mistral batch OCR jobs for the project, then exit. |
+| `--check-ocr` | Poll + import pending Mistral batch OCR jobs for the project, then exit. The raw JSONL of each job is stored in the `.agl`; jobs imported before that are backfilled (download only, no new OCR). |
 
 ### `aglaia ocr PATHS… [options]` — OCR only, no pipeline
 
@@ -243,6 +243,20 @@ Verify availability with `aglaia list ocr` before choosing.
   grey/colour pages as they are). The PDF carries the OCR text layer.
 - `md`: one Markdown file for the project; `md:refine=apple_fm` (or
   `--md-refine apple_fm`) runs an on-device LLM cleanup pass (macOS).
+- `textpack`: the **OCR textpack**, `<scan stem>_OCR.textpack` — a zipped
+  TextBundle holding `assets/source.pdf` (the searchable PDF), `text.md` (the
+  Markdown, each page preceded by `<!-- page N -->`), the raw OCR response
+  (`assets/mistral-<job>.jsonl`) and `info.json` with the OCR provenance
+  (engine, jobs, pages, billed pages, cost, times). Takes the same profile
+  tokens as `pdf`, plus `ocr=ENGINE` and `zlib=ID` (the library id the archive
+  attaches to). Use it when the receiving library wants the scan, the text and
+  the evidence as one file.
+- **A text layer that cannot be written fails the export.** With OCR
+  requested, `pdf` and `textpack` refuse rather than write a file that looks
+  searchable and is not: the message names the pages with no text, and no
+  file is left behind. A page with no OCR run is not an error. A `textpack`
+  also refuses when a Mistral batch job's raw output is not stored — run
+  `aglaia run <file>.agl --check-ocr` first.
 - Files are written next to the project, named after it, exactly as the user
   typed the project name (no slugifying).
 - `--send-to SLUG[+SLUG]` runs after export and hands the files to installed

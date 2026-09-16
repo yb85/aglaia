@@ -1,13 +1,13 @@
 # Quickstart
 
-Aglaïa is a Mac app that turns book photos (or a PDF) into a **searchable
+Aglaïa is a desktop app that turns book photos (or a PDF) into a **searchable
 PDF / Markdown**. Everything happens in the app — no command line. Each book
 you work on is a **project**, saved as a single `<name>.agl` file you can
 move, back up, or reopen later.
 
-Install: download **Aglaïa** for macOS (Apple Silicon) from
-[aglaia.bibli.cc](https://aglaia.bibli.cc), open the `.dmg`, and drag the app
-to your Applications folder.
+Install from [aglaia.bibli.cc](https://aglaia.bibli.cc): the `.dmg` on macOS
+(Apple Silicon — open it and drag the app to Applications), the installer on
+Windows, the AppImage on Linux (`chmod +x`, then run).
 
 > There's also a cross-platform command-line mode for power users (`aglaia run`
 > for batch processing, `aglaia server` for an HTTP job API) — see the
@@ -62,21 +62,39 @@ panel also has a **Fix input DPI** button — the single most important fix
 when results look wrong (again, see [Troubleshooting](#troubleshooting)).
 
 ### 🔤 OCR
-Add a searchable text layer. Pick an **engine** (Apple Vision on macOS, or a
-cloud option) and the **language(s)**, then run it. Without OCR your export
-is an image-only PDF you can't search.
+Add a searchable text layer. Pick an **engine** (Apple Vision on macOS, a
+local VLM, or the Mistral cloud) and the **language(s)**, then run it.
+Without OCR your export is an image-only PDF you can't search.
+
+A cloud **batch** run is cheaper and answers later: leave it, come back, and
+press **Check result**. Aglaïa then keeps the engine's raw answer inside the
+project, so the text can be rebuilt without paying for the OCR twice.
 
 ### 📤 Export
 Produce the final file(s):
 
 - a **searchable PDF** — the page image plus an invisible, selectable text
-  layer, and/or
-- **Markdown** — the text as a clean document.
+  layer,
+- **Markdown** — the text as a clean document,
+- an **OCR textpack** — all of that in one archive, with the OCR's
+  provenance, for a library that wants the evidence too, and/or
+- a **destination** — an installed plugin that sends the finished export
+  somewhere (a Kindle, a Calibre library, a folder, a corpus).
 
-Exports land next to your `.agl` project file.
+Exports land next to your `.agl` project file. A send goes straight to the
+plugin instead, so it asks for no filename.
+
+> If the text layer cannot be written, the PDF export **fails and writes
+> nothing**, naming the pages at fault. A file that looks searchable and is
+> not costs more than a missing one.
+
+### 🔌 Plugins
+Browse the plugin store and install what your work needs: a processing step,
+an OCR engine, or an export destination. Nothing ships inside the app, so
+this list starts empty.
 
 > **Bottom of the sidebar:** close the project, report a bug, and settings
-> (theme, language, default OCR engine, …).
+> (theme, language, default OCR engine, capture shortcuts, …).
 
 ---
 
@@ -127,8 +145,13 @@ Getting within ~15 % is plenty — Aglaïa is tolerant, just not to a 3× error.
 
 ### Other fixes
 
-- A single page came out wrong → toggle individual cleanup steps on just that
-  page (see [the GUI guide](./gui.md)).
+- A single page came out wrong → tune that page by hand: switch off a
+  cleanup step for it, drag its crop or its page corners, set the rotation,
+  move the dewarp sliders (see [the GUI guide](./gui.md)). Pages you have
+  edited are marked in the list, the gallery and the table.
+- A PDF export refused to write, saying the OCR layer is incomplete → the
+  pages it names have OCR text that could not be placed. Re-run OCR on them,
+  or export without the text layer.
 - Camera lens distortion → [calibrate the camera](./calibration.md).
 - OCR text is poor → check the language and engine in the OCR panel
   ([ocr.md](./ocr.md)) — but first, check the DPI.

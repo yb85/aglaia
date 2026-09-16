@@ -13,7 +13,7 @@ Aglaïa keeps all per-user state outside the repo, resolved through
 | `log_dir()` | `~/Library/Logs/Aglaia` | one rotated log per session |
 | `models_dir()` | `<APP_DATA>/models` | downloaded ML weights (Surya, EAST, DBNet…) |
 | `pipelines_dir()` | `<APP_DATA>/pipelines` | user pipeline YAMLs |
-| `plugins_dir(kind)` | `<APP_DATA>/plugins/{processors,ocr}` | drop-in `.py` plugins (see [processors.md](./processors.md)) |
+| `plugins_dir(kind)` | `<APP_DATA>/plugins/{processors,ocr,destinations}` | plugins, dropped in or installed from the registry (see [processors.md](./processors.md), [destinations.md](./destinations.md)) |
 | `config_db_path()` | `<APP_DATA>/aglaia-config.db` | SQLite config + recent projects |
 
 Linux uses the XDG dirs (`~/.local/share/Aglaia`, `~/.cache/Aglaia`,

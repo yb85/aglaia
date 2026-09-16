@@ -189,7 +189,7 @@ saved pipeline doesn't preserve it.
 2. **Spec** (`aglaia/processors/option_specs.py`): a `_f` / `_i` / `_e` / `_b`
    entry in the `OPTION_SPECS["<Processor>"]` dict. Determines UI
    widget kind, range, step, help text.
-3. **YAML** (`config/pipelines/*.yaml`): an entry in each pipeline
+3. **YAML** (`aglaia/config/pipelines/*.yaml`): an entry in each pipeline
    that includes the processor. If the option only affects new
    defaults, the dataclass default + spec entry are enough; users get
    the new field in their editor automatically.
@@ -292,7 +292,7 @@ Checklist:
 1. **Dataclass** with sane defaults. All processor options live here.
 2. **`option_specs.py`** entry for every field that should be user-editable.
 3. **Pipeline YAML** entries in each pipeline that uses it.
-4. **Default pipeline**: `config/pipelines/book_curved_x2.yaml` should include
+4. **Default pipeline**: `aglaia/config/pipelines/book_curved_x2.yaml` should include
    the processor if it's intended to be on by default.
 5. **Status enum** — set `img_buf.meta["status"]` to `Status.OK`,
    `Status.FALLBACK`, or `Status.ERROR`. Used for UI badges.
