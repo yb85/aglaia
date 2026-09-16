@@ -4,6 +4,23 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc7] — 2026-09-16
+
+### Fixed
+
+- **`pip install aglaia` installed 0.1.0rc1.** PyPI refuses a package with a
+  direct URL dependency, and the `macos` extra pinned `mlx-vlm` to a GitHub
+  commit — so every wheel since rc2 was rejected at upload while the release
+  itself looked successful (the publish job is `continue-on-error`). The pin
+  existed because the `unlimited_ocr` model was unreleased; mlx-vlm **0.7.1**
+  (2026-09-14) ships it — verified in the published wheel
+  (`mlx_vlm/models/unlimited_ocr/`), whose `mlx_vlm.server` CLI still takes
+  the four flags `MlxBackend` passes. The extra now requires `mlx-vlm>=0.7.1`.
+- **The Homebrew cask and formula named a tag that never existed** (`v0.1.0`,
+  with a placeholder checksum), so `brew install --cask aglaia` and
+  `brew install aglaia-cli` could not work for any release. Both now carry the
+  current tag and its real sha256.
+
 ## [0.1.0rc6] — 2026-09-16
 
 The OCR chain a library can trust end to end (milestone M11): a PDF text
@@ -767,6 +784,7 @@ First public **alpha**. Well tested on macOS; Linux and Windows are unverified.
   EAST for such pages.
 - JAX Metal is disabled; the page dewarp runs on CPU (or CUDA/MLX where built).
 
+[0.1.0rc7]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc7
 [0.1.0rc6]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc6
 [0.1.0rc5]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc5
 [0.1.0rc4]: https://github.com/yb85/aglaia/releases/tag/v0.1.0rc4

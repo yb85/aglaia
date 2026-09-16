@@ -13,8 +13,8 @@ generation with the R-SWA ring-buffer KV cache — and returns one ``OcrResult``
 per page. The fused stream has no page delimiter, so we split it back by the
 per-page 0..999 coordinate resets (see ``unlimited_backend.segment_pages``).
 
-Runs IN-PROCESS via the upstream ``mlx_vlm`` ``unlimited_ocr`` model (git-pinned
-in ``pyproject.toml``) against a hybrid-precision MLX weight dir (F32 vision +
+Runs IN-PROCESS via the upstream ``mlx_vlm`` ``unlimited_ocr`` model (shipped
+from mlx-vlm 0.7.1, the version ``pyproject.toml`` requires) against a hybrid-precision MLX weight dir (F32 vision +
 4-bit LLM) from the ``unlimited-ocr-mlx`` converter — NOT through the shared
 ``LocalVlmServer`` (that path is for glm/paddle). Apple-Silicon only; the CUDA
 path is a later slice.
