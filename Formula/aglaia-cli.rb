@@ -24,12 +24,12 @@
 #   maturin crate (a local path dep, not on PyPI), so PDF export falls back to
 #   CCITT G4 rather than JBIG2.
 # - Replace `sha256` with the real release-tarball checksum when tagging:
-#     curl -sL https://github.com/yb85/aglaia/archive/refs/tags/v0.1.0rc6.tar.gz | shasum -a 256
+#     curl -sL https://github.com/yb85/aglaia/archive/refs/tags/v0.1.0rc7.tar.gz | shasum -a 256
 class AglaiaCli < Formula
   desc "Webcam book scanner — capture, dewarp, binarize, OCR to PDF/Markdown"
   homepage "https://aglaia.bibli.cc"
-  url "https://github.com/yb85/aglaia/archive/refs/tags/v0.1.0rc6.tar.gz"
-  sha256 "87e2e2f4d982a2bf4d2fbf07928092cc8a8a2cd0363a0a8920856757f697fa49"
+  url "https://github.com/yb85/aglaia/archive/refs/tags/v0.1.0rc7.tar.gz"
+  sha256 "9e31c0a1501eb2e8ed9dffce9fd0155f38121b167b74308eb471fdbb94dac9eb"
   license "LicenseRef-PolyForm-Shield-1.0.0"
   head "https://github.com/yb85/aglaia.git", branch: "main"
 
