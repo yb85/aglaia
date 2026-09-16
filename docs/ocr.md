@@ -175,6 +175,16 @@ before #147 (`missing_outputs()`): one file download per job, no new OCR.
 
 ## Engine→GUI logging
 
-Engines emit diagnostics via `engine_log(text, level)`. `OcrWorker`
-installs a sink (`set_engine_log_sink`) routing them to the GUI Log tab;
-outside the GUI they print to stdout.
+Engines emit diagnostics via `engine_log(text, level)`. `OcrWorker` **and**
+`MistralBatchWorker` install a sink (`set_engine_log_sink`) routing them to
+the GUI Log tab; outside the GUI they print to stdout.
+
+**A cloud run says what it is doing, step by step.** It is minutes of nothing
+visible over someone else's network, so every stage is a log line, not just a
+toast: the engine, languages and mode at the start; the pages counted; the
+document assembled and uploaded (with its size and the file id); "reading it
+now — this is the long part"; the answer and how long it took. For a batch:
+the jobs submitted, then on each check the job's status as Mistral reports
+it, the download with its size, and the import result. The status bar and the
+toasts keep their short version; the log keeps the whole run, which is what a
+user comparing two runs a week apart needs.

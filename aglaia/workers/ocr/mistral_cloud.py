@@ -392,12 +392,22 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
 
     # ── Mistral round-trip ────────────────────────────────────────────
     def _ocr_pdf(self, api_key: str, pdf_bytes: bytes) -> list[str]:
-        """Upload the PDF, OCR it, return per-page markdown (page order)."""
+        """Upload the PDF, OCR it, return per-page markdown (page order).
+
+        Each step says so in the log. A cloud run is minutes of nothing
+        visible, over somebody else's network, and "which step is it on" is
+        the first question a waiting user asks."""
+        import time
         client = make_mistral_client(api_key)
+        engine_log("[mistral_cloud] uploading the document to Mistral…", "info")
+        t0 = time.monotonic()
         uploaded = client.files.upload(
             file={"file_name": "aglaia-ocr.pdf", "content": pdf_bytes},
             purpose="ocr",
         )
+        engine_log(f"[mistral_cloud] uploaded as file {uploaded.id} in "
+                   f"{time.monotonic() - t0:.1f}s; reading it now — this is "
+                   f"the long part.", "info")
         signed = client.files.get_signed_url(file_id=uploaded.id)
         kw: dict = dict(
             model=MODEL,
@@ -409,6 +419,7 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
             extract_header=True,
             extract_footer=True,
         )
+        t1 = time.monotonic()
         try:
             resp = client.ocr.process(**kw)
         except TypeError:
@@ -416,4 +427,7 @@ class MistralCloudEngine(BatchableOCR, OcrEngine):
             kw.pop("extract_header", None)
             kw.pop("extract_footer", None)
             resp = client.ocr.process(**kw)
-        return [page_to_dict(pg) for pg in (getattr(resp, "pages", None) or [])]
+        out = [page_to_dict(pg) for pg in (getattr(resp, "pages", None) or [])]
+        engine_log(f"[mistral_cloud] Mistral answered: {len(out)} page(s) in "
+                   f"{time.monotonic() - t1:.1f}s.", "info")
+        return out

@@ -2069,6 +2069,12 @@ class MainWindow(QMainWindow):
         self.toast(self.tr("Sending to {name}…").format(name=label))
         self.status_label.setText(
             self.tr("Sending to {name}…").format(name=label))
+        # The toast is gone in four seconds and the status bar holds one line.
+        # A send is a transfer to somebody else's machine: what went where,
+        # and what came back, belongs in the log, where it can still be read
+        # tomorrow.
+        self._on_log_line("info", f"[{name}] sending {_P(path).name} "
+                                  f"({_P(path).stat().st_size / 1e6:.1f} MB)")
         # Two sends at once would be two plugin calls sharing one settings
         # object and one progress line. The overlay both says so and enforces
         # it; it comes down in `_done`, which runs whichever way the send
@@ -2088,6 +2094,13 @@ class MainWindow(QMainWindow):
                 self.tr("{name}: done.").format(name=label))
             self.toast(f"{label}: {msg}" if outcome.error else msg,
                        6000 if not outcome.ok else 4000)
+            line = f"[{name}] {msg}"
+            if getattr(outcome, "url", ""):
+                line += f" — {outcome.url}"
+            detail = getattr(outcome, "detail", None)
+            if detail:
+                line += f" · {detail}"
+            self._on_log_line("info" if outcome.ok else "error", line)
             self.status_label.setText(self.tr("Ready."))
 
         job = DestinationJob(lambda: d.send(src, meta), self)
@@ -3887,6 +3900,7 @@ class MainWindow(QMainWindow):
             batch=batch,
         )
         self._ocr_worker.log_line.connect(self._on_log_line)
+        self._log_ocr_run(engine, list(languages), mode, batch, complement)
         self._ocr_worker.started_total.connect(self._on_ocr_started_total)
         if batch:
             # Batch: submit + leave pending; no per-page progress / finish.
@@ -3913,10 +3927,16 @@ class MainWindow(QMainWindow):
         self.status_bar_widget.progress.set_indeterminate(False)
         if error:
             self.toast(self.tr("Batch submit failed: {e}").format(e=error))
+            self._on_log_line("error", f"OCR batch submit failed: {error}")
         else:
             self.toast(self.tr("Submitted {n} Mistral batch job(s). Pull "
                                "results later with 'Check result'.").format(
                                    n=n_jobs))
+            # The job ids themselves are logged by the worker; this line is
+            # the anchor a user looks for when they come back days later.
+            self._on_log_line(
+                "info", f"OCR batch: submitted {n_jobs} job(s). Press "
+                        f"'Check result' to pull them in.")
         self._update_ocr_frame_state()
         self._refresh_batch_card()
 
@@ -3996,6 +4016,10 @@ class MainWindow(QMainWindow):
     def _on_batch_check_done(self, imported: int, pending: int, failed: int,
                              msg: str) -> None:
         self.toast(msg)
+        self._on_log_line(
+            "error" if failed else "info",
+            f"OCR batch check: {imported} imported, {pending} pending, "
+            f"{failed} failed. {msg}")
         if imported:
             self.ocr_state_changed.emit()
             self._refresh_alt_views_if_visible()
@@ -4148,6 +4172,17 @@ class MainWindow(QMainWindow):
             app.setProperty("aglaia_reopen_path", str(p))
         self.close()
 
+    def _log_ocr_run(self, engine: str, languages: list, mode: str,
+                     batch: bool, complement: str) -> None:
+        """What this OCR run is about to do. The card shows it for as long as
+        the run lasts; the log keeps it, which is what a user comparing two
+        runs a week apart actually needs."""
+        langs = "+".join(languages) if languages else "auto"
+        extra = f", complement {complement}" if complement else ""
+        self._on_log_line(
+            "info", f"OCR: engine {engine}, languages {langs}, mode {mode}"
+                    f"{', batch' if batch else ''}{extra}")
+
     def _on_ocr_started_total(self, total: int):
         # `total == 0` means "nothing to do" — don't repaint the bar as
         # `OCR · 0/0` in that case; leave the previous (pipeline / OCR)
@@ -4163,6 +4198,7 @@ class MainWindow(QMainWindow):
         # the whole-doc round-trip. "loading…" is more precise than "working"
         # and matches the worker's first-run log. The first tick flips it off.
         bar.set_indeterminate(True, self.tr("OCR · loading…"))
+        self._on_log_line("info", f"OCR: {total} page(s) to read.")
 
     def _on_ocr_progress(self, scan_id: int):
         # OCR completes per (scan, branch). The progress tick is cheap (keep it
@@ -4189,6 +4225,8 @@ class MainWindow(QMainWindow):
             # ok=True with text = an advisory (e.g. Cloud OCR truncation).
             # Surface it prominently so the user knows to re-run.
             self._on_log_line("warning", error_text)
+        elif ok:
+            self._on_log_line("info", "OCR: done.")
 
     def _refresh_ocr_ui(self) -> None:
         """Re-query OCR state per branch and push into scan widgets +

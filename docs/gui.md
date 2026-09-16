@@ -510,6 +510,12 @@ engine/DPI-tagged filename) and reveals the written file on success
 goes to a private staging directory and is handed to the plugin, because the
 file is a courier, not a deliverable.
 
+**Every send is logged, not just toasted.** A destination export writes the
+file name and size to the Log tab when the send starts, and the plugin's own
+outcome — message, URL, and whatever detail it returned — when it ends
+(`error` level when the send failed). A toast lasts four seconds; a transfer
+to someone else's machine is worth keeping.
+
 **A PDF export can fail, and says so.** With the OCR-layer toggle on,
 `create_pdf_from_db` raises `OcrLayerError` and deletes the file when the text
 layer cannot be written (#149); the status bar carries the message, naming the

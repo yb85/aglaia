@@ -82,8 +82,12 @@ def submit(api_key: str, img_rows: list[dict], run_ids: list[int],
         raise ValueError("run_ids must align 1:1 with img_rows")
     eng = MistralCloudEngine()
     client = _client(api_key)
+    engine_log(f"[mistral_batch] assembling {len(img_rows)} page(s) into "
+               f"upload document(s)…", "info")
     chunks = _chunk_pdfs(eng, img_rows)
     total = len(chunks)
+    engine_log(f"[mistral_batch] {total} job(s) to submit "
+               f"({sum(n for _b, n in chunks)} page(s)).", "info")
     out: list[dict] = []
     offset = 0
     for ci, (pdf_bytes, n) in enumerate(chunks):
@@ -127,6 +131,8 @@ def poll(api_key: str, job_id: str) -> tuple[str, Optional[str]]:
     job = client.batch.jobs.get(job_id=job_id)  # client gets torn down mid-call
     status = _norm_status(getattr(job, "status", ""))
     err = getattr(job, "errors", None)
+    engine_log(f"[mistral_batch] job {job_id}: {status or 'unknown'}"
+               f"{' — ' + str(err) if err else ''}", "info")
     return status, (str(err) if err else None)
 
 
@@ -156,6 +162,8 @@ def fetch_output(api_key: str, job_id: str) -> tuple[bytes, dict]:
     out_id = getattr(job, "output_file", None) or getattr(job, "output_file_id", None)
     if not out_id:
         raise RuntimeError(f"job {job_id} has no output_file")
+    engine_log(f"[mistral_batch] job {job_id} is ready — downloading its "
+               f"result (file {out_id})…", "info")
     dl = client.files.download(file_id=out_id)
     # The SDK's download return shape varies by version: a stream with
     # .read(), an object with .content/.text, or raw bytes/str.
@@ -168,6 +176,8 @@ def fetch_output(api_key: str, job_id: str) -> tuple[bytes, dict]:
     else:
         data = dl
     raw = bytes(data) if isinstance(data, (bytes, bytearray)) else str(data).encode("utf-8")
+    engine_log(f"[mistral_batch] downloaded {len(raw) / 1024:.0f} KiB for job "
+               f"{job_id}; it is kept in the project.", "info")
     return raw, {"output_file_id": str(out_id),
                  "completed_at": iso_time(getattr(job, "completed_at", None))}
 

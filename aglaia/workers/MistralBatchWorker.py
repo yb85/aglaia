@@ -47,6 +47,12 @@ class MistralBatchWorker(QThread):
 
     def run(self) -> None:
         from aglaia.app_data.secrets import get_mistral_api_key
+        # Route the engine's own lines (poll status, download, sizes) to the
+        # Log tab. Without this they went to stdout — /dev/null in a bundled
+        # app — and the user watching a cloud job saw nothing between
+        # "submitted" and "imported".
+        from aglaia.workers.ocr.engine import set_engine_log_sink
+        set_engine_log_sink(self.log_line.emit)
         api_key = get_mistral_api_key()
         if not api_key:
             err = "No Mistral API key — set it in the OCR tab's Cloud card."
@@ -105,6 +111,9 @@ class MistralBatchWorker(QThread):
             repo = MistralBatchRepo(conn)
             ocr_repo = OcrRepo(conn)
             jobs = repo.pending()
+            self.log_line.emit(
+                "info", f"[mistral_batch] checking {len(jobs)} pending "
+                        f"job(s) against Mistral…")
             for job in jobs:
                 jid = job["job_id"]
                 try:
