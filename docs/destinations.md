@@ -35,6 +35,9 @@ asked to judge.
 | `send-to-kindle` | SMTP, as a MIME attachment | pdf, epub, txt, md, docx |
 | `send-to-corpus` | Corpus `POST /book/upload` | pdf, md, txt, epub, html, textpack |
 
+A destination whose server sits behind an authenticating proxy declares a
+`headers` field (below) instead of one field per proxy.
+
 ## Why one kind and not two
 
 The obvious shape is "email destinations" and "API destinations". The wire

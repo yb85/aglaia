@@ -273,6 +273,11 @@ def _fields(d) -> list:
 
 def _current(d, f) -> str:
     """What to show for a field: its value, or that a secret is stored."""
+    if f.kind == "headers":
+        names = d.header_names(f.key)
+        # Names, never values: the point of the field is that the user can
+        # see WHICH headers go out without the credentials coming back.
+        return ", ".join(names) if names else "[red]none[/red]"
     if f.kind == "secret":
         return "•••• stored" if d.secret(f.key) else "[red]not set[/red]"
     v = d.conf(f.key, f.default)
@@ -293,6 +298,20 @@ def _coerce(f, raw: str):
     if f.kind == "choice" and str(raw) not in tuple(f.choices):
         raise ValueError(f"{f.label}: one of {', '.join(f.choices)}")
     return str(raw)
+
+
+def _set_header(d, f, name: str, value: str) -> None:
+    """Add, replace or (empty value) remove one header of a `headers` field."""
+    import json as _json
+    names = d.header_names(f.key)
+    if value == "":
+        d.ctx.secrets.delete(f"{f.key}.{name}")
+        names = [n for n in names if n != name]
+    else:
+        d.ctx.secrets.set(f"{f.key}.{name}", value)
+        if name not in names:
+            names.append(name)
+    d.ctx.config.set(f.key, _json.dumps(names))
 
 
 def _write(d, f, value) -> None:
@@ -328,9 +347,19 @@ def config(
                 _err(f"--set wants key=value, got {item!r}")
                 raise typer.Exit(2)
             k, v = item.split("=", 1)
-            f = fields.get(k.strip())
+            k = k.strip()
+            # `extra_headers.CF-Access-Client-Id=token` — one header of a
+            # `headers` field. An empty value removes it.
+            if "." in k and fields.get(k.split(".", 1)[0]) is not None \
+                    and fields[k.split(".", 1)[0]].kind == "headers":
+                base, name = k.split(".", 1)
+                _set_header(d, fields[base], name, v)
+                typer.echo(f"{fields[base].label}: "
+                           f"{'removed ' if v == '' else 'set '}{name}")
+                continue
+            f = fields.get(k)
             if f is None:
-                _err(f"{slug} has no setting {k.strip()!r}. It has: "
+                _err(f"{slug} has no setting {k!r}. It has: "
                      f"{', '.join(fields)}")
                 raise typer.Exit(2)
             try:

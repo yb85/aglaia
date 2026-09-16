@@ -34,6 +34,7 @@ to reach for `sqlite3` or `keyring`.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -99,8 +100,20 @@ class Field:
     nobody anticipated still gets a proper settings panel.
 
     `kind` is one of ``"str"``, ``"int"``, ``"bool"``, ``"choice"``,
-    ``"secret"``. A ``secret`` field is rendered masked and stored in
-    `ctx.secrets`; every other kind is stored in `ctx.config`.
+    ``"secret"``, ``"headers"``. A ``secret`` field is rendered masked and
+    stored in `ctx.secrets`; every other kind is stored in `ctx.config`.
+
+    ``headers`` is a **list the user grows**: a name, a value, an *Add*
+    button, and one removable tag per header already stored. The names live
+    in `ctx.config` (they are not secret, and the user must see which headers
+    are set); each value lives in `ctx.secrets` under ``<key>.<name>``, and is
+    never shown again. Read them with `Destination.headers(key)`.
+
+    It exists because a service that sits behind an authenticating proxy
+    needs headers nobody anticipated — Cloudflare Access wants
+    ``CF-Access-Client-Id`` and ``CF-Access-Client-Secret``, the next one will
+    want something else. A field per proxy would be a new plugin release per
+    proxy.
     """
 
     key: str
@@ -274,6 +287,29 @@ class Destination:
             return ""
         return self.ctx.secrets.get(key) or ""
 
+    def header_names(self, key: str = "extra_headers") -> list[str]:
+        """Names stored in a ``headers`` field, in the order they were added.
+        Names only — safe to log, safe to show."""
+        raw = self.conf(key, "") or ""
+        if isinstance(raw, (list, tuple)):
+            return [str(n) for n in raw]
+        try:
+            got = json.loads(str(raw)) if str(raw).strip() else []
+        except Exception:
+            return []
+        return [str(n) for n in got] if isinstance(got, list) else []
+
+    def headers(self, key: str = "extra_headers") -> dict[str, str]:
+        """``{name: value}`` for a ``headers`` field, values read from the
+        keychain. A name whose value is missing is skipped rather than sent
+        empty: an empty credential header reads to a proxy as a wrong one."""
+        out: dict[str, str] = {}
+        for name in self.header_names(key):
+            value = self.secret(f"{key}.{name}")
+            if value:
+                out[name] = value
+        return out
+
     def missing_settings(self) -> list[str]:
         """Labels of required fields that are still empty. The host shows
         these instead of letting a send fail on the far end for a reason the
@@ -283,7 +319,10 @@ class Destination:
             if f.required and not str(self.conf(f.key) or "").strip():
                 out.append(f.label)
         for f in self.SECRET_FIELDS:
-            if f.required and not self.secret(f.key):
+            if f.kind == "headers":
+                if f.required and not self.headers(f.key):
+                    out.append(f.label)
+            elif f.required and not self.secret(f.key):
                 out.append(f.label)
         return out
 

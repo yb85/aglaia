@@ -97,6 +97,23 @@ The update flow is built (`aglaia plugins update [SLUG|--all]`, and the
 Plugins tab replaces a plugin in place). Not built: the revocation refresh
 (§10).
 
+### Field kinds
+
+`Field.kind` is `str`, `int`, `bool`, `choice`, `secret` — or **`headers`**,
+a list the user grows: a name, a value, an *Add* button, and one removable
+tag per header stored. Names live in `ctx.config` (a header the user cannot
+see is one they cannot fix); each value lives in `ctx.secrets` under
+`<key>.<name>` and is never shown again. The plugin reads them with
+`self.headers("extra_headers")`, and `self.header_names(...)` when it only
+needs the names.
+
+It exists because a service behind an authenticating proxy needs headers
+nobody anticipated — Cloudflare Access wants `CF-Access-Client-Id` and
+`CF-Access-Client-Secret`, the next proxy will want something else, and a
+field per proxy is a plugin release per proxy. From the terminal:
+`aglaia plugins config <slug> --set extra_headers.CF-Access-Client-Id=…`
+(an empty value removes that header).
+
 ## 2. Trust tiers
 
 Three ways a plugin arrives, three levels of ceremony.

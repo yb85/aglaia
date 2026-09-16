@@ -29,6 +29,7 @@ he accepted.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -246,6 +247,17 @@ class PluginSettingsDialog(QDialog):
             f"color: {COLOR_FONT_PRIMARY}; font-size: 12px; font-weight: 600;")
         col.addWidget(lbl)
 
+        if field.kind == "headers":
+            w = self._headers_row(field)
+            col.addWidget(w)
+            if field.help:
+                h = QLabel(field.help)
+                h.setWordWrap(True)
+                h.setStyleSheet(f"color: {COLOR_FONT_MUTED}; font-size: 10px;")
+                col.addWidget(h)
+            self._widgets[field.key] = (field, w, is_secret)
+            return wrap
+
         if field.kind == "bool":
             w: QWidget = QCheckBox()
             w.setChecked(bool(self.dest.conf(field.key, field.default)))
@@ -289,8 +301,122 @@ class PluginSettingsDialog(QDialog):
         self._widgets[field.key] = (field, w, is_secret)
         return wrap
 
+    # ── "headers" field: a list the user grows ────────────────────────
+    def _headers_row(self, field) -> QWidget:
+        """Name + value + Add, over one removable tag per stored header.
+
+        The value is never shown again — a settings panel that hands a
+        credential back to the screen leaks it to the next screenshot. The
+        NAME is shown, because a header the user cannot see is a header they
+        cannot fix."""
+        box = QWidget()
+        col = QVBoxLayout(box)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+
+        tags = QWidget()
+        tags_row = QHBoxLayout(tags)
+        tags_row.setContentsMargins(0, 0, 0, 0)
+        tags_row.setSpacing(6)
+        tags_row.addStretch(1)
+        col.addWidget(tags)
+
+        entry = QHBoxLayout()
+        entry.setSpacing(6)
+        name = QLineEdit()
+        name.setPlaceholderText(self.tr("Header name"))
+        value = QLineEdit()
+        value.setPlaceholderText(self.tr("Value"))
+        value.setEchoMode(QLineEdit.EchoMode.Password)
+        add = QPushButton(self.tr("Add"))
+        entry.addWidget(name, 2)
+        entry.addWidget(value, 3)
+        entry.addWidget(add)
+        col.addLayout(entry)
+
+        state = {"names": list(self.dest.header_names(field.key)),
+                 "new": {}, "removed": []}
+        box.setProperty("aglaia_headers_state", True)
+        box._state = state          # read back by `_collect`
+        box._tags_row = tags_row
+
+        def _repaint() -> None:
+            while tags_row.count() > 1:
+                item = tags_row.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+            for n in state["names"]:
+                tags_row.insertWidget(tags_row.count() - 1, _tag(n))
+            tags.setVisible(bool(state["names"]))
+
+        def _tag(n: str) -> QWidget:
+            chip = QWidget()
+            h = QHBoxLayout(chip)
+            h.setContentsMargins(8, 2, 4, 2)
+            h.setSpacing(4)
+            chip.setStyleSheet(
+                f"background: {COLOR_BG_OVERLAY_SOFT}; border-radius: 9px;")
+            lab = QLabel(n)
+            lab.setStyleSheet(
+                f"color: {COLOR_FONT_PRIMARY}; font-size: 11px;")
+            h.addWidget(lab)
+            x = QPushButton("✕")
+            x.setCursor(Qt.CursorShape.PointingHandCursor)
+            x.setFixedSize(16, 16)
+            x.setToolTip(self.tr("Remove {name}").format(name=n))
+            x.setStyleSheet(
+                f"border: none; color: {COLOR_FONT_MUTED}; font-size: 10px;")
+            x.clicked.connect(lambda _=False, nn=n: _remove(nn))
+            h.addWidget(x)
+            return chip
+
+        def _remove(n: str) -> None:
+            if n in state["names"]:
+                state["names"].remove(n)
+            state["new"].pop(n, None)
+            if n not in state["removed"]:
+                state["removed"].append(n)
+            _repaint()
+
+        def _add() -> None:
+            n = name.text().strip()
+            v = value.text()
+            if not n or not v:
+                self._status.setText(
+                    self.tr("A header needs both a name and a value."))
+                return
+            if n not in state["names"]:
+                state["names"].append(n)
+            if n in state["removed"]:
+                state["removed"].remove(n)
+            state["new"][n] = v
+            # Empty boxes again, cursor back in the first one: the next
+            # header is the likely next action (two for Cloudflare Access).
+            name.clear()
+            value.clear()
+            name.setFocus()
+            self._status.setText("")
+            _repaint()
+
+        add.clicked.connect(_add)
+        value.returnPressed.connect(_add)
+        _repaint()
+        return box
+
     def _collect(self) -> None:
         for key, (field, w, is_secret) in self._widgets.items():
+            if getattr(field, "kind", "") == "headers":
+                state = getattr(w, "_state", None) or {}
+                for n in state.get("removed", []):
+                    try:
+                        self.dest.ctx.secrets.delete(f"{key}.{n}")
+                    except Exception:
+                        pass
+                for n, v in state.get("new", {}).items():
+                    self.dest.ctx.secrets.set(f"{key}.{n}", v)
+                self.dest.ctx.config.set(key, json.dumps(state.get("names", [])))
+                continue
             if isinstance(w, QCheckBox):
                 value = w.isChecked()
             elif isinstance(w, QSpinBox):
