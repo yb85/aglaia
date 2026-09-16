@@ -35,6 +35,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 
+from aglaia.gui import gui_log
 from aglaia.plugin_api import KIND_LABEL_UI
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
@@ -514,8 +515,9 @@ class PluginSettingsDialog(QDialog):
             # unreadable.
             detail = getattr(outcome.result, "detail", None)
             if detail or outcome.error:
-                print(f"[plugins] {self.dest.name} check: "
-                      f"{outcome.error or detail}")
+                gui_log.log("info" if outcome.ok else "error",
+                            f"[plugins] {self.dest.name} check: "
+                            f"{outcome.error or detail}")
 
         job = DestinationJob(self.dest.check)
         job.done.connect(_done)
@@ -1141,7 +1143,7 @@ class PluginsTab(QWidget):
             # for whoever wrote the plugin.
             detail = dest.load_detail(slug)
             if detail:
-                print(f"[plugins] {slug}: {detail}")
+                gui_log.log("error", f"[plugins] {slug}: {detail}")
             QMessageBox.warning(
                 self, self.tr("{slug} cannot be used").format(slug=slug),
                 self.tr("This plugin is damaged. Remove it below, or report "

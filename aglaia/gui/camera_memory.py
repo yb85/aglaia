@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from aglaia.gui import gui_log
 from aglaia.app_data import db as cfg
 
 
@@ -69,4 +70,4 @@ def save(cam_key: str, rotation: int, mirror: bool, flip: bool) -> None:
             cfg.set(conn, cfg.KEY_CAMERA_TRANSFORMS, table)
             conn.commit()
     except Exception as e:  # noqa: BLE001 — a failed remember must not stop capture
-        print(f"[camera] could not remember the transform: {e}")
+        gui_log.log("warning", f"[camera] could not remember the transform: {e}")

@@ -282,6 +282,13 @@ technique found:
 > "Example: .mozilla.org, .net.nz, 192.168.1.0/24" — Firefox
 > placeholder `john.doe@example.com` — Thunderbird
 
+An example is a **value**, so it keeps the spelling and the case of the thing
+it stands for — `Example: X-Api-Token` in a box whose content is an HTTP
+header name. That is the one place a wire detail belongs in the UI: the user
+is about to type it. It does not license prose about the wire. The test
+(`tests/test_ui_writing.py`) exempts strings that begin with `Example: `, and
+nothing else.
+
 **State the default only where the widget does not show it.** VS Code omits it
 97 % of the time because the settings control renders it; rustc and Ghostty
 state it 45 % and 60 % of the time because they have no widget. Aglaïa's

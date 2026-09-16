@@ -118,6 +118,12 @@ ALLOWED = {
     # The bug report tells the user to review a file they are about to send.
     "Saved to <b>{folder}</b>",
     # Diagnostics the user is asked to attach to a report.
+    # A literal example of a value the user must TYPE. `docs/ui-writing.md`
+    # asks for exactly this ("give a literal example instead of describing a
+    # format"), and a box whose content is an HTTP header name cannot show
+    # an example that is not one. The prefix keeps the exemption narrow: it
+    # covers the example, never prose about the wire.
+    "Example: ",
 }
 
 
@@ -188,6 +194,10 @@ def test_short_labels_are_sentence_case(strings):
         "UNREVIEWED PLUGIN", "by Aglaïa",
     }
     #: Names that are capitalised because they are names.
+    #: A literal example is a VALUE, not a sentence — its case is the
+    #: server's, not ours (see ALLOWED above).
+    strings = [(f, ln, s) for f, ln, s in strings
+               if not s.startswith("Example: ")]
     proper = {"aglaïa", "aglaia", "apple", "intelligence", "vision",
               "markdown", "mistral", "kindle", "calibre", "corpus", "surya",
               "github", "finder", "python", "macos", "linux", "windows",

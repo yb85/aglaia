@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 
+from aglaia.gui import gui_log
 from aglaia.app_data import plugins as _plugins
 
 
@@ -33,7 +34,7 @@ def prompt_pending_plugins(parent: QWidget | None = None) -> None:
     try:
         pending = _plugins.scan_pending()
     except Exception as e:  # noqa: BLE001 — never block startup on the gate
-        print(f"[plugin-trust] scan skipped: {e}")
+        gui_log.log("warning", f"[plugin-trust] scan skipped: {e}")
         return
 
     for cand in pending:

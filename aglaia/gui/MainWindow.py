@@ -687,6 +687,12 @@ class MainWindow(QMainWindow):
             self.status_bar_widget.rss.update_values
         )
         self.monitor_thread.log_signal.connect(self._on_log_line)
+        # Anything in the GUI that has no handle on this window — a plugin
+        # settings dialog, a destination's refusal and the server answer
+        # inside it — reaches the Log tab through this sink instead of
+        # printing to a stdout the packaged app does not have.
+        from aglaia.gui import gui_log
+        gui_log.set_sink(self._on_log_line)
         # Live per-step pipeline timing → sidebar Pipeline tab.
         # First sample swaps the idle step list out for the live view.
         self.monitor_thread.timing_signal.connect(
