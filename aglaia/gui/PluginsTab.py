@@ -186,7 +186,21 @@ class PluginSettingsDialog(QDialog):
         self.setWindowTitle(self.tr("{name} — settings").format(
             name=dest.display or dest.name))
         self.setMinimumWidth(520)
-        v = QVBoxLayout(self)
+        # The form goes in a scroll area, and the buttons stay outside it.
+        # A dialog whose content does not fit was letting Qt squeeze the
+        # rows into each other — captions printed over the tags above them
+        # — instead of scrolling. The number of fields is the plugin's
+        # choice, so it cannot be bounded here.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        body = QWidget()
+        outer.addWidget(scroll, 1)
+        scroll.setWidget(body)
+        v = QVBoxLayout(body)
         v.setSpacing(10)
 
         if getattr(dest, "description", ""):
@@ -224,8 +238,10 @@ class PluginSettingsDialog(QDialog):
         self._status.setWordWrap(True)
         self._status.setStyleSheet(f"color: {COLOR_FONT_DIM}; font-size: 11px;")
         v.addWidget(self._status)
+        v.addStretch(1)
 
-        row = QHBoxLayout()
+        foot = QWidget()
+        row = QHBoxLayout(foot)
         self._test_btn = QPushButton(self.tr("Test connection"))
         self._test_btn.clicked.connect(self._on_test)
         row.addWidget(self._test_btn)
@@ -235,7 +251,7 @@ class PluginSettingsDialog(QDialog):
         bb.accepted.connect(self._on_save)
         bb.rejected.connect(self.reject)
         row.addWidget(bb)
-        v.addLayout(row)
+        outer.addWidget(foot)
 
     def _field_row(self, field, is_secret: bool) -> QWidget:
         wrap = QWidget()
