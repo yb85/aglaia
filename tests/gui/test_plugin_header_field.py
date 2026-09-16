@@ -21,7 +21,7 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import (QApplication, QLabel,            # noqa: E402
-                               QLineEdit, QPushButton)
+                               QLineEdit, QPushButton, QToolButton)
 
 from aglaia.gui.PluginsTab import PluginSettingsDialog          # noqa: E402
 from aglaia.plugin_api import Destination, Field                # noqa: E402
@@ -122,7 +122,9 @@ def test_removing_a_tag_deletes_its_secret(app, dest):
     dest.ctx.secrets.set("extra_headers.CF-Access-Client-Id", "id-123")
     dlg = PluginSettingsDialog(dest)
     w = _headers_widget(dlg)
-    cross = [b for b in w.findChildren(QPushButton) if b.text() == "✕"][0]
+    crosses = [b for b in w.findChildren(QToolButton) if b.text() == "✕"]
+    assert crosses, "the tag must carry a visible remove button"
+    cross = crosses[0]
     cross.click()
     dlg._collect()
     assert json.loads(dest.ctx.config["extra_headers"]) == []

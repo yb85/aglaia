@@ -41,7 +41,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QSpinBox, QVBoxLayout, QWidget,
+    QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from aglaia.gui.colors import (
@@ -396,12 +396,20 @@ class PluginSettingsDialog(QDialog):
             lab.setStyleSheet(
                 f"color: {COLOR_FONT_PRIMARY}; font-size: 11px;")
             h.addWidget(lab)
-            x = QPushButton("✕")
+            # A QToolButton, not a QPushButton: a push button keeps its
+            # platform padding (wide on macOS), so at tag size the glyph was
+            # clipped away and the tag showed an empty square.
+            x = QToolButton()
+            x.setText("✕")
+            x.setAutoRaise(True)
             x.setCursor(Qt.CursorShape.PointingHandCursor)
-            x.setFixedSize(16, 16)
+            x.setFixedSize(18, 18)
             x.setToolTip(self.tr("Remove {name}").format(name=n))
             x.setStyleSheet(
-                f"border: none; color: {COLOR_FONT_MUTED}; font-size: 10px;")
+                f"QToolButton {{ border: none; background: transparent; "
+                f"padding: 0; margin: 0; min-width: 0; min-height: 0; "
+                f"color: {COLOR_FONT_MUTED}; font-size: 12px; }}"
+                f"QToolButton:hover {{ color: {COLOR_FONT_PRIMARY}; }}")
             x.clicked.connect(lambda _=False, nn=n: _remove(nn))
             h.addWidget(x)
             return chip
