@@ -270,6 +270,12 @@ def page_to_result(page: dict, page_w: int, page_h: int,
     persist via ``ocr_repo.finish`` exactly like a synchronous run, structure
     intact. Footnote / header-footer post-processing happens at export time."""
     md = page.get("markdown", "") if isinstance(page, dict) else (page or "")
+    if (page_w <= 0 or page_h <= 0) and isinstance(page, dict):
+        # The node the run was submitted on is gone — a reprocess replaced it
+        # before the batch came back (#159). The frame Mistral saw is still a
+        # frame; a 0 × 0 one makes the page impossible to place in a PDF.
+        dims = page.get("dimensions") or {}
+        page_w, page_h = int(dims.get("width") or 0), int(dims.get("height") or 0)
     base: OcrResult = {
         "engine": "mistral_cloud", "languages": list(languages),
         "page_w": int(page_w), "page_h": int(page_h),

@@ -78,12 +78,13 @@ def _select_export_rows(conn, step_name: str | None):
     """Pull rows ordered by `page_order` (drag-reorder aware), then `idx`.
 
     Always carries `scan_id` + `branch_path` so the OCR-layer pass can
-    look up the matching OCR run per page without re-querying the order.
+    look up the matching OCR run per page without re-querying the order, and
+    `scan_idx` — the number the scan list shows — to name a failed page.
     """
     if step_name:
         q = """
             SELECT i.format, i.type, i.width, i.height, i.dpi, i.blob,
-                   n.scan_id AS scan_id,
+                   n.scan_id AS scan_id, s.idx AS scan_idx,
                    COALESCE(n.branch_label, '') AS branch_path
               FROM nodes n
               JOIN images i ON i.id = n.image_id
@@ -100,7 +101,8 @@ def _select_export_rows(conn, step_name: str | None):
         return conn.execute(q, (step_name,)).fetchall()
     q = """
         SELECT i.format, i.type, i.width, i.height, i.dpi, i.blob,
-               b.scan_id AS scan_id, b.branch_path AS branch_path
+               b.scan_id AS scan_id, s.idx AS scan_idx,
+               b.branch_path AS branch_path
           FROM branches b
           JOIN nodes n  ON n.id = b.chosen_node_id
           JOIN images i ON i.id = n.image_id
@@ -158,16 +160,36 @@ class OcrLayerError(RuntimeError):
     is raised. `missing` holds 1-based PDF page numbers."""
 
     def __init__(self, expected: int, written: int, missing: list[int],
-                 reason: str = ""):
+                 reason: str = "", labels: dict[int, str] | None = None):
         self.expected = int(expected)
         self.written = int(written)
         self.missing = list(missing)
-        shown = ", ".join(str(p) for p in missing[:20])
+        # The error speaks in PDF pages, the page list in scans: without the
+        # scan beside the page number, a retry went to the wrong page (#159).
+        lab = labels or {}
+        shown = ", ".join(f"{p} ({lab[p]})" if p in lab else str(p)
+                          for p in missing[:20])
         more = "…" if len(missing) > 20 else ""
         super().__init__(
             reason or f"OCR layer incomplete: {written} of {expected} pages "
                       f"with OCR text were embedded (missing pages: "
                       f"{shown}{more})")
+
+
+def _page_labels(rows, kept: list[int], pages: list[int]) -> dict[int, str]:
+    """``{pdf_page: "scan 149 A"}`` for the 1-based PDF pages given."""
+    out: dict[int, str] = {}
+    for p in pages:
+        if not 1 <= p <= len(kept):
+            continue
+        r = rows[kept[p - 1]]
+        try:
+            branch = r["branch_path"] or ""
+            # `scans.idx` is the number the scan list shows ("Scan 149").
+            out[p] = f"scan {int(r['scan_idx'])}{' ' + branch if branch else ''}"
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return out
 
 
 # ── public export entry point ────────────────────────────────────────
@@ -240,7 +262,8 @@ def create_pdf_from_db(
         if stats["written"] < stats["expected"]:
             output_path.unlink(missing_ok=True)
             raise OcrLayerError(stats["expected"], stats["written"],
-                                stats["missing"])
+                                stats["missing"],
+                                labels=_page_labels(rows, kept, stats["missing"]))
     return ok
 
 

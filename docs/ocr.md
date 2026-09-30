@@ -134,7 +134,12 @@ Flow (`aglaia/workers/ocr/mistral_batch.py`, `MistralBatchWorker`,
    — #147), parses the stored bytes (`pages_from_output`) and writes each
    page's markdown back to its OCR run via
    `ocr_repo.finish` (dims from `ocr_runs → nodes → images`), then marks the
-   job imported. `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs. It is
+   job imported. A batch can land **after its branch was reprocessed**: the
+   node it ran on is gone, so the dims fall back to Mistral's own
+   `dimensions` (never a 0 × 0 frame), and `finish` keeps the run **stale** —
+   it computes `is_stale` (node gone, or not the branch's `chosen_node_id`)
+   instead of clearing it, and a stale run does not replace the current
+   layer (#159). `FAILED`/`TIMEOUT_EXCEEDED`/`CANCELLED` fail the runs. It is
    re-clickable: the poll runs in a `MistralBatchWorker` QThread handed to
    `MainWindow._track_worker(…, attr="_batch_worker")`, which clears the
    owning attribute when the thread ends. Leaving it set left a

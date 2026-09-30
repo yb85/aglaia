@@ -730,21 +730,36 @@ class OcrRepo:
             "finished_at = ? WHERE id = ?",
             (json.dumps(result), _now(), run_id),
         )
-        # A fresh `done` run is always considered current — it ran
-        # against whichever node was the chosen target at the time.
+        # A `done` run is current only if it ran against the node its branch
+        # has chosen NOW. That held for a synchronous run, not for a batch: it
+        # lands long after submission, and a reprocess in between deletes the
+        # node it ran on and marks it stale — clearing the flag here made the
+        # list call the page OCR'd while its text could not be placed (#159).
         # If `chosen_node_id` moves afterwards, `recompute_stale_for_scan`
-        # will flip is_stale to 1.
-        self.conn.execute(
-            "UPDATE ocr_runs SET is_stale = 0 WHERE id = ?", (run_id,)
-        )
+        # flips it again.
+        self.conn.execute("""
+            UPDATE ocr_runs SET is_stale = CASE
+                WHEN ocr_runs.node_id IS NULL THEN 0
+                WHEN NOT EXISTS (SELECT 1 FROM nodes n
+                                 WHERE n.id = ocr_runs.node_id) THEN 1
+                WHEN EXISTS (SELECT 1 FROM branches b
+                             WHERE b.scan_id = ocr_runs.scan_id
+                               AND b.branch_path = ocr_runs.branch_path
+                               AND b.chosen_node_id IS NOT NULL
+                               AND b.chosen_node_id <> ocr_runs.node_id) THEN 1
+                ELSE 0 END
+            WHERE id = ?
+        """, (run_id,))
         # Max ONE done layer per (branch, engine): drop superseded same-engine
         # done rows so a re-run *replaces* rather than accumulates. Other
         # engines' layers are untouched — kept + independently export-selectable.
         row = self.conn.execute(
-            "SELECT scan_id, branch_path, engine FROM ocr_runs WHERE id = ?",
+            "SELECT scan_id, branch_path, engine, is_stale FROM ocr_runs WHERE id = ?",
             (run_id,),
         ).fetchone()
-        if row is not None:
+        # A stale run replaces nothing: a batch that lands after the branch was
+        # reprocessed and re-OCR'd must not delete the current layer (#159).
+        if row is not None and not int(row["is_stale"] or 0):
             self.conn.execute(
                 "DELETE FROM ocr_runs WHERE scan_id = ? AND branch_path = ? "
                 "AND engine = ? AND status = 'done' AND id != ?",
