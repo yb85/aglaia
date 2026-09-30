@@ -22,8 +22,14 @@ from aglaia.storage.repo import BranchRepo, NodeRepo, OcrRepo
 from aglaia.workers.ocr import mistral_batch
 from aglaia.workers.PDFprocessor import OcrLayerError, create_pdf_from_db
 
-from .test_pdf_ocr_layer import (PAGE_1, SENT_H, SENT_W, _mistral_result,
-                                 _page_texts, _project)
+from .test_pdf_ocr_layer import (
+    PAGE_1,
+    SENT_H,
+    SENT_W,
+    _mistral_result,
+    _page_texts,
+    _project,
+)
 
 
 def _replay(db, scan_id, old_node):
