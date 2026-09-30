@@ -316,6 +316,20 @@ def _spread(text: str, box) -> list[tuple[str, tuple]]:
             for k, t in enumerate(rows)]
 
 
+def ocr_page_frame(ocr: dict) -> tuple[float, float]:
+    """The stored page frame, ``(page_w, page_h)``.
+
+    A run imported after its node was replaced was stored with a 0 × 0 frame
+    (#159). Mistral's own ``dimensions`` are then the frame its blocks live in,
+    so the page can still be placed instead of being counted as missing."""
+    w = float(ocr.get("page_w") or 0)
+    h = float(ocr.get("page_h") or 0)
+    if w > 0 and h > 0:
+        return w, h
+    dims = ((ocr.get("meta") or {}).get("mistral_page") or {}).get("dimensions") or {}
+    return float(dims.get("width") or 0), float(dims.get("height") or 0)
+
+
 def ocr_text_lines(ocr: dict) -> list[tuple[str, tuple]]:
     """``[(text, (x0, y0, x1, y1)), …]`` in the stored page frame
     (``page_w`` × ``page_h``), in reading order.
@@ -334,8 +348,7 @@ def ocr_text_lines(ocr: dict) -> list[tuple[str, tuple]]:
     - With neither, a whole-page text is stacked over the page, which at least
       keeps every line on it.
     """
-    page_w = float(ocr.get("page_w") or 0)
-    page_h = float(ocr.get("page_h") or 0)
+    page_w, page_h = ocr_page_frame(ocr)
     if page_w <= 0 or page_h <= 0:
         return []
     mp = ((ocr.get("meta") or {}).get("mistral_page") or {})
@@ -410,8 +423,9 @@ def inject_ocr_layer(pdf_path: Path, ocr_per_page: list) -> dict:
             if not placed:
                 stats["missing"].append(i + 1)
                 continue
-            sx = pw / float(ocr["page_w"])
-            sy = ph / float(ocr["page_h"])
+            frame_w, frame_h = ocr_page_frame(ocr)
+            sx = pw / frame_w
+            sy = ph / frame_h
             try:
                 res = page.Resources
             except Exception:
