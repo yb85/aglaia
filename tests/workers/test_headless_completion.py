@@ -137,6 +137,12 @@ def test_a_chain_that_raises_does_not_hang_the_run():
 
 # ── the signal completion now depends on, in a real spawn-worker chain ──
 
+#: Seconds either half of the busy/idle assertion may take. Not a performance
+#: bound — a slow-runner allowance. Raising it costs nothing on a green run and
+#: only delays a genuine hang, which the step's own `timeout-minutes` catches.
+_BUDGET_S = 120
+
+
 def test_chain_reports_busy_while_a_worker_is_mid_page(tmp_path):
     """`is_idle()` must go False while a page is being processed and True once
     it is done — it is now the thing that decides when a headless run ends.
@@ -193,19 +199,32 @@ def test_chain_reports_busy_while_a_worker_is_mid_page(tmp_path):
             filestem="t_001", scan_id=scan_id, parent_node_id=root,
             pipeline_version_id=pid, depth=0))
 
+        # What is asserted is the STATE MACHINE — busy while working, idle
+        # after — not how fast SkewFinder is. So the budget is generous: on a
+        # shared Windows runner, `spawn` re-imports the whole package (cv2,
+        # numpy, the processor registry) in the worker before a pixel moves,
+        # and 30 s failed a release gate on timing alone while the same commit
+        # passed on rerun (#179). A test that blocks a release over how busy
+        # someone else's box is has stopped measuring what it is for.
         saw_busy = False
-        deadline = time.monotonic() + 30
+        started = time.monotonic()
+        deadline = started + _BUDGET_S
         while time.monotonic() < deadline:
             if not chain.is_idle():
                 saw_busy = True
                 break
             time.sleep(0.005)
-        assert saw_busy, "chain never reported busy while processing a page"
+        assert saw_busy, (
+            f"chain never reported busy while processing a page "
+            f"(waited {time.monotonic() - started:.0f}s)")
 
         # …and it must come back to idle, or a run would never terminate.
-        deadline = time.monotonic() + 30
+        started = time.monotonic()
+        deadline = started + _BUDGET_S
         while time.monotonic() < deadline and not chain.is_idle():
             time.sleep(0.05)
-        assert chain.is_idle(), "chain never returned to idle"
+        assert chain.is_idle(), (
+            f"chain never returned to idle (waited "
+            f"{time.monotonic() - started:.0f}s)")
     finally:
         chain.stop()
