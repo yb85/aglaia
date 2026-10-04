@@ -14,6 +14,7 @@ kept showing the deleted page's thumbnail, built from nodes the rerun had
 already dropped from the DB.
 """
 import os
+from collections import OrderedDict
 
 import pytest
 
@@ -50,6 +51,9 @@ def _card():
                        "current_idx": 3, "trashed": False},
     }
     w._stem_for_node = {1: "page_001", 10: "page_001_A", 20: "page_001_B"}
+    # `forget_layouts` also drops the memoised pixmaps: their key is the image
+    # id, which the rerun reuses for new pixels (#162).
+    w._pix_cache = OrderedDict()
     return w
 
 

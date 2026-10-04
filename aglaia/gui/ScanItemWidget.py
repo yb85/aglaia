@@ -458,10 +458,18 @@ class ScanItemWidget(QWidget):
         # re-runs it for ALL its thumbs even when nothing about a given thumb
         # changed — N cards × M thumbs × (read+decode+scale) saturated the GUI
         # event loop (stall-watch: 10 s blocks in refresh_composite/repo.get).
-        # image_id is content-addressed (regenerate wipes orphaned rows), so
-        # (image_id, max_w, is_final, global_zoom) fully determines the built
+        # (image_id, max_w, is_final, global_zoom) determines the built
         # pixmap → memoise it. Bounded LRU; placeholder (pending) results are
         # never cached so a not-yet-written thumb still retries.
+        #
+        # `image_id` is NOT a stable identity for the pixels. `images` is
+        # content-addressed on sha256, but `images.id` is a plain rowid, and a
+        # reprocess deletes the top of the table and inserts over the freed
+        # ids: measured across one force-rerun of a 121-scan project, 257 ids
+        # came back holding different content, some a different size (#162).
+        # So the cache has to be DROPPED whenever this card's node tree is
+        # rebuilt — `_register_node` and `forget_layouts` do that — and may
+        # never be trusted across a rerun.
         self._pix_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
         self._pix_cache_cap = 96
         # One coalesced retry for pending (not-yet-written) thumbs, instead of
@@ -570,6 +578,32 @@ class ScanItemWidget(QWidget):
                     self.items[parent_stem]["children"].append(stem)
         return self.items[stem]
 
+    def set_pipeline_steps(self, pipeline_steps: list[str]) -> None:
+        """Adopt an edited pipeline's step list.
+
+        A card is built once, from the pipeline in force at the time, and
+        `_spawn_widget` reuses it for the rest of the session. `_register_node`
+        only ever APPENDS an unseen step name to `global_history`, so editing
+        the pipeline and reprocessing left the card walking the OLD rail with
+        the new names bolted on the end: `final_step` (`pipeline_steps[-1]`)
+        matched nothing the chain now emits, so `is_final` stopped firing —
+        no final-step zoom, the OCR badge on the wrong thumbnail, and chevrons
+        stepping through an order that no longer exists (#162).
+
+        The rail is rebuilt, not merged: the incoming events describe the new
+        pipeline, and a merged rail is the bug. The cursor goes back to the
+        raw source, which is all that is on screen until they arrive."""
+        steps = list(pipeline_steps or [])
+        if steps == self.pipeline_steps:
+            return
+        self.pipeline_steps = steps
+        self.max_steps = len(steps)
+        self.global_history = ["raw"] + steps
+        self.current_history_idx = 0
+        for entry in self.items.values():
+            entry["current_idx"] = 0
+        self._pix_cache.clear()
+
     def forget_layouts(self) -> None:
         """Drop every per-layout column, keeping only the raw source.
 
@@ -580,9 +614,19 @@ class ScanItemWidget(QWidget):
         rebuild whatever the new run actually produces.
 
         The raw entry stays — it is the source the rerun feeds from, not a
-        result of it — and so do the steps it already carries."""
+        result of it — and so do the steps it already carries.
+
+        Called by every rerun path: one scan (the card's ↻), and the two
+        project-wide ones (Reprocess all, Apply pipeline + reprocess). The
+        project-wide ones used to skip it, so "reprocess everything" kept the
+        ghost columns the per-scan rerun had learnt to drop (#162)."""
         raw = self.raw_filestem
         keep = self.items.get(raw)
+        # Unconditional: the pixmap cache is keyed by image_id, and a rerun
+        # reuses those ids for new pixels (see `_pix_cache`). Dropping it only
+        # when a layout disappears would leave the common case — same layout
+        # count, all-new images — painting the previous run.
+        self._pix_cache.clear()
         dropped = [st for st in self.items if st != raw]
         if not dropped:
             return
@@ -604,6 +648,13 @@ class ScanItemWidget(QWidget):
         entry = self.items[stem]
         if step_name not in entry["history"]:
             entry["history"].append(step_name)
+        elif step_name in entry["nodes"]:
+            # This stage already had a node and is being replaced — a rerun.
+            # Drop the pixmap cache: its key is the image id, and a rerun
+            # writes new pixels over the ids the wipe freed, so a hit here is
+            # the PREVIOUS run's picture (#162). Not conditional on the id
+            # having changed: reuse means it often has not.
+            self._pix_cache.clear()
         entry["nodes"][step_name] = {
             "node_id": node_id,
             "image_id": image_id,

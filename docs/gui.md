@@ -275,6 +275,30 @@ colour: it throws away work done by hand, which no rerun can recover). The
 third clears `manual_overrides` only; the per-page step **disables** live in
 `step_overrides` and keep their own toggles in the scan views.
 
+Every rerun path — the card's ↻, *Reprocess all*, and *Apply pipeline +
+reprocess* — first calls `_prepare_cards_for_rerun()`, which puts each card
+back to its raw source (`ScanItemWidget.forget_layouts`) before the wipe. A
+card's state is not a view of the DB, it is accumulated from events:
+`handle_event` only ever ADDS a stem, and the decoded-pixmap cache is keyed by
+`image_id` — a rowid the reprocess **reuses** for new pixels (257 ids came
+back holding different content across one 121-scan rerun). So a card that is
+not reset paints the previous run: ghost layout columns, and thumbnails of
+images that no longer exist (#123, #162).
+
+An edited pipeline also has to reach the live cards: `_spawn_widget` passes
+`pipeline_steps` once and reuses the widget for the session, so
+`update_pipeline_context` pushes the new list through
+`ScanItemWidget.set_pipeline_steps`. Without it the card walks its original
+stage rail with the new step names appended at the end, and `is_final` — which
+decides the final-step zoom and where the OCR badge sits — stops matching.
+
+When the chain goes idle, `_reconcile_progress_if_idle` forces the bar to 100 %
+and clears stuck spinners (it exists to rescue a dropped `branch_ready`). That
+is also how a run that genuinely lost work reports itself complete, so it now
+calls `_report_scans_left_unprocessed`: active scans with no live `branches`
+row are named in the Log tab and counted in a toast. One reprocess lost 35 of
+121 scans and said 100 %; the hole only surfaced at export.
+
 The slider ranges are chosen for manual tuning, not for the solver's freedom:
 curl is clamped at ±0.5 internally but a page past ±0.35 is already extreme,
 and a full-width slider over the solver's range would make every useful value
