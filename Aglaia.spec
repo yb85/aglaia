@@ -162,6 +162,14 @@ datas = [
     # the aglaia/app_data subdir (where filetype_register reads it). Drop a
     # copy at the root for the Finder file icon.
     (str(REPO / "aglaia" / "assets" / "app" / "AglaiaDoc.icns"), "."),
+    # Compiled translations. `aglaia/i18n/__init__.py` loads them from
+    # `<package>/i18n/qm`, so they have to be in the bundle at that path. The
+    # wheel has shipped them all along (pyproject package-data); this list did
+    # not, so the frozen app had NO app catalogue and `install_translator`
+    # silently fell back to the en-US source strings — French simply did not
+    # exist in the only build most users have (#170). The .ts sources are not
+    # read at runtime and stay out.
+    (str(REPO / "aglaia" / "i18n" / "qm"), "aglaia/i18n/qm"),
 ]
 
 # Surya/transformers/huggingface_hub ship YAML configs + tokenizer
