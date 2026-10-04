@@ -226,16 +226,25 @@ class PluginSecrets:
         safe = re.sub(r"[^A-Za-z0-9]+", "_", f"{self.slug}_{key}")
         return f"AGLAIA_PLUGIN_{safe.upper()}"
 
-    def _keyring(self):
-        # Headless runs keep secrets in the 0600 .env, not in a keychain a
-        # cron job or systemd unit cannot unlock (see
-        # `aglaia.app_data.secrets.use_plaintext_store`).
-        try:
-            from aglaia.app_data.secrets import plaintext_store
-            if plaintext_store():
-                return None
-        except Exception:
-            pass
+    def _keyring(self, *, for_write: bool = False):
+        """The keyring module, or None when it must not be used.
+
+        `for_write` is the whole of the plaintext switch. Headless runs STORE
+        in the 0600 .env rather than in a keychain a cron job or systemd unit
+        cannot unlock (see `aglaia.app_data.secrets.use_plaintext_store`) —
+        but that same function promises "nothing already in a keychain becomes
+        unreachable", and reading through this helper broke the promise: with
+        the headless store on, a plugin configured in the GUI reported every
+        secret as missing, so `--send-to` refused a correctly configured
+        destination and told the user to configure it again (#166).
+        """
+        if for_write:
+            try:
+                from aglaia.app_data.secrets import plaintext_store
+                if plaintext_store():
+                    return None
+            except Exception:
+                pass
         try:
             import keyring
             from keyring.backends.fail import Keyring as _Fail
@@ -281,7 +290,7 @@ class PluginSecrets:
         if value is None:
             self.delete(key)
             return
-        kr = self._keyring()
+        kr = self._keyring(for_write=True)
         if kr is not None:
             try:
                 kr.set_password(SECRET_SERVICE, self._username(key),

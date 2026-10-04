@@ -118,6 +118,14 @@ boundary.
 `config.all()` hides host-reserved rows, because it is what a settings form
 reads and a password does not belong in one.
 
+**The headless store is about writing, not reading.** `use_plaintext_store()`
+— on for every CLI command — makes `set` write to the 0600
+`<APP_DATA>/.env` instead of a keychain a cron job cannot unlock. `get` still
+looks in `.env`, then the keychain, then the legacy config row, whatever the
+mode. Routing reads through the same switch is what made a plugin configured
+in the GUI invisible to the CLI: `plugins config` printed "not set" over a
+stored key and `--send-to` refused a configured destination (#166).
+
 ## The three, and what each gets wrong if you are not careful
 
 ### calibre

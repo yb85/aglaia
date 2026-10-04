@@ -162,7 +162,7 @@ def test_purge_empties_the_namespace(ctxmod, monkeypatch):
 # ── no keychain: fall back, but say so ───────────────────────────────
 
 def test_without_a_keychain_it_still_works_and_admits_it(ctxmod, monkeypatch):
-    monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring", lambda self: None)
+    monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring", lambda self, for_write=False: None)
     s = ctxmod.PluginSecrets("a-plugin")
     assert s.available is False
     s.set("api_key", "sk-plain")
@@ -178,7 +178,7 @@ def test_the_plaintext_copy_is_dropped_once_a_keychain_takes_it(
     it was the config DB until secrets moved there."""
     pytest.importorskip("keyring")
     from aglaia.app_data.secrets import _read_env_file
-    monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring", lambda self: None)
+    monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring", lambda self, for_write=False: None)
     cfg = ctxmod.PluginConfig("a-plugin")
     s = ctxmod.PluginSecrets("a-plugin", cfg)
     s.set("api_key", "sk-plain")
@@ -187,7 +187,7 @@ def test_the_plaintext_copy_is_dropped_once_a_keychain_takes_it(
     _fake_keyring(monkeypatch, {})
     import keyring
     monkeypatch.setattr(ctxmod.PluginSecrets, "_keyring",
-                        lambda self: keyring)
+                        lambda self, for_write=False: keyring)
     s.set("api_key", "sk-kept")
     assert line not in _read_env_file()
     assert cfg._raw_get("__secret__.api_key") is None
