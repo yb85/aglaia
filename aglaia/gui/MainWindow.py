@@ -1125,6 +1125,26 @@ class MainWindow(QMainWindow):
                 pass
         cb(ids)
 
+    def _prepare_cards_for_rerun(self) -> int:
+        """Put every card back to "only the raw source" before a project-wide
+        reprocess, and spin it up. Returns how many cards were reset.
+
+        The per-scan rerun has done this since #123; the two project-wide
+        paths — Reprocess all, and Apply pipeline + reprocess — only set the
+        spinner, so they kept painting a node tree the wipe was about to
+        delete: ghost layouts, and pixmaps served from the previous run for
+        image ids the rebuild reuses (#162). The worst of it was that a scan
+        the rerun never got to looked exactly like one it finished."""
+        n = 0
+        for w in self.scan_widgets_by_scan.values():
+            try:
+                w.forget_layouts()
+                w.set_processing(True)
+                n += 1
+            except Exception:  # noqa: BLE001 — one bad card is not a dead rerun
+                continue
+        return n
+
     def _refresh_debug_tabs(self, scan_id: int, branch_path: str,
                             node_id=None) -> None:
         """Point every open debug tab of that page-branch at the new nodes.
@@ -3419,6 +3439,16 @@ class MainWindow(QMainWindow):
                                               self.pipeline_descriptions)
             except Exception:
                 pass
+        # An edited pipeline changes the rail every card navigates. Push it
+        # into the live widgets — they were built with the old one and
+        # `_spawn_widget` reuses them for the session (#162). Done whether or
+        # not scans are re-enqueued: a plain apply still renames the steps the
+        # NEXT capture will emit.
+        for w in self.scan_widgets_by_scan.values():
+            try:
+                w.set_pipeline_steps(self.pipeline_steps)
+            except Exception:  # noqa: BLE001
+                continue
         if not reprocess:
             return
         # Reprocess re-fires branch_ready but NOT scan_imported (scans exist).
@@ -3430,10 +3460,9 @@ class MainWindow(QMainWindow):
         if n_active:
             self.status_bar_widget.progress.set_imported(n_active)
         # All existing scan widgets are about to be re-fed through the
-        # new pipeline → spin them up again. branch_ready clears each
-        # one as its replay finishes.
-        for w in self.scan_widgets_by_scan.values():
-            w.set_processing(True)
+        # new pipeline → drop the tree the wipe is deleting and spin them up
+        # again. branch_ready clears each one as its replay finishes.
+        self._prepare_cards_for_rerun()
 
     # ── status bar wiring ──────────────────────────────────────────────
     def _on_log_line(self, level: str, text: str):
@@ -3518,6 +3547,51 @@ class MainWindow(QMainWindow):
                     w.set_processing(False)
             except Exception:
                 pass
+        self._report_scans_left_unprocessed()
+
+    def _report_scans_left_unprocessed(self) -> None:
+        """Name the scans the finished run produced nothing for.
+
+        Forcing the bar to 100% and clearing the spinners is how this method
+        rescues a dropped event — and it is also how a run that genuinely lost
+        work reports itself complete. A reprocess wipes each scan's subtree
+        before re-enqueuing it, so a scan the chain never got back to is left
+        holding its raw node and nothing else; on screen it is identical to a
+        finished one. One such run lost 35 of 121 scans and said 100%, and the
+        hole only surfaced at export (#162).
+
+        The DB is the only honest source here, so ask it: an active scan with
+        no branch row produced no output. Said once per hole, not once per
+        idle tick — the state does not change until something reruns."""
+        try:
+            with db_session(str(self.db_path)) as conn:
+                rows = conn.execute(
+                    "SELECT s.idx FROM scans s "
+                    " WHERE s.deleted_at IS NULL "
+                    "   AND NOT EXISTS (SELECT 1 FROM branches b "
+                    "                    WHERE b.scan_id = s.id "
+                    "                      AND b.trashed_at IS NULL) "
+                    " ORDER BY s.idx"
+                ).fetchall()
+        except Exception as e:  # noqa: BLE001 — a failed check is not a failed run
+            self._on_log_line("warning",
+                              f"could not check for unprocessed scans: {e}")
+            return
+        missing = [int(r["idx"]) for r in rows]
+        if missing == getattr(self, "_reported_unprocessed", None):
+            return
+        self._reported_unprocessed = missing
+        if not missing:
+            return
+        shown = ", ".join(str(i) for i in missing[:12])
+        more = f" (+{len(missing) - 12})" if len(missing) > 12 else ""
+        self._on_log_line(
+            "warning",
+            f"{len(missing)} scan(s) have no output after the run: "
+            f"{shown}{more}. Re-run them from their cards, or use "
+            f"Reprocess all.")
+        self.toast(self.tr("{n} scans produced no pages. See the Log tab.")
+                   .format(n=len(missing)), 8000)
 
     def _on_status_branch_ready(self, payload: dict):
         scan_id = payload.get("scan_id")
@@ -3842,8 +3916,7 @@ class MainWindow(QMainWindow):
         # Reseed progress bar + spinners — workers run in background.
         self.status_bar_widget.progress.reset()
         self.status_bar_widget.progress.set_imported(n)
-        for w in self.scan_widgets_by_scan.values():
-            w.set_processing(True)
+        self._prepare_cards_for_rerun()
         self.toast(self.tr("Reprocessing {n} scan(s)…").format(n=n))
         # Reprocess wipe writes `is_stale = 1` to every ocr_run touched.
         # Broadcast now so badges + the OCR frame's pending count refresh
