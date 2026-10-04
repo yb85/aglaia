@@ -24,10 +24,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QHBoxLayout,
-    QHeaderView, QLabel, QPushButton, QSizePolicy, QSpinBox,
+    QHeaderView, QLabel, QMessageBox, QPushButton, QSizePolicy, QSpinBox,
     QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from aglaia.gui import gui_log
 from aglaia.gui.colors import COLOR_PRIMARY
 from aglaia.gui.theme import lucide
 from aglaia.storage.db import db_session
@@ -363,5 +364,36 @@ class ScansDpiTab(QWidget):
             for scan_id, dpi in edits.items():
                 conn.execute("UPDATE scans SET capture_dpi = ? WHERE id = ?", (dpi, scan_id))
             conn.commit()
+        # A PDF page was RENDERED at the old density, so its pixels hold that
+        # density and relabelling them cannot put detail back — the chain just
+        # resamples the other way and the export stays wrong (#173). Render it
+        # again from the file the import came from. A capture or an imported
+        # image is untouched: its pixels are the original.
+        self._rerender_pdf_sources(edits)
         self._reprocess_cb(set(edits.keys()))
         self.reload()
+
+    def _rerender_pdf_sources(self, edits: dict[int, float]) -> None:
+        from aglaia.workers.ImportHelpers import rerender_pdf_sources
+
+        try:
+            report = rerender_pdf_sources(db_path=self._db_path,
+                                          dpi_by_scan=edits)
+        except Exception as e:  # noqa: BLE001 — the relabel + rerun still stand
+            gui_log.log("error", f"[dpi] re-render failed: {e}")
+            return
+        for scan_id, path in report["missing"]:
+            gui_log.log("warning",
+                        f"[dpi] scan {scan_id}: {path} is no longer there; "
+                        f"the page keeps the pixels it was imported with.")
+        for scan_id, why in report["failed"]:
+            gui_log.log("warning", f"[dpi] scan {scan_id}: {why}")
+        stale = len(report["missing"]) + len(report["failed"])
+        if stale:
+            # Said in the open: the number changed and the pixels did not, so
+            # the page will be resampled rather than re-read.
+            QMessageBox.warning(
+                self, self.tr("Fix input DPI"),
+                self.tr("{n} page(s) could not be read from their PDF again. "
+                        "Their DPI is updated but the image is not. See the "
+                        "Log tab.").format(n=stale))

@@ -673,6 +673,8 @@ class MainWindow(QMainWindow):
             # tracked-quad polyline) on top.
             self.webcam_thread.set_overlay_fn(self._freehand_overlay)
             self.webcam_thread.start()
+            # No DPI set yet → ask now, not after the book is shot (#174).
+            QTimer.singleShot(0, self.prompt_dpi_if_uncalibrated)
         else:
             self.webcam_thread = None
 
@@ -1449,6 +1451,7 @@ class MainWindow(QMainWindow):
         self._capture_stack.setCurrentIndex(1)
         self._capture_tab = ct
         self.toast("Capture activated — webcam ready.")
+        self.prompt_dpi_if_uncalibrated()
 
     def _deactivate_capture_clicked(self) -> None:
         """Tear down the late-activated webcam session: stop the
@@ -1466,6 +1469,9 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self.webcam_thread = None
+        # The next camera is a new session — possibly a new distance, so a new
+        # DPI. Arm the prompt again.
+        self._dpi_prompted = False
         ct = getattr(self, "_capture_tab", None)
         if ct is not None and hasattr(ct, "set_preview_pixmap"):
             # Cleanly toggle off any hands-free trigger before tearing
@@ -3239,6 +3245,35 @@ class MainWindow(QMainWindow):
             self.is_calibrating = False
             self.btn_full_calibrate.setText(self.tr("Full calibration"))
             self.btn_full_calibrate.setEnabled(True)
+
+    def prompt_dpi_if_uncalibrated(self) -> bool:
+        """Open the DPI dialog once when a camera comes up uncalibrated.
+
+        The capture DPI is per-session and distance-dependent — not a camera
+        intrinsic — and `effective_dpi()` quietly falls back to `input_dpi`
+        (100) until someone calibrates. Nothing on screen insists, so a whole
+        book gets shot at the default, and `dpi_normalize_output` then takes
+        every page to 300: three times the pixels that were ever captured,
+        large files and soft text. By the time the export looks wrong the rig
+        has moved and the DPI cannot be recovered — the pages have to be shot
+        again (#174).
+
+        So ask at the one moment the answer is cheap: the rig is in place and
+        the card is to hand. Once per activation, and closing it proceeds with
+        the default — this is a reminder, not a gate. Returns whether it asked,
+        for the test.
+        """
+        if getattr(self, "webcam_thread", None) is None:
+            return False
+        if self._dpi_base is not None:
+            return False          # already calibrated this session
+        if getattr(self, "_dpi_prompted", False):
+            return False
+        self._dpi_prompted = True
+        # Deferred: at launch this runs before the window is on screen, and a
+        # dialog parented to an unshown window opens behind it.
+        QTimer.singleShot(400, self.calibrate_dpi)
+        return True
 
     def calibrate_dpi(self):
         """Open the medium DPI calibration dialog. Live preview + card

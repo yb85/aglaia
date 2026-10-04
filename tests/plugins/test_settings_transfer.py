@@ -181,10 +181,13 @@ def test_importing_settings_only_leaves_the_stored_password_alone(ctx, tmp_path)
     assert target.secrets.get("api_key") == "already-here"
 
 
-def test_describe_counts_what_the_user_is_about_to_replace(ctx, tmp_path):
+def test_counts_are_numbers_not_a_sentence(ctx, tmp_path):
+    """The confirmation wording belongs to the front-end. A phrase built here
+    would be interpolated into a translated string as an English fragment."""
     xfer.write(ctx, tmp_path / "x.json", include_secrets=True)
-    assert xfer.describe(xfer.read(tmp_path / "x.json")) == \
-        "3 setting(s) and 2 password(s)"
+    assert xfer.counts(xfer.read(tmp_path / "x.json")) == (3, 2)
+    xfer.write(ctx, tmp_path / "y.json")
+    assert xfer.counts(xfer.read(tmp_path / "y.json")) == (3, 0)
 
 
 # ── naming only what will really be written ────────────────────────────
