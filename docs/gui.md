@@ -545,6 +545,43 @@ to someone else's machine is worth keeping.
 layer cannot be written (#149); the status bar carries the message, naming the
 pages that got no text. A page with no OCR run is not a failure.
 
+## Capture DPI
+
+`effective_dpi()` is `_dpi_base × zoom`, and `_dpi_base` is unset until
+someone calibrates — so it quietly falls back to `input_dpi` (100). The DPI is
+per-session and distance-dependent, not a camera intrinsic: moving the rig
+changes it, and nothing on screen insists.
+
+That default is expensive and silent. At 100 dpi `dpi_normalize_output` still
+takes every page to 300, so the output is upsampled 3× from resolution that
+was never captured — large files, soft text, worse OCR — and by the time the
+export looks wrong the rig has moved and the pages have to be shot again.
+
+So `prompt_dpi_if_uncalibrated()` opens the DPI dialog when a camera becomes
+live with no DPI set, on both paths (launched with `--camera-id`, and Activate
+capture). Once per activation; closing it proceeds with the default, because
+this is a reminder and not a gate. `_deactivate_capture_clicked` re-arms it —
+the next camera may be at a different distance (#174).
+
+## Fixing a PDF's input DPI
+
+A PDF is imported by **rendering** each page (`enqueue_pdf_files` →
+`render_page`), so the density is baked into the pixels at import. The
+Fix-input-DPI table therefore cannot work by relabelling: a page rendered at
+72 dpi holds 72 dpi worth of detail, and calling it 350 only changes which way
+`DPIfixer` resamples. A 350 dpi PDF registered at 72 kept producing an export
+several times the size of the source even after the number was corrected
+(#173).
+
+`_on_apply` now calls `ImportHelpers.rerender_pdf_sources` before the rerun:
+for a scan whose `source = 'pdf'`, the page is rendered again from
+`scans.source_ref` (`<file>#<page>`) at the new DPI and the root image is
+replaced, with the old render pruned when nothing else holds it. A capture or
+an imported image is deliberately untouched — those pixels ARE the original,
+and relabelling is the whole fix. A source file that has moved is named in the
+Log tab and counted in a dialog, because its number changed and its pixels did
+not.
+
 ## Opening a project from the Finder
 
 macOS does not pass a double-clicked document in argv; it sends a

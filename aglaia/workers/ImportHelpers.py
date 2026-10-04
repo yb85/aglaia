@@ -178,6 +178,91 @@ def enqueue_pdf_files(*, db_path: str, pipeline_version_id: int,
             doc.close()
 
 
+def rerender_pdf_sources(*, db_path: str,
+                         dpi_by_scan: dict[int, float]) -> dict[str, list]:
+    """Re-render the PDF-backed scans in `dpi_by_scan` at their new DPI.
+
+    A PDF is imported by RENDERING each page at a chosen density, so the
+    density is baked into the pixels. Relabelling such a scan cannot work: a
+    page rendered at 72 dpi holds 72 dpi worth of detail, and calling it 350
+    only changes which way `DPIfixer` then resamples. The user who reported
+    this had a 350 dpi PDF registered at 72, fixed the number, and still got
+    an export several times the size of the source — because `dpi_clamp_input`
+    pushed 72 up to 100 and `dpi_normalize_output` took that to 300, three
+    times more pixels than were ever captured (#173).
+
+    The source is still on disk — `scans.source_ref` is `<file>#<page>` — so
+    the honest fix is to render the page again. Returns what happened:
+    ``{"rendered": [scan_id…], "missing": [(scan_id, path)…],
+    "failed": [(scan_id, reason)…]}``; a scan this does not touch keeps the
+    plain relabel, which is correct for a capture or an imported image whose
+    pixels ARE the original.
+    """
+    from aglaia.storage.repo import NodeRepo
+    from aglaia.workers.pdf_extract import render_one
+
+    out: dict[str, list] = {"rendered": [], "missing": [], "failed": []}
+    if not dpi_by_scan:
+        return out
+    conn = open_db(db_path)
+    try:
+        persister = Persister(conn)
+        node_repo = NodeRepo(conn)
+        scans = ScanRepo(conn)
+        for scan_id, dpi in dpi_by_scan.items():
+            row = scans.get(int(scan_id))
+            if row is None or (row["source"] or "") != "pdf":
+                continue
+            ref = str(row["source_ref"] or "")
+            path_s, _, page_s = ref.rpartition("#")
+            try:
+                page = int(page_s)
+            except ValueError:
+                out["failed"].append((int(scan_id), "unreadable source reference"))
+                continue
+            src = Path(path_s)
+            if not src.is_file():
+                out["missing"].append((int(scan_id), str(src)))
+                continue
+            try:
+                arr = render_one(src, page - 1, float(dpi))
+            except Exception as e:  # noqa: BLE001 — one bad page, not a dead batch
+                out["failed"].append((int(scan_id), f"{type(e).__name__}: {e}"))
+                continue
+            root_id = row["root_node_id"]
+            root = node_repo.get(root_id) if root_id is not None else None
+            if root is None:
+                out["failed"].append((int(scan_id), "no raw node"))
+                continue
+            old_image_id = root["image_id"]
+            image_id = persister.persist_image(arr, "COLOR", dpi=float(dpi))
+            conn.execute("UPDATE nodes SET image_id = ? WHERE id = ?",
+                         (image_id, root_id))
+            # The old render is nobody's original — drop it once nothing
+            # points at it, or a project re-rendered a few times carries every
+            # attempt. `images` is content-addressed, so a re-render that
+            # happens to produce identical bytes reuses the row and this is a
+            # no-op.
+            if old_image_id is not None and int(old_image_id) != int(image_id):
+                still = conn.execute(
+                    "SELECT 1 FROM nodes WHERE image_id = ? LIMIT 1",
+                    (old_image_id,)).fetchone()
+                held = conn.execute(
+                    "SELECT 1 FROM debug_artifacts WHERE image_id = ? LIMIT 1",
+                    (old_image_id,)).fetchone()
+                if not still and not held:
+                    conn.execute("DELETE FROM thumbs WHERE image_id = ?",
+                                 (old_image_id,))
+                    conn.execute("DELETE FROM images WHERE id = ?",
+                                 (old_image_id,))
+            conn.commit()
+            out["rendered"].append(int(scan_id))
+            del arr
+    finally:
+        conn.close()
+    return out
+
+
 def reprocess_active_scans(*, db_path: str, pipeline_version_id: int,
                             chain, scan_ids: Optional[set[int]] = None) -> int:
     """Re-enqueue active scans' raw images with the given pipeline_version_id.
