@@ -57,7 +57,7 @@ def env(tmp_path, monkeypatch):
     import aglaia.app_data.plugin_registry as reg
     for m in (ad, pc, reg):
         importlib.reload(m)
-    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self: None)
+    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self, for_write=False: None)
     from aglaia.workers import destinations as d
     d.reset_for_tests()
     # no network: the registry index is empty

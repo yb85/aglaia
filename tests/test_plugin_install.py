@@ -286,7 +286,7 @@ def test_a_registry_install_records_where_it_came_from(reg, tmp_path,
 def test_uninstall_takes_the_settings_and_the_secrets_too(reg, tmp_path,
                                                           monkeypatch):
     import aglaia.app_data.plugin_ctx as pc
-    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self: None)
+    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self, for_write=False: None)
     reg.install_from_archive(_archive(tmp_path), "destinations")
     ctx = pc.build_context("a-plugin", wants_secrets=True)
     ctx.config.set("k", "v")
@@ -360,7 +360,7 @@ def test_uninstall_says_so_when_the_files_survive(reg, tmp_path, monkeypatch):
     import shutil
 
     import aglaia.app_data.plugin_ctx as pc
-    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self: None)
+    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self, for_write=False: None)
     reg.install_from_archive(_archive(tmp_path), "destinations")
     pc.build_context("a-plugin", wants_secrets=True).config.set("k", "v")
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)

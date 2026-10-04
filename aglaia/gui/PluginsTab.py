@@ -245,6 +245,18 @@ class PluginSettingsDialog(QDialog):
         self._test_btn = QPushButton(self.tr("Test connection"))
         self._test_btn.clicked.connect(self._on_test)
         row.addWidget(self._test_btn)
+        # Carrying a configuration to a second machine. Flat and small: this
+        # is the rare errand, and it must not compete with Save.
+        for text, slot in ((self.tr("Export…"), self._on_export),
+                           (self.tr("Import…"), self._on_import)):
+            b = QPushButton(text)
+            b.setFlat(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(
+                f"QPushButton {{ color: {COLOR_PRIMARY}; border: none; "
+                f"font-size: 11px; padding: 0 8px; }}")
+            b.clicked.connect(slot)
+            row.addWidget(b)
         row.addStretch(1)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
                               | QDialogButtonBox.StandardButton.Cancel)
@@ -461,6 +473,9 @@ class PluginSettingsDialog(QDialog):
 
         add.clicked.connect(_add)
         value.returnPressed.connect(_add)
+        # Exposed so an import can reset the tags to what is now stored
+        # (#165). The closure is the only thing that knows how to draw them.
+        box._repaint = _repaint
         _repaint()
         return box
 
@@ -544,6 +559,173 @@ class PluginSettingsDialog(QDialog):
     def closeEvent(self, ev):  # noqa: N802 — Qt API
         self._alive = False
         super().closeEvent(ev)
+
+    # ── carrying a configuration between machines (#165) ──────────────
+
+    def _on_export(self) -> None:
+        """Write this plugin's settings to a file, secrets only if asked.
+
+        The secrets question is asked HERE, not in a checkbox on the form: a
+        checkbox pre-ticked by anyone's convenience is how a keychain ends up
+        in a Downloads folder. Default is settings only, and the warning names
+        the secrets rather than saying "passwords" — the user is agreeing to
+        export an API key, which is a different thing to agree to."""
+        from aglaia.app_data import plugin_transfer as xfer
+
+        ctx = getattr(self.dest, "ctx", None)
+        if ctx is None:
+            QMessageBox.warning(
+                self, self.tr("Export settings"),
+                self.tr("This plugin keeps no settings to export."))
+            return
+        names = xfer.exported_secret_names(ctx)
+        with_secrets = False
+        if names:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle(self.tr("Export settings"))
+            box.setText(self.tr(
+                "Include the stored passwords in the file?"))
+            box.setInformativeText(self.tr(
+                "They are written as readable text: {names}. Anyone who "
+                "opens the file, and any backup or sync folder it lands in, "
+                "can read them. Keep it like the passwords themselves, and "
+                "delete it once the other machine is set up."
+            ).format(names=", ".join(names)))
+            yes = box.addButton(self.tr("Include passwords"),
+                                QMessageBox.ButtonRole.DestructiveRole)
+            no = box.addButton(self.tr("Settings only"),
+                               QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(self.tr("Cancel"),
+                          QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(no)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is None or clicked not in (yes, no):
+                return
+            with_secrets = clicked is yes
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr("Export settings"),
+            xfer.default_filename(ctx.slug),
+            self.tr("Aglaïa settings (*.json)"))
+        if not path:
+            return
+        try:
+            written = xfer.write(
+                ctx, Path(path), include_secrets=with_secrets,
+                plugin_version=str(getattr(self.dest, "version", "") or ""))
+        except Exception as e:  # noqa: BLE001
+            gui_log.log("error", f"[plugins] {self.dest.name} export: {e}")
+            QMessageBox.critical(
+                self, self.tr("Export settings"),
+                self.tr("The file could not be written. See the Log tab."))
+            return
+        self._status.setText(
+            self.tr("Exported to {name}").format(name=written.name))
+
+    def _on_import(self) -> None:
+        """Read a bundle and write it into this plugin's stores, then show
+        the result in the form so the user can see what landed before saving
+        anything else."""
+        from aglaia.app_data import plugin_transfer as xfer
+
+        ctx = getattr(self.dest, "ctx", None)
+        if ctx is None:
+            QMessageBox.warning(
+                self, self.tr("Import settings"),
+                self.tr("This plugin keeps no settings to import."))
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, self.tr("Import settings"), "",
+            self.tr("Aglaïa settings (*.json)"))
+        if not path:
+            return
+        try:
+            bundle = xfer.read(Path(path))
+        except xfer.TransferError as e:
+            QMessageBox.warning(self, self.tr("Import settings"), str(e))
+            return
+        if str(bundle.get("slug") or "") != ctx.slug:
+            QMessageBox.warning(
+                self, self.tr("Import settings"),
+                self.tr("This file holds the settings of {other}.")
+                .format(other=str(bundle.get("slug") or "another plugin")))
+            return
+        if QMessageBox.question(
+                self, self.tr("Import settings"),
+                self.tr("Replace the current settings with {what}?")
+                .format(what=xfer.describe(bundle)),
+                QMessageBox.StandardButton.Ok
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel
+        ) != QMessageBox.StandardButton.Ok:
+            return
+        try:
+            report = xfer.apply(ctx, bundle)
+        except xfer.TransferError as e:
+            QMessageBox.warning(self, self.tr("Import settings"), str(e))
+            return
+        if report.skipped:
+            gui_log.log("warning",
+                        f"[plugins] {self.dest.name} import skipped: "
+                        f"{', '.join(report.skipped)}")
+        self._reload_values()
+        self._status.setText(
+            self.tr("Imported {n} setting(s)").format(n=report.total)
+            if not report.skipped else
+            self.tr("Imported {n}, skipped {k}").format(
+                n=report.total, k=len(report.skipped)))
+
+    def _reload_values(self) -> None:
+        """Re-read every widget's value from the stores.
+
+        After an import the form still shows what was on screen when it
+        opened, and the user's next Save would write that back over what was
+        just imported — the import would appear to have done nothing."""
+        for key, (field, w, is_secret) in self._widgets.items():
+            try:
+                self._set_widget_value(field, w, is_secret)
+            except Exception:  # noqa: BLE001 — one odd widget, not a dead form
+                continue
+
+    def _reload_headers(self, field, w) -> None:
+        """Point the header tags at what is stored now, dropping the pending
+        adds and removals the user had queued: they were edits to the set the
+        import has just replaced."""
+        state = getattr(w, "_state", None)
+        if state is None:
+            return
+        state["names"] = list(self.dest.header_names(field.key))
+        state["new"] = {}
+        state["removed"] = []
+        repaint = getattr(w, "_repaint", None)
+        if callable(repaint):
+            repaint()
+
+    def _set_widget_value(self, field, w, is_secret: bool) -> None:
+        if getattr(field, "kind", "") == "headers":
+            self._reload_headers(field, w)
+            return
+        if isinstance(w, QCheckBox):
+            w.setChecked(bool(self.dest.conf(field.key, field.default)))
+        elif isinstance(w, QSpinBox):
+            try:
+                w.setValue(int(self.dest.conf(field.key, field.default) or 0))
+            except (TypeError, ValueError):
+                w.setValue(0)
+        elif isinstance(w, QComboBox):
+            cur = str(self.dest.conf(field.key, field.default) or "")
+            if cur in (field.choices or ()):
+                w.setCurrentText(cur)
+        elif isinstance(w, QLineEdit) and is_secret:
+            # Still never shown: the box says one is stored, as on first open.
+            w.clear()
+            if self.dest.secret(field.key):
+                w.setPlaceholderText(self.tr("•••• stored — type to replace"))
+            elif field.placeholder:
+                w.setPlaceholderText(field.placeholder)
+        elif isinstance(w, QLineEdit):
+            w.setText(str(self.dest.conf(field.key, field.default) or ""))
 
     def _on_save(self) -> None:
         self._collect()

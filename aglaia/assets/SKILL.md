@@ -167,7 +167,7 @@ a stamp remover), `ocr` (engines), `destinations` (export plugins).
 | `aglaia plugins update SLUG` / `--all` | To the registry's newer version; keeps settings, files and secrets. |
 | `aglaia plugins toggle SLUG` | Disable ↔ enable. A pipeline that references a disabled/uninstalled processor **fails with an error** — it does not silently skip the step. |
 | `aglaia plugins remove SLUG [--yes]` | Uninstall, including its settings and any password it stored in the keychain. `--yes`/`-y` skips the confirmation. |
-| `aglaia plugins config SLUG` | Interactive view (select/text/password prompts) of an export plugin's settings. `--set key=value` (repeatable) for scripts; `--test` checks the connection afterwards. |
+| `aglaia plugins config SLUG` | Interactive view (select/text/password prompts) of an export plugin's settings. `--set key=value` (repeatable) for scripts; `--test` checks the connection afterwards. `--export FILE` writes the settings to a JSON file and `--import FILE` reads one back, for moving a configuration to another machine; `--with-secrets` adds the stored passwords to `--export` as readable text (the file is written `0600` — treat it like the passwords). |
 
 Secrets (passwords, API keys, SMTP credentials) go to the OS keychain,
 namespaced per plugin; other settings go to the config database. Only
@@ -304,6 +304,8 @@ aglaia run ~/scans/book.agl --check-ocr --export pdf:g4+md
 # Export and send to a Kindle
 aglaia plugins install send-to-kindle
 aglaia plugins config send-to-kindle          # interactive; or --set smtp_host=… --test
+aglaia plugins config send-to-corpus --export corpus.json --with-secrets
+aglaia plugins config send-to-corpus --import corpus.json   # on the other machine
 aglaia run ~/scans/book.agl --export pdf:g4 --send-to send-to-kindle
 
 # What can this machine do?

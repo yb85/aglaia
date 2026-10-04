@@ -118,6 +118,45 @@ boundary.
 `config.all()` hides host-reserved rows, because it is what a settings form
 reads and a password does not belong in one.
 
+**The headless store is about writing, not reading.** `use_plaintext_store()`
+— on for every CLI command — makes `set` write to the 0600
+`<APP_DATA>/.env` instead of a keychain a cron job cannot unlock. `get` still
+looks in `.env`, then the keychain, then the legacy config row, whatever the
+mode. Routing reads through the same switch is what made a plugin configured
+in the GUI invisible to the CLI: `plugins config` printed "not set" over a
+stored key and `--send-to` refused a configured destination (#166).
+
+### Moving a configuration to another machine
+
+`aglaia/app_data/plugin_transfer.py` (#165) writes one plugin's settings to a
+JSON bundle and reads it back. Generic over whatever the plugin declared, so a
+plugin written later needs no changes.
+
+```bash
+aglaia plugins config send-to-corpus --export corpus.json [--with-secrets]
+aglaia plugins config send-to-corpus --import corpus.json
+```
+
+In the GUI the same two errands are **Export…** / **Import…** in the plugin's
+settings dialog.
+
+The bundle names the plugin it belongs to, and an import into a different one
+is refused — two plugins can both have a `base_url` meaning different servers,
+and the only thing worse than no settings is someone else's.
+
+Secrets are **opt-in per export** and written as readable text. A keychain's
+whole point is that nothing else can read it, so carrying one to a file is a
+decision the user makes in words, not a side effect of "export": the GUI asks
+in a dialog that names the secrets, the CLI wants `--with-secrets`, and the
+file is `0600`. The warning counts only the secrets that could actually be
+READ — the name index and the values live in different stores, so a name can
+be listed and its value out of reach, and both front-ends say so rather than
+reporting a clean export of nothing.
+
+The plaintext fallback rows never ride out as settings: `build()` reads
+`config.all()`, which hides them, so a settings-only export cannot carry a
+password past the switch that governs passwords.
+
 ## The three, and what each gets wrong if you are not careful
 
 ### calibre
