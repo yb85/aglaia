@@ -101,10 +101,23 @@ def test_the_plaintext_fallback_never_rides_out_as_a_setting(tmp_path):
 
 # ── the file on disk ───────────────────────────────────────────────────
 
+@pytest.mark.skipif(not hasattr(os, "fchmod"),
+                    reason="no POSIX file mode on this platform")
 def test_a_bundle_with_secrets_is_not_world_readable(ctx, tmp_path):
     p = xfer.write(ctx, tmp_path / "x.json", include_secrets=True)
     mode = stat.S_IMODE(os.stat(p).st_mode)
     assert mode == 0o600, oct(mode)
+
+
+def test_a_platform_without_fchmod_still_gets_its_file(ctx, tmp_path,
+                                                       monkeypatch):
+    """Windows has no `os.fchmod`. Calling it unguarded did not skip the
+    permission bit — it raised, so exporting with secrets failed outright and
+    only the release gate ever ran it (#177)."""
+    monkeypatch.delattr(xfer.os, "fchmod", raising=False)
+    p = xfer.write(ctx, tmp_path / "x.json", include_secrets=True)
+    assert json.loads(p.read_text(encoding="utf-8"))["secrets"]["api_key"] \
+        == "k-123"
 
 
 def test_no_partial_file_is_left_behind(ctx, tmp_path, monkeypatch):

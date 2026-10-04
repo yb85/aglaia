@@ -103,6 +103,14 @@ def write(ctx, path: Path, *, include_secrets: bool = False,
     in which the key is on disk world-readable. Written through a temp file in
     the same directory and renamed, so a failure half-way leaves no partial
     bundle for someone to import.
+
+    `os.fchmod` is POSIX-only, and calling it unguarded made this raise
+    `AttributeError` on Windows — so exporting with secrets did not merely
+    skip the permission bit, it failed outright (#177). Where the platform has
+    no POSIX mode the file is written anyway, inheriting the directory's ACL:
+    the sentence the user agreed to ("anyone who opens the file can read
+    them") is the true one on every platform, and refusing to write the file
+    at all would be a worse answer than writing it.
     """
     bundle = build(ctx, include_secrets=include_secrets,
                    plugin_version=plugin_version)
@@ -110,7 +118,7 @@ def write(ctx, path: Path, *, include_secrets: bool = False,
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".part")
     try:
-        if bundle["contains_secrets"]:
+        if bundle["contains_secrets"] and hasattr(os, "fchmod"):
             os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(bundle, fh, ensure_ascii=False, indent=2)
