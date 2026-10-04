@@ -13,27 +13,45 @@ files were in the wheel but not in `Aglaia.spec`'s `datas`, so
 Settings still said Français. `QTranslator.load()` returning False was not
 checked, so nothing said so.
 
-These are file checks, not Qt checks: a .qm missing from the tree, from the
-package data or from the bundle spec is the failure, and all three are
-readable without a GUI.
+This is a PACKAGING test, not a GUI one, and it deliberately does not import
+`aglaia.i18n` — that module imports PySide6, which the CI test job does not
+install, and a guard that skips on CI is not a guard. `SUPPORTED_LOCALES` is
+read out of the source with `ast` instead.
 """
 
 from __future__ import annotations
 
+import ast
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
 
-from aglaia.i18n import CATALOG, SUPPORTED_LOCALES
+_REPO = Path(__file__).resolve().parents[1]
+_I18N = _REPO / "aglaia" / "i18n"
+CATALOG = "aglaia"
 
-_I18N = Path(__file__).resolve().parents[2] / "aglaia" / "i18n"
-_REPO = Path(__file__).resolve().parents[2]
 
-#: "" is the auto entry — it resolves to the system locale, which may be any
-#: language on earth and is allowed to have no catalogue.
-LOCALES = [code for code, _label in SUPPORTED_LOCALES if code]
+def _supported_locales() -> list[str]:
+    """The locale codes `aglaia/i18n/__init__.py` offers, without importing
+    it. The "" entry is auto (follow the system), which may be any language on
+    earth and is allowed to have no catalogue."""
+    tree = ast.parse((_I18N / "__init__.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets = getattr(node, "targets", []) or [getattr(node, "target", None)]
+        names = [t.id for t in targets if isinstance(t, ast.Name)]
+        if "SUPPORTED_LOCALES" in names:
+            pairs = ast.literal_eval(node.value)
+            return [code for code, _label in pairs if code]
+    raise AssertionError("SUPPORTED_LOCALES not found in aglaia/i18n")
+
+
+LOCALES = _supported_locales()
+
+
+def test_there_is_at_least_one_locale_to_check():
+    assert LOCALES
 
 
 @pytest.mark.parametrize("locale", LOCALES)
