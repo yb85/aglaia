@@ -364,22 +364,55 @@ def classify_inputs(cfg: CliConfig) -> None:
 def resolve_pipeline_path(pipeline_arg: Optional[str]) -> Optional[Path]:
     """Map a ``--pipeline`` argument to a YAML path.
 
-    Accepts either a bare name (looked up under ``config/pipelines/``)
-    or a direct path. Returns None when the argument is unset so the
-    caller can apply its own default."""
+    Accepts either a bare name or a direct path. Returns None when the
+    argument is unset so the caller can apply its own default.
+
+    A bare name is looked up in the USER pipelines dir first
+    (``<APP_DATA>/pipelines``), then in the bundle. That order is the whole
+    point of `seed_pipelines`: the bundled files are copied there so they can
+    be edited, and an edit has to win. Searching the bundle first meant the
+    CLI silently ran the shipped copy of a pipeline the user had changed —
+    and, for a project whose pipeline carries a plugin step the bundled one
+    does not, rebuilt every scan without that step while the banner printed
+    the same name for both (#161).
+    """
     if not pipeline_arg:
         return None
     p = Path(pipeline_arg).expanduser()
     if p.is_file():
         return p.resolve()
-    # Treat as a name under the bundled pipelines/ dir.
-    from aglaia.assets import config_path
-    candidate = config_path("pipelines", f"{pipeline_arg}.yaml")
-    if candidate.is_file():
-        return candidate
+    searched: list[Path] = []
+    for directory in _pipeline_search_dirs():
+        searched.append(directory)
+        candidate = directory / f"{pipeline_arg}.yaml"
+        if candidate.is_file():
+            return candidate.resolve()
+    where = " or ".join(str(d) for d in searched)
     raise SystemExit(
-        f"--pipeline: not found as path or under config/pipelines/: {pipeline_arg!r}"
+        f"--pipeline: not found as a path, or as a name in {where}: "
+        f"{pipeline_arg!r}"
     )
+
+
+def _pipeline_search_dirs() -> list[Path]:
+    """Where a bare ``--pipeline`` name is looked for, in order: the user's
+    pipelines dir, then the bundle. The bundle is kept as a fallback so a
+    name still resolves when APP_DATA cannot be written (CI, a read-only
+    home) — seeding is best-effort there."""
+    dirs: list[Path] = []
+    try:
+        from aglaia.app_data import pipelines_dir
+        dirs.append(pipelines_dir())
+    except Exception:  # noqa: BLE001 — no APP_DATA is not a reason to fail
+        pass
+    try:
+        from aglaia.app_data import bundled_pipelines_dir
+        bundled = bundled_pipelines_dir()
+        if bundled not in dirs:
+            dirs.append(bundled)
+    except Exception:  # noqa: BLE001
+        pass
+    return dirs
 
 
 def default_project_name(cfg: CliConfig) -> str:
