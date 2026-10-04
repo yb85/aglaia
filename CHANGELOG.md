@@ -4,6 +4,66 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc8] — 2026-10-04
+
+A reprocess you can believe, a DPI you cannot forget, and a French build that
+is actually French. Every item here came out of one afternoon's use of rc7 on
+a 121-scan book.
+
+### Fixed
+
+- **A full reprocess lost 35 of 121 scans and reported 100 %** (#162). The two
+  project-wide rerun paths — *Reprocess all*, *Apply pipeline + reprocess* —
+  never reset the scan cards, so each one kept painting a node tree the wipe
+  had already deleted, and a scan the chain never got back to looked exactly
+  like one it finished. The decoded-pixmap cache made it worse: it is keyed by
+  `image_id`, which SQLite **reuses** after a wipe — measured across one rerun,
+  257 ids came back holding different content. Cards are now reset on every
+  rerun path, the cache is dropped whenever a stage is re-registered, an edited
+  pipeline is pushed into the live cards, and when the chain goes idle the
+  scans that produced nothing are named in the Log tab instead of being
+  reconciled to 100 %.
+- **A PDF's input DPI could not be corrected inside the app** (#173). Import
+  *renders* each page at a chosen density, so "Fix input DPI" was relabelling
+  pixels that already had the wrong density: a 350 dpi PDF registered at 72
+  kept exporting several times the size of its source even after the number
+  was fixed. The page is now rendered again from its source file at the new
+  DPI. Captures and imported images are untouched — their pixels are the
+  original.
+- **A capture session with no DPI was only discovered at export** (#174). The
+  capture DPI is per-session and distance-dependent, and nothing insisted, so
+  a whole book could be shot at the default 100 and silently upsampled to 300.
+  The DPI dialog now opens when a camera comes up uncalibrated — once per
+  activation, and closing it proceeds.
+- **The packaged app had no translations at all** (#170). `Aglaia.spec` never
+  shipped `aglaia/i18n/qm`, so every string fell back to English while
+  Settings still offered Français, and `QTranslator.load()` returning False
+  was not checked. The catalogues ship, a failed load is logged, and a test
+  fails if a locale loses its catalogue. The catalogues are also re-extracted:
+  **French is 919/919**.
+- **Double-clicking a `.agl` opened the picker** (#168). macOS delivers the
+  document as a `QFileOpenEvent` once an event loop is already turning — by
+  which time the launcher dialog was up, running a modal loop that read
+  nothing, and cancelling it discarded the path.
+- **`-p NAME` silently ran a different pipeline** (#161). A bare name resolved
+  only under the bundled `config/pipelines/`, never the user's own dir, so an
+  edited pipeline was replaced by the shipped copy of the same name —
+  rebuilding a project through a pipeline one step shorter, with the banner
+  printing the same name for either file.
+- **A plugin configured in the GUI was invisible to the CLI** (#166).
+  `use_plaintext_store()` promises that nothing already in a keychain becomes
+  unreachable; `PluginSecrets` routed *reads* through the same switch as
+  writes, so `plugins config` printed "not set" over a stored key and
+  `--send-to` refused a configured destination.
+
+### Added
+
+- **Plugin settings travel** (#165). **Export… / Import…** in the plugin
+  settings dialog, and `aglaia plugins config SLUG --export FILE
+  [--with-secrets] / --import FILE`, so a destination configured once can be
+  carried to another machine or a headless box. Secrets are opt-in per export,
+  the dialog names them, and the file is `0600`.
+
 ## [0.1.0rc7] — 2026-09-16
 
 ### Fixed
