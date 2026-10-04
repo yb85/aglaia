@@ -545,6 +545,31 @@ to someone else's machine is worth keeping.
 layer cannot be written (#149); the status bar carries the message, naming the
 pages that got no text. A page with no OCR run is not a failure.
 
+## Opening a project from the Finder
+
+macOS does not pass a double-clicked document in argv; it sends a
+`QFileOpenEvent`. `_FileOpenFilter` (in `aglaia/app.py:_qt_app`) catches it and
+stashes the path in the `aglaia_open_file` app property, which the launcher
+loop reads on each turn.
+
+Timing is the whole problem. `application:openFile:` arrives after
+`applicationDidFinishLaunching` — once an event loop is already turning — and
+by then the launcher has usually shown `StartupWindow`, whose `exec()` is a
+modal loop of its own. Setting a property reaches nobody inside it, and
+cancelling the dialog used to `return 0` and throw the path away: the user
+double-clicked a project and got the picker (#168).
+
+So the filter calls `app.dismiss_launcher()`, which `reject()`s a visible
+`StartupWindow`. The loop treats a rejected dialog with a pending
+`aglaia_open_file` as "go round again", not as a quit. Three cases, one
+mechanism:
+
+| when the event lands | what happens |
+|---|---|
+| before the dialog | the existing `processEvents()` drain picks it up |
+| while the dialog is up | the dialog is rejected, the loop reopens on the file |
+| with a project window open | `aglaia_restart="reopen"`, so the chain stops first |
+
 ## Menu bar
 
 `MainWindow._build_menu_bar` populates `self.menuBar()`. Qt places it natively

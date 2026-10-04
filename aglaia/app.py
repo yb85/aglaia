@@ -271,6 +271,29 @@ def _qt_available() -> bool:
     return importlib.util.find_spec("PySide6") is not None
 
 
+def dismiss_launcher(app) -> bool:
+    """Close the StartupWindow, if one is up. Returns whether one was.
+
+    macOS sends `application:openFile:` after `applicationDidFinishLaunching`
+    — once an event loop is already turning — and by then the launcher has
+    usually shown its dialog. `startup.exec()` is a modal loop of its own, so
+    stashing the path in a property is not enough: nothing reads it until that
+    loop ends, and cancelling the dialog threw it away. Double-clicking a
+    project opened the picker instead (#168). Closing the dialog hands control
+    back to the launcher loop, which reads the property on its next turn.
+    """
+    try:
+        from aglaia.gui.StartupWindow import StartupWindow
+    except Exception:  # noqa: BLE001 — no GUI extra: nothing to dismiss
+        return False
+    found = False
+    for w in app.topLevelWidgets():
+        if isinstance(w, StartupWindow) and w.isVisible():
+            found = True
+            w.reject()
+    return found
+
+
 def _qt_app() -> "QApplication":
     from PySide6.QtWidgets import QApplication
     # Patch CFBundleName BEFORE QApplication registers the process with the
@@ -319,6 +342,8 @@ def _qt_app() -> "QApplication":
                             app.setProperty("aglaia_open_file", None)
                             for w in live:
                                 w.close()
+                        else:
+                            dismiss_launcher(app)
                     return True
             except Exception:
                 pass
@@ -1159,6 +1184,12 @@ def launch_gui(cfg: CliConfig) -> int:
             rc = startup.exec()
             _trace(f"main: startup.exec() returned {rc}")
             if rc != StartupWindow.DialogCode.Accepted:
+                # A .agl double-clicked while the picker was up rejects it
+                # (see `_dismiss_launcher`). That is not the user quitting —
+                # go round again and open what they clicked.
+                if app.property("aglaia_open_file"):
+                    _trace("main: launcher dismissed by a FileOpen → reopening")
+                    continue
                 return 0
             choice = startup.choice()
             if choice is None or choice.project_dir is None:
