@@ -1,8 +1,14 @@
 name: ci
 
 # Fast test gate on every push / PR. No packaging, no secrets.
-# Runs on macOS because Aglaïa's runtime hard-depends on Apple Vision +
-# Speech (pyobjc) — the same constraint that makes releases macOS-only.
+#
+# macOS is the primary target — the runtime hard-depends on Apple Vision
+# (pyobjc) and that is what the releases are built for. Windows runs the same
+# suite WITHOUT those extras, because `release.yml` builds a Windows exe and
+# used to be the first thing that ever ran the suite there: six POSIX
+# assumptions reached a pushed tag that way, one of them three weeks old, and
+# PyPI had already taken the version by the time they were found (#177). A
+# platform we ship has to fail a PR, not a release.
 
 on:
   push:
@@ -28,4 +34,28 @@ jobs:
         run: uv sync --extra macos --extra dev --extra server
 
       - name: Tests
+        # The suite hangs on a flake roughly one run in five — orphaned
+        # Python children outlive pytest and hold the step's stdout open
+        # (#146). Without a cap that costs 6 hours of a runner and however
+        # long whoever is watching gives it; with one it costs a rerun.
+        timeout-minutes: 20
+        run: uv run pytest -q
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The same extras `release.yml`'s Windows job builds with, so this gate
+      # exercises what that one will.
+      - name: Sync deps
+        run: uv sync --extra gui --extra voice --extra dev --extra cloud
+
+      - name: Tests
+        timeout-minutes: 20
         run: uv run pytest -q

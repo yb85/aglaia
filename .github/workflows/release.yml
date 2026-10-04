@@ -71,6 +71,7 @@ jobs:
           --extra jbig2 --extra cloud --extra keyring-bitwarden --extra keyring-1password
 
       - name: Tests (release gate)
+        timeout-minutes: 20      # see ci.yml / #146
         run: uv run pytest -q
 
       - name: Import signing certificate
@@ -185,6 +186,7 @@ jobs:
           --extra cloud
 
       - name: Tests (release gate)
+        timeout-minutes: 20      # see ci.yml / #146
         run: uv run pytest -q
 
       - name: Build .exe (PyInstaller onedir)

@@ -4,6 +4,35 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc9] — 2026-10-04
+
+rc8's release build failed on Windows, which is where it was always going to:
+`ci.yml` ran macOS only, so the Windows suite was first executed by the
+release gate — after the tag was pushed and PyPI had taken the version.
+
+### Fixed
+
+- **Exporting plugin settings with secrets raised on Windows** (#177).
+  `plugin_transfer.write()` called `os.fchmod`, which is POSIX-only, so the
+  feature did not merely skip the permission bit — it failed outright. The
+  file is now written wherever the platform cannot restrict it, inheriting the
+  directory's ACL; the sentence the user agreed to before exporting is the one
+  that is true on every platform.
+- **`test_the_env_file_stays_private` asserted a mode Windows cannot produce**
+  (#177). There `os.chmod` only toggles the read-only bit. The assertion is
+  POSIX-only now, and a second test covers what matters everywhere: the `.env`
+  is written and the secret reads back.
+
+### Changed
+
+- **CI runs the suite on Windows as well as macOS** (#177). A platform we ship
+  a binary for has to fail a PR, not a release. The Windows job uses the same
+  extras `release.yml` builds with.
+- **Every test step has a 20-minute cap** (#146). The suite hangs on a flake —
+  orphaned Python children outlive pytest and hold the step's stdout open —
+  and without a cap that costs six hours of a runner. Three runs hit it while
+  rc8 was being prepared.
+
 ## [0.1.0rc8] — 2026-10-04
 
 A reprocess you can believe, a DPI you cannot forget, and a French build that

@@ -16,6 +16,7 @@ Reading is unchanged and still checks every store, so nothing already in a
 keychain becomes unreachable.
 """
 import importlib
+import os
 
 import pytest
 
@@ -91,12 +92,26 @@ def test_deleting_a_secret_removes_its_line(app_data):
     assert store.get("api_key") is None
 
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows `chmod` only toggles the read-only bit; "
+                           "there is no 0600 to assert")
 def test_the_env_file_stays_private(app_data):
     tmp_path, sec, pc = app_data
     sec.use_plaintext_store(True)
     pc.PluginSecrets("send-to-corpus").set("api_key", "k-1")
     mode = (tmp_path / ".env").stat().st_mode & 0o777
     assert mode == 0o600, f"the .env holds secrets; found mode {mode:o}"
+
+
+def test_the_env_file_is_still_written_without_posix_modes(app_data):
+    """The mode is a POSIX nicety; the file itself is the feature. On Windows
+    it lands with the directory's ACL and the secret is still readable back —
+    which is what a headless run there depends on (#177)."""
+    tmp_path, sec, pc = app_data
+    sec.use_plaintext_store(True)
+    pc.PluginSecrets("send-to-corpus").set("api_key", "k-1")
+    assert (tmp_path / ".env").is_file()
+    assert pc.PluginSecrets("send-to-corpus").get("api_key") == "k-1"
 
 
 def test_the_mistral_key_goes_to_the_same_file(app_data):
