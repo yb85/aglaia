@@ -12,73 +12,73 @@
 <context>
     <name>ArchiveInstallDialog</name>
     <message>
-        <location filename="../gui/PluginsTab.py" line="66"/>
+        <location filename="../gui/PluginsTab.py" line="70"/>
         <source>I TRUST THE AUTHOR OF THIS PLUGIN</source>
         <extracomment>The sentence. Typed exactly, or the button stays dead. Fallback only. The dialog asks for `trust_sentence()`, which is translated: a French user made to transcribe an English sentence is not affirming anything, they are copying shapes, and the whole point of typing it is that it cannot be done absently.</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="461"/>
+        <location filename="../gui/PluginsTab.py" line="638"/>
         <source>Unreviewed plugin</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="466"/>
+        <location filename="../gui/PluginsTab.py" line="643"/>
         <source>UNREVIEWED PLUGIN</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="472"/>
+        <location filename="../gui/PluginsTab.py" line="649"/>
         <source>This plugin did not come from the Aglaïa registry. Nobody has reviewed it. Once installed it runs with the same access to your files as Aglaïa itself.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="479"/>
+        <location filename="../gui/PluginsTab.py" line="656"/>
         <source>(no author given)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="485"/>
+        <location filename="../gui/PluginsTab.py" line="662"/>
         <source>It declares:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="486"/>
+        <location filename="../gui/PluginsTab.py" line="663"/>
         <source>nothing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="490"/>
+        <location filename="../gui/PluginsTab.py" line="667"/>
         <source>It imports:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="491"/>
+        <location filename="../gui/PluginsTab.py" line="668"/>
         <source>nothing beyond the plugin API</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="497"/>
+        <location filename="../gui/PluginsTab.py" line="674"/>
         <source>Undeclared:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="498"/>
+        <location filename="../gui/PluginsTab.py" line="675"/>
         <source>not in its manifest</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="502"/>
+        <location filename="../gui/PluginsTab.py" line="679"/>
         <source>Worth a look:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="506"/>
+        <location filename="../gui/PluginsTab.py" line="683"/>
         <source>Type the sentence below to install it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="524"/>
+        <location filename="../gui/PluginsTab.py" line="701"/>
         <source>Install</source>
         <translation type="unfinished"></translation>
     </message>
@@ -458,12 +458,12 @@ Waiting on %s:%d…
 <context>
     <name>DebugViewerDialog</name>
     <message>
-        <location filename="../gui/DebugViewerTab.py" line="1379"/>
+        <location filename="../gui/DebugViewerTab.py" line="1392"/>
         <source>node {n}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/DebugViewerTab.py" line="1380"/>
+        <location filename="../gui/DebugViewerTab.py" line="1393"/>
         <source>Inspect · {hint}</source>
         <translation></translation>
     </message>
@@ -570,26 +570,26 @@ Waiting on %s:%d…
     </message>
     <message>
         <location filename="../gui/DebugViewerTab.py" line="899"/>
-        <location filename="../gui/DebugViewerTab.py" line="1055"/>
-        <location filename="../gui/DebugViewerTab.py" line="1222"/>
-        <location filename="../gui/DebugViewerTab.py" line="1248"/>
+        <location filename="../gui/DebugViewerTab.py" line="1063"/>
+        <location filename="../gui/DebugViewerTab.py" line="1230"/>
+        <location filename="../gui/DebugViewerTab.py" line="1256"/>
         <source>manual: {fields}</source>
         <extracomment>How long a non-drag slider change (arrow key, wheel) settles before it is written and rerun. Long enough to absorb a held arrow key, short enough not to feel stuck.</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/DebugViewerTab.py" line="1340"/>
+        <location filename="../gui/DebugViewerTab.py" line="1353"/>
         <source>Saved. Reprocess from the scans view.</source>
         <extracomment>What each stage owns in the payload. The payload is per BRANCH — one row for the whole page — so &quot;Clear override&quot; under the dewarp sliders must drop the curl and leave a deskew correction alone. Owned by whichever processor drew one, plugins included — so &quot;Clear override&quot; works on a stage this table has never heard of.</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/DebugViewerTab.py" line="1348"/>
+        <location filename="../gui/DebugViewerTab.py" line="1361"/>
         <source>Reprocess failed: {err}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/DebugViewerTab.py" line="1362"/>
+        <location filename="../gui/DebugViewerTab.py" line="1375"/>
         <source>Reprocessing…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -905,130 +905,150 @@ Waiting on %s:%d…
 <context>
     <name>ExportTab</name>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="93"/>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="251"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="97"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="267"/>
         <source>Export</source>
-        <extracomment>A destination that is not configured yet: open its settings. destination name -&gt; its format combo (None when it takes only one)</extracomment>
+        <extracomment>Export formats Aglaïa produces and can hand to a destination plugin. A destination that is not configured yet: open its settings. destination name -&gt; its format combo (None when it takes only one)</extracomment>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="97"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="101"/>
         <source>Format</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="108"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="112"/>
         <source>Use JBIG2 for monochrome</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="122"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="126"/>
         <source>1-bit pages: encode with JBIG2 (≈30% smaller than G4).</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="127"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="131"/>
         <source>The JBIG2 encoder is not available in this build. 1-bit pages use CCITT G4 instead, which is slightly larger.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="133"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="137"/>
         <source>Add invisible OCR text layer</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="138"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="142"/>
         <source>Overlay the OCR result as selectable, invisible text on top of each page. Enabled once OCR has been run.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="145"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="149"/>
         <source>PDF</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="146"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="150"/>
         <source>Searchable PDF with optional OCR text layer.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="169"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="173"/>
         <source>Convert footnotes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="172"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="176"/>
         <source>Footnote refs (LaTeX $^{N}$, Unicode ⁹⁸, or (N)) → GFM [^N]; line-start entries → [^N]:. Footnote definitions in the extracted footer are lifted out as real footnotes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="190"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="194"/>
         <source>Wrap headers / footers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="193"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="197"/>
         <source>Wrap the page&apos;s running head / page number in &lt;header&gt;/&lt;footer&gt; tags. Off → keep them as plain inline text. Either way the text is preserved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="200"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="204"/>
         <source>Markdown</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="201"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="205"/>
         <source>Plain text extracted from OCR. Needs an OCR run.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="209"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="216"/>
+        <source>OCR textpack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="217"/>
+        <source>Searchable PDF, Markdown and OCR metadata in one archive. Needs an OCR run.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="225"/>
         <source>Slim Aglaïa project</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="210"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="226"/>
         <source>Pruned project DB — raw + chosen layout only.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="223"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="239"/>
         <source>Run OCR to enable Markdown export and the PDF text layer. A batched cloud OCR only counts once its result is downloaded — hit “Check result” in the OCR tab.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="240"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="256"/>
         <source>OCR layer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="243"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="259"/>
         <source>Which engine&apos;s OCR layer to export (PDF text layer + Markdown). &apos;Latest&apos; uses the most recently generated layer.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="263"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="279"/>
         <source>Normalize character width</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="337"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="355"/>
         <source>Latest layer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="401"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="419"/>
         <source>Export as</source>
         <extracomment>Card keys for plugin exporters are prefixed so they cannot collide with a built-in format, and so the host can tell them apart with a string test instead of a second lookup.</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="409"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="423"/>
+        <source>Textpack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="438"/>
+        <source>What this destination is given.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="442"/>
         <source>Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/sidebar/tabs/ExportTab.py" line="420"/>
+        <location filename="../gui/sidebar/tabs/ExportTab.py" line="454"/>
         <source>Not set up yet — needs {what}.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1151,1011 +1171,1058 @@ Once it sits still, click &lt;b&gt;Register&lt;/b&gt;. The tracker will use it a
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../gui/MainWindow.py" line="287"/>
+        <location filename="../gui/MainWindow.py" line="288"/>
         <source>Aglaïa · {name}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="403"/>
+        <location filename="../gui/MainWindow.py" line="404"/>
         <source>Hide side panel</source>
         <extracomment>Directories holding an export made only to hand to a plugin. The in-flight `DestinationJob`, if any.</extracomment>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="462"/>
+        <location filename="../gui/MainWindow.py" line="463"/>
         <source>— (no change)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="463"/>
+        <location filename="../gui/MainWindow.py" line="464"/>
         <source>Rotate -90°</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="464"/>
+        <location filename="../gui/MainWindow.py" line="465"/>
         <source>Mirror</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="465"/>
+        <location filename="../gui/MainWindow.py" line="466"/>
         <source>Flip</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="466"/>
+        <location filename="../gui/MainWindow.py" line="467"/>
         <source>Rotate 90°</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="467"/>
+        <location filename="../gui/MainWindow.py" line="468"/>
         <source>Rotate 180°</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="502"/>
+        <location filename="../gui/MainWindow.py" line="503"/>
         <source>Ready. Say &apos;Scan&apos; or Press Space.</source>
         <translation>Ready. Say &apos;Photo&apos; or Press Space.</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="557"/>
+        <location filename="../gui/MainWindow.py" line="558"/>
         <source>Show side panel</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="618"/>
+        <location filename="../gui/MainWindow.py" line="619"/>
         <source>Scans</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="971"/>
+        <location filename="../gui/MainWindow.py" line="977"/>
         <source>Ready. Scans loaded from project DB.</source>
         <translation>Ready. Scans loaded from project file.</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1266"/>
+        <location filename="../gui/MainWindow.py" line="1292"/>
         <source>Ready. All workers active.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1270"/>
+        <location filename="../gui/MainWindow.py" line="1320"/>
         <source>Rotated to {deg}°</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1274"/>
-        <location filename="../gui/MainWindow.py" line="1279"/>
+        <location filename="../gui/MainWindow.py" line="1325"/>
+        <location filename="../gui/MainWindow.py" line="1331"/>
         <source>ON</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1274"/>
-        <location filename="../gui/MainWindow.py" line="1279"/>
+        <location filename="../gui/MainWindow.py" line="1325"/>
+        <location filename="../gui/MainWindow.py" line="1331"/>
         <source>OFF</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1275"/>
+        <location filename="../gui/MainWindow.py" line="1326"/>
         <source>Mirror: {state}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1280"/>
+        <location filename="../gui/MainWindow.py" line="1332"/>
         <source>Flip: {state}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1328"/>
-        <location filename="../gui/MainWindow.py" line="1381"/>
-        <location filename="../gui/MainWindow.py" line="1528"/>
-        <location filename="../gui/MainWindow.py" line="1816"/>
+        <location filename="../gui/MainWindow.py" line="1380"/>
+        <location filename="../gui/MainWindow.py" line="1433"/>
+        <location filename="../gui/MainWindow.py" line="1580"/>
+        <location filename="../gui/MainWindow.py" line="1868"/>
         <source>Capture</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1332"/>
+        <location filename="../gui/MainWindow.py" line="1384"/>
         <source>Camera</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1338"/>
+        <location filename="../gui/MainWindow.py" line="1390"/>
         <source>Default camera</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1340"/>
+        <location filename="../gui/MainWindow.py" line="1392"/>
         <source>{name}  (id {cid})</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1382"/>
-        <location filename="../gui/MainWindow.py" line="1817"/>
+        <location filename="../gui/MainWindow.py" line="1434"/>
+        <location filename="../gui/MainWindow.py" line="1869"/>
         <source>Failed to start camera #{cid}: {err}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1530"/>
+        <location filename="../gui/MainWindow.py" line="1582"/>
         <source>Import</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1533"/>
-        <location filename="../gui/MainWindow.py" line="3236"/>
-        <location filename="../gui/MainWindow.py" line="3368"/>
+        <location filename="../gui/MainWindow.py" line="1585"/>
+        <location filename="../gui/MainWindow.py" line="3364"/>
+        <location filename="../gui/MainWindow.py" line="3505"/>
         <source>Pipeline</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1535"/>
-        <location filename="../gui/MainWindow.py" line="4069"/>
+        <location filename="../gui/MainWindow.py" line="1587"/>
+        <location filename="../gui/MainWindow.py" line="4272"/>
         <source>OCR</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1537"/>
+        <location filename="../gui/MainWindow.py" line="1589"/>
         <source>Export</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1552"/>
-        <location filename="../gui/MainWindow.py" line="5151"/>
-        <location filename="../gui/MainWindow.py" line="5152"/>
+        <location filename="../gui/MainWindow.py" line="1604"/>
+        <location filename="../gui/MainWindow.py" line="5357"/>
+        <location filename="../gui/MainWindow.py" line="5358"/>
         <source>Settings</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2120"/>
-        <location filename="../gui/MainWindow.py" line="2130"/>
+        <location filename="../gui/MainWindow.py" line="2190"/>
+        <location filename="../gui/MainWindow.py" line="2200"/>
         <source>Zoom: {f:.2f}x</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2309"/>
+        <location filename="../gui/MainWindow.py" line="2379"/>
         <source>Could not extract a stable pattern from that frame (only {n} keypoints). Try a busier pattern.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2275"/>
-        <location filename="../gui/MainWindow.py" line="2307"/>
+        <location filename="../gui/MainWindow.py" line="2345"/>
+        <location filename="../gui/MainWindow.py" line="2377"/>
         <source>Hands-free</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="773"/>
+        <location filename="../gui/MainWindow.py" line="779"/>
         <source>Settings…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="777"/>
+        <location filename="../gui/MainWindow.py" line="783"/>
         <source>Quit Aglaïa</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="780"/>
+        <location filename="../gui/MainWindow.py" line="786"/>
         <source>File</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="790"/>
+        <location filename="../gui/MainWindow.py" line="796"/>
         <source>New Project…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="793"/>
+        <location filename="../gui/MainWindow.py" line="799"/>
         <source>Open Project…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="803"/>
+        <location filename="../gui/MainWindow.py" line="809"/>
         <source>Close Project</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="808"/>
+        <location filename="../gui/MainWindow.py" line="814"/>
         <source>View</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="816"/>
+        <location filename="../gui/MainWindow.py" line="822"/>
         <source>Close Tab</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="822"/>
+        <location filename="../gui/MainWindow.py" line="828"/>
         <source>Table</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="823"/>
+        <location filename="../gui/MainWindow.py" line="829"/>
         <source>Grid</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="824"/>
+        <location filename="../gui/MainWindow.py" line="830"/>
         <source>Gallery</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="839"/>
+        <location filename="../gui/MainWindow.py" line="845"/>
         <source>Help</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="841"/>
+        <location filename="../gui/MainWindow.py" line="847"/>
         <source>Aglaïa Documentation</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="845"/>
+        <location filename="../gui/MainWindow.py" line="851"/>
         <source>Report a Bug…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="887"/>
+        <location filename="../gui/MainWindow.py" line="893"/>
         <source>Close current project?</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="888"/>
+        <location filename="../gui/MainWindow.py" line="894"/>
         <source>Close the current project and return to the launcher?</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="914"/>
+        <location filename="../gui/MainWindow.py" line="920"/>
         <source>Loading existing scans…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1190"/>
+        <location filename="../gui/MainWindow.py" line="1216"/>
         <source>Inspect · {label}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1191"/>
+        <location filename="../gui/MainWindow.py" line="1217"/>
         <source>Inspect · node {nid}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1257"/>
+        <location filename="../gui/MainWindow.py" line="1283"/>
         <source>{frame} Workers loading {progress}…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1344"/>
+        <location filename="../gui/MainWindow.py" line="1396"/>
         <source>Activate capture</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1540"/>
+        <location filename="../gui/MainWindow.py" line="1592"/>
         <source>Close project (⌘W)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1544"/>
+        <location filename="../gui/MainWindow.py" line="1596"/>
         <source>Report a bug</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1548"/>
-        <location filename="../gui/MainWindow.py" line="3971"/>
-        <location filename="../gui/MainWindow.py" line="4038"/>
+        <location filename="../gui/MainWindow.py" line="1600"/>
+        <location filename="../gui/MainWindow.py" line="4163"/>
+        <location filename="../gui/MainWindow.py" line="4230"/>
         <source>Plugins</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1769"/>
+        <location filename="../gui/MainWindow.py" line="1821"/>
         <source>Auto (widest)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1955"/>
+        <location filename="../gui/MainWindow.py" line="2012"/>
         <source>{name} cannot be used</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1956"/>
+        <location filename="../gui/MainWindow.py" line="2013"/>
         <source>This plugin is damaged. Remove it from the Plugins tab, or report it to whoever wrote it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2038"/>
-        <location filename="../gui/MainWindow.py" line="2040"/>
-        <location filename="../gui/MainWindow.py" line="2046"/>
+        <location filename="../gui/MainWindow.py" line="2095"/>
+        <location filename="../gui/MainWindow.py" line="2097"/>
+        <location filename="../gui/MainWindow.py" line="2109"/>
         <source>Sending to {name}…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2057"/>
+        <location filename="../gui/MainWindow.py" line="2120"/>
         <source>{name}: done.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2204"/>
+        <location filename="../gui/MainWindow.py" line="2274"/>
         <source>Voice control is not available in this build.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2276"/>
+        <location filename="../gui/MainWindow.py" line="2346"/>
         <source>Hands-free capture needs the webcam preview.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2330"/>
+        <location filename="../gui/MainWindow.py" line="2400"/>
         <source>Hands-free armed ({n} keypoints) — cover pattern to capture.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2364"/>
+        <location filename="../gui/MainWindow.py" line="2434"/>
         <source>Hands-free disabled.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2532"/>
+        <location filename="../gui/MainWindow.py" line="2602"/>
         <source>Voice Command Detected: {cmd}</source>
         <extracomment>What each bindable action does. One table, used by both the application-level filter and the window&apos;s own fallback.</extracomment>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2060"/>
-        <location filename="../gui/MainWindow.py" line="2533"/>
-        <location filename="../gui/MainWindow.py" line="2802"/>
-        <location filename="../gui/MainWindow.py" line="2923"/>
-        <location filename="../gui/MainWindow.py" line="2928"/>
-        <location filename="../gui/MainWindow.py" line="2970"/>
-        <location filename="../gui/MainWindow.py" line="2985"/>
-        <location filename="../gui/MainWindow.py" line="3036"/>
-        <location filename="../gui/MainWindow.py" line="3046"/>
+        <location filename="../gui/MainWindow.py" line="2130"/>
+        <location filename="../gui/MainWindow.py" line="2603"/>
+        <location filename="../gui/MainWindow.py" line="2883"/>
+        <location filename="../gui/MainWindow.py" line="3004"/>
+        <location filename="../gui/MainWindow.py" line="3009"/>
+        <location filename="../gui/MainWindow.py" line="3051"/>
+        <location filename="../gui/MainWindow.py" line="3066"/>
+        <location filename="../gui/MainWindow.py" line="3113"/>
+        <location filename="../gui/MainWindow.py" line="3164"/>
+        <location filename="../gui/MainWindow.py" line="3174"/>
         <source>Ready.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="810"/>
+        <location filename="../gui/MainWindow.py" line="816"/>
         <source>Show downloader</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2548"/>
+        <location filename="../gui/MainWindow.py" line="2618"/>
         <source>Capture unavailable in this mode.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2557"/>
+        <location filename="../gui/MainWindow.py" line="2627"/>
         <source>OCR running — capture disabled until it finishes.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2622"/>
+        <location filename="../gui/MainWindow.py" line="2692"/>
         <source>Captured {stem}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2627"/>
+        <location filename="../gui/MainWindow.py" line="2697"/>
         <source>Nothing to undo.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2631"/>
+        <location filename="../gui/MainWindow.py" line="2701"/>
         <source>Undid scan {sid}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2643"/>
+        <location filename="../gui/MainWindow.py" line="2713"/>
         <source>Deleted scan #{sid}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2760"/>
+        <location filename="../gui/MainWindow.py" line="2830"/>
         <source>Export PDF</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2760"/>
+        <location filename="../gui/MainWindow.py" line="2830"/>
         <source>PDF (*.pdf)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2765"/>
+        <location filename="../gui/MainWindow.py" line="2835"/>
         <source>Generating PDF ({src}, {comp})…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2791"/>
-        <location filename="../gui/MainWindow.py" line="2921"/>
-        <location filename="../gui/MainWindow.py" line="2974"/>
+        <location filename="../gui/MainWindow.py" line="2867"/>
+        <location filename="../gui/MainWindow.py" line="3002"/>
+        <location filename="../gui/MainWindow.py" line="3055"/>
+        <location filename="../gui/MainWindow.py" line="3107"/>
         <source>Saved: {name}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2793"/>
+        <location filename="../gui/MainWindow.py" line="2869"/>
         <source>PDF saved — {name}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2800"/>
+        <location filename="../gui/MainWindow.py" line="2881"/>
         <source>Failed to create PDF (no images).</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2801"/>
+        <location filename="../gui/MainWindow.py" line="2882"/>
         <source>PDF export failed.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2859"/>
-        <location filename="../gui/MainWindow.py" line="2864"/>
-        <location filename="../gui/MainWindow.py" line="2886"/>
-        <location filename="../gui/MainWindow.py" line="2929"/>
+        <location filename="../gui/MainWindow.py" line="2940"/>
+        <location filename="../gui/MainWindow.py" line="2945"/>
+        <location filename="../gui/MainWindow.py" line="2967"/>
+        <location filename="../gui/MainWindow.py" line="3010"/>
         <source>Slim export</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2817"/>
-        <location filename="../gui/MainWindow.py" line="2860"/>
+        <location filename="../gui/MainWindow.py" line="2898"/>
+        <location filename="../gui/MainWindow.py" line="2941"/>
         <source>Wait for the OCR pass to finish first.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="784"/>
+        <location filename="../gui/MainWindow.py" line="790"/>
         <source>No save : project autosaves</source>
         <translation>No save : project autosaves</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="797"/>
+        <location filename="../gui/MainWindow.py" line="803"/>
         <source>Slim-down current project…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="813"/>
+        <location filename="../gui/MainWindow.py" line="819"/>
         <source>Mistral OCR jobs…</source>
         <translation>Mistral OCR jobs…</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="843"/>
+        <location filename="../gui/MainWindow.py" line="849"/>
         <source>Diagnostics…</source>
         <translation>Diagnostics…</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="847"/>
+        <location filename="../gui/MainWindow.py" line="853"/>
         <source>Contact (aglaia@bibli.cc)…</source>
         <translation>Contact (aglaia@bibli.cc)…</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="851"/>
+        <location filename="../gui/MainWindow.py" line="857"/>
         <source>About Aglaïa</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1638"/>
+        <location filename="../gui/MainWindow.py" line="1690"/>
         <source>Full camera calibration isn&apos;t ready yet — use “Calibrate DPI”.</source>
         <translation>Full camera calibration isn&apos;t ready yet — use “Calibrate DPI”.</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1714"/>
+        <location filename="../gui/MainWindow.py" line="1766"/>
         <source>Set DPI manually</source>
         <translation>Set DPI manually</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1715"/>
+        <location filename="../gui/MainWindow.py" line="1767"/>
         <source>Scan resolution in DPI:</source>
         <translation>Scan resolution in DPI:</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1720"/>
+        <location filename="../gui/MainWindow.py" line="1772"/>
         <source>DPI set manually — {dpi:.0f} dpi.</source>
         <translation>DPI set manually — {dpi:.0f} dpi.</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2186"/>
+        <location filename="../gui/MainWindow.py" line="2256"/>
         <source>Vosk — offline</source>
         <translation>Vosk — offline</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2209"/>
+        <location filename="../gui/MainWindow.py" line="2279"/>
         <source>The Vosk voice model isn&apos;t downloaded yet.</source>
         <translation>The Vosk voice model isn&apos;t downloaded yet.</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2229"/>
+        <location filename="../gui/MainWindow.py" line="2299"/>
         <source>Voice control</source>
         <translation>Voice control</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2232"/>
+        <location filename="../gui/MainWindow.py" line="2302"/>
         <source>Open downloader</source>
         <translation>Open downloader</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2449"/>
+        <location filename="../gui/MainWindow.py" line="2519"/>
         <source>Capture shortcuts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2450"/>
+        <location filename="../gui/MainWindow.py" line="2520"/>
         <source>Could not save: {err}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2771"/>
+        <location filename="../gui/MainWindow.py" line="2841"/>
         <source>Generating PDF…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2816"/>
-        <location filename="../gui/MainWindow.py" line="2821"/>
+        <location filename="../gui/MainWindow.py" line="2897"/>
+        <location filename="../gui/MainWindow.py" line="2902"/>
         <source>Slim-down</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2822"/>
+        <location filename="../gui/MainWindow.py" line="2903"/>
         <source>Wait for the pipeline to finish before slimming down.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2827"/>
+        <location filename="../gui/MainWindow.py" line="2908"/>
         <source>Slim-down current project</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2829"/>
+        <location filename="../gui/MainWindow.py" line="2910"/>
         <source>After slimming down, the intermediate processing states are not available anymore (they can be regenerated since the originals are kept).</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2833"/>
+        <location filename="../gui/MainWindow.py" line="2914"/>
         <source>The current view will close and re-open.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2835"/>
+        <location filename="../gui/MainWindow.py" line="2916"/>
         <source>Slim down</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2866"/>
+        <location filename="../gui/MainWindow.py" line="2947"/>
         <source>The pipeline is still running. Export the current DB anyway? (In-flight nodes won&apos;t be in the result.)</source>
         <translation>The pipeline is still running. Export current project anyway? (In-flight nodes won&apos;t be in the result.)</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2879"/>
+        <location filename="../gui/MainWindow.py" line="2960"/>
         <source>Export slimmed project</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2887"/>
+        <location filename="../gui/MainWindow.py" line="2968"/>
         <source>Destination must differ from the active project.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2890"/>
+        <location filename="../gui/MainWindow.py" line="2971"/>
         <source>Building slim project…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2914"/>
+        <location filename="../gui/MainWindow.py" line="2995"/>
         <source>Slim export saved: {name}
 {after_mb:.1f} MB (was {before_mb:.1f} MB) · {kept} kept, {dropped} dropped image(s)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2927"/>
+        <location filename="../gui/MainWindow.py" line="3008"/>
         <source>Slim export failed.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2940"/>
+        <location filename="../gui/MainWindow.py" line="3021"/>
         <source>Export Markdown</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2941"/>
+        <location filename="../gui/MainWindow.py" line="3022"/>
         <source>Markdown (*.md)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2951"/>
+        <location filename="../gui/MainWindow.py" line="3032"/>
         <source>Polishing with Apple Intelligence…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2952"/>
+        <location filename="../gui/MainWindow.py" line="3033"/>
         <source>Writing Markdown…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2965"/>
+        <location filename="../gui/MainWindow.py" line="3046"/>
         <source>Markdown export failed. See the Log tab.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2969"/>
+        <location filename="../gui/MainWindow.py" line="3050"/>
         <source>Markdown export failed.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2976"/>
+        <location filename="../gui/MainWindow.py" line="3057"/>
         <source>Markdown saved — {name}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2983"/>
+        <location filename="../gui/MainWindow.py" line="3064"/>
         <source>No OCR text to export.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="2984"/>
+        <location filename="../gui/MainWindow.py" line="3065"/>
         <source>Markdown export skipped — no OCR text.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3025"/>
+        <location filename="../gui/MainWindow.py" line="3153"/>
         <source>Normalising widths (computing scales)…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3034"/>
+        <location filename="../gui/MainWindow.py" line="3162"/>
         <source>Normalise: no terminal images found.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3039"/>
+        <location filename="../gui/MainWindow.py" line="3167"/>
         <source>Normalising widths (writing {n} files)…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3043"/>
+        <location filename="../gui/MainWindow.py" line="3171"/>
         <source>Normalised {n} files → {dir}/</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3045"/>
+        <location filename="../gui/MainWindow.py" line="3173"/>
         <source>Normalise failed: {err}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3052"/>
+        <location filename="../gui/MainWindow.py" line="3180"/>
         <source>Error: No frame from camera.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3059"/>
+        <location filename="../gui/MainWindow.py" line="3187"/>
         <source>Calibration Mode: Capture 1/{total}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3066"/>
+        <location filename="../gui/MainWindow.py" line="3194"/>
         <source>Sample failed: {msg}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3074"/>
+        <location filename="../gui/MainWindow.py" line="3202"/>
         <source>Last one : put the board flat, at book distance</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3075"/>
+        <location filename="../gui/MainWindow.py" line="3203"/>
         <source>Prepare final sample: {n}/{total}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3079"/>
+        <location filename="../gui/MainWindow.py" line="3207"/>
         <source>Retake ({n} more ...)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3080"/>
+        <location filename="../gui/MainWindow.py" line="3208"/>
         <source>Sample added! Capture {n}/{total}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3085"/>
+        <location filename="../gui/MainWindow.py" line="3213"/>
         <source>Finalizing calibration... please wait.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3100"/>
+        <location filename="../gui/MainWindow.py" line="3228"/>
         <source>Full Calibration Success! DPI: {dpi:.1f}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3108"/>
+        <location filename="../gui/MainWindow.py" line="3236"/>
         <source>Full Calibration Failed: {msg}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3086"/>
+        <location filename="../gui/MainWindow.py" line="3214"/>
         <source>Processing…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="1096"/>
+        <location filename="../gui/MainWindow.py" line="1102"/>
         <source>Could not re-run this scan. See the Log tab.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3112"/>
+        <location filename="../gui/MainWindow.py" line="2877"/>
+        <source>PDF not saved: {err}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="2879"/>
+        <source>PDF export failed — OCR layer incomplete.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3079"/>
+        <source>Export OCR textpack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3080"/>
+        <source>Textpack (*.textpack)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3084"/>
+        <source>Building OCR textpack…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3104"/>
+        <source>Textpack not saved: {err}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3105"/>
+        <source>Textpack export failed. See the Log tab.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3109"/>
+        <source>Textpack saved — {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3240"/>
         <source>Full calibration</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3121"/>
+        <location filename="../gui/MainWindow.py" line="3249"/>
         <source>No webcam available.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3149"/>
+        <location filename="../gui/MainWindow.py" line="3277"/>
         <source>DPI calibrated — {dpi:.0f} dpi.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3179"/>
+        <location filename="../gui/MainWindow.py" line="3307"/>
         <source>Fix input DPI</source>
         <translation>Fix input DPI</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3187"/>
-        <location filename="../gui/MainWindow.py" line="3197"/>
-        <location filename="../gui/MainWindow.py" line="3223"/>
-        <location filename="../gui/MainWindow.py" line="3246"/>
+        <location filename="../gui/MainWindow.py" line="3315"/>
+        <location filename="../gui/MainWindow.py" line="3325"/>
+        <location filename="../gui/MainWindow.py" line="3351"/>
+        <location filename="../gui/MainWindow.py" line="3374"/>
         <source>Pipeline editor</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3188"/>
+        <location filename="../gui/MainWindow.py" line="3316"/>
         <source>No pipeline yaml path was set for this session.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3198"/>
+        <location filename="../gui/MainWindow.py" line="3326"/>
         <source>Could not load pipeline: {err}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3216"/>
-        <location filename="../gui/MainWindow.py" line="3217"/>
+        <location filename="../gui/MainWindow.py" line="3344"/>
+        <location filename="../gui/MainWindow.py" line="3345"/>
         <source>Edit pipeline</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3224"/>
+        <location filename="../gui/MainWindow.py" line="3352"/>
         <source>Pipeline saved but no live-swap callback is wired.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3229"/>
+        <location filename="../gui/MainWindow.py" line="3357"/>
         <source>Applying pipeline + reprocessing…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3230"/>
+        <location filename="../gui/MainWindow.py" line="3358"/>
         <source>Applying pipeline…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3247"/>
+        <location filename="../gui/MainWindow.py" line="3375"/>
         <source>Apply failed: {err}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3249"/>
+        <location filename="../gui/MainWindow.py" line="3377"/>
         <source>Pipeline updated.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3250"/>
+        <location filename="../gui/MainWindow.py" line="3378"/>
         <source>Pipeline applied. Reprocessing started.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3251"/>
+        <location filename="../gui/MainWindow.py" line="3379"/>
         <source>Pipeline applied.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3676"/>
+        <location filename="../gui/MainWindow.py" line="3593"/>
+        <source>{n} scans produced no pages. See the Log tab.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/MainWindow.py" line="3858"/>
         <source>Stopping OCR…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3682"/>
+        <location filename="../gui/MainWindow.py" line="3864"/>
         <source>Force rerun not wired in this build.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3685"/>
+        <location filename="../gui/MainWindow.py" line="3867"/>
         <source>No scans to reprocess.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3689"/>
+        <location filename="../gui/MainWindow.py" line="3871"/>
         <source>Reprocess every active scan ({n})?
 
 This wipes every branch + intermediate node for those scans (including any page selection) and re-enqueues the raw inputs.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3696"/>
-        <location filename="../gui/MainWindow.py" line="3731"/>
-        <location filename="../gui/MainWindow.py" line="3759"/>
+        <location filename="../gui/MainWindow.py" line="3878"/>
+        <location filename="../gui/MainWindow.py" line="3913"/>
+        <location filename="../gui/MainWindow.py" line="3940"/>
         <source>Force rerun</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3699"/>
+        <location filename="../gui/MainWindow.py" line="3881"/>
         <source>Manual per-page tuning (deskew angle, page ROI, dewarp curl) survives a rerun — the pages come back as you corrected them. Clear it only if you want the pipeline&apos;s own estimate back.
 
 Per-page step disables are a different thing and are NOT cleared: keep using their toggles in the scans views.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3704"/>
+        <location filename="../gui/MainWindow.py" line="3886"/>
         <source>Reprocess all</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3709"/>
+        <location filename="../gui/MainWindow.py" line="3891"/>
         <source>Reprocess all and clear manual overrides</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3715"/>
+        <location filename="../gui/MainWindow.py" line="3897"/>
         <source>Cancel</source>
         <translation type="unfinished">Cancel</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3732"/>
-        <location filename="../gui/MainWindow.py" line="3773"/>
+        <location filename="../gui/MainWindow.py" line="3914"/>
+        <location filename="../gui/MainWindow.py" line="3954"/>
         <source>Failed: {err}</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3739"/>
+        <location filename="../gui/MainWindow.py" line="3920"/>
         <source>Reprocessing {n} scan(s)…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3760"/>
+        <location filename="../gui/MainWindow.py" line="3941"/>
         <source>Could not clear the manual overrides: {err}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3767"/>
+        <location filename="../gui/MainWindow.py" line="3948"/>
         <source>Stop not wired in this build.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3772"/>
+        <location filename="../gui/MainWindow.py" line="3953"/>
         <source>Stop pipeline</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3784"/>
+        <location filename="../gui/MainWindow.py" line="3965"/>
         <source>Pipeline stopped. Dropped {n} queued item(s).</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3826"/>
+        <location filename="../gui/MainWindow.py" line="4008"/>
         <source>Batch submit failed: {e}</source>
         <translation>Batch submit failed: {e}</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3828"/>
+        <location filename="../gui/MainWindow.py" line="4011"/>
         <source>Submitted {n} Mistral batch job(s). Pull results later with &apos;Check result&apos;.</source>
         <translation>Submitted {n} Mistral batch job(s). Pull results later with &apos;Check result&apos;.</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3904"/>
+        <location filename="../gui/MainWindow.py" line="4092"/>
         <source>Checking Mistral batch job(s)…</source>
         <translation>Checking Mistral batch job(s)…</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3934"/>
+        <location filename="../gui/MainWindow.py" line="4126"/>
         <source>Cancelling {n} batch job(s)…</source>
         <translation>Cancelling {n} batch job(s)…</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3951"/>
+        <location filename="../gui/MainWindow.py" line="4143"/>
         <source>Mistral jobs</source>
         <translation>Mistral jobs</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="3981"/>
+        <location filename="../gui/MainWindow.py" line="4173"/>
         <source>Manage plugins…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4013"/>
+        <location filename="../gui/MainWindow.py" line="4205"/>
         <source>{title} cannot be opened</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4015"/>
+        <location filename="../gui/MainWindow.py" line="4207"/>
         <source>This plugin window failed to start. See the Log tab for the reason.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4046"/>
+        <location filename="../gui/MainWindow.py" line="4238"/>
         <source>Project not found: {p}</source>
         <translation>Project not found: {p}</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4049"/>
+        <location filename="../gui/MainWindow.py" line="4241"/>
         <source>Open project?</source>
         <translation>Open project?</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4050"/>
+        <location filename="../gui/MainWindow.py" line="4242"/>
         <source>Close the current project and open
 {p}?</source>
         <translation>Close the current project and open
 {p}?</translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4076"/>
+        <location filename="../gui/MainWindow.py" line="4279"/>
         <source>OCR · loading…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4879"/>
+        <location filename="../gui/MainWindow.py" line="5085"/>
         <source>Compact table view</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4880"/>
+        <location filename="../gui/MainWindow.py" line="5086"/>
         <source>Card grid view</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4881"/>
+        <location filename="../gui/MainWindow.py" line="5087"/>
         <source>Full-size carousel</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4941"/>
+        <location filename="../gui/MainWindow.py" line="5147"/>
         <source>Show selected</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="4944"/>
+        <location filename="../gui/MainWindow.py" line="5150"/>
         <source>Per-page view: each cell shows the starred (chosen) stage. Stage navigation is hidden.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5189"/>
+        <location filename="../gui/MainWindow.py" line="5395"/>
         <source>Settings applied.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5222"/>
-        <location filename="../gui/MainWindow.py" line="5266"/>
+        <location filename="../gui/MainWindow.py" line="5428"/>
+        <location filename="../gui/MainWindow.py" line="5472"/>
         <source>Worker processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5223"/>
+        <location filename="../gui/MainWindow.py" line="5429"/>
         <source>The new worker count will apply on next startup.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5246"/>
+        <location filename="../gui/MainWindow.py" line="5452"/>
         <source>Theme</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5247"/>
+        <location filename="../gui/MainWindow.py" line="5453"/>
         <source>Will apply on next startup.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5268"/>
+        <location filename="../gui/MainWindow.py" line="5474"/>
         <source>Don&apos;t warn again</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5283"/>
+        <location filename="../gui/MainWindow.py" line="5489"/>
         <source>Log</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/MainWindow.py" line="5284"/>
+        <location filename="../gui/MainWindow.py" line="5490"/>
         <source>Console log history</source>
         <translation></translation>
     </message>
@@ -2247,32 +2314,32 @@ Per-page step disables are a different thing and are NOT cleared: keep using the
 <context>
     <name>ModePickerPanel</name>
     <message>
-        <location filename="../gui/ModePicker.py" line="201"/>
+        <location filename="../gui/ModePicker.py" line="212"/>
         <source>Properties…</source>
         <translation>Properties…</translation>
     </message>
     <message>
-        <location filename="../gui/ModePicker.py" line="202"/>
+        <location filename="../gui/ModePicker.py" line="213"/>
         <source>Open the pipeline editor</source>
         <translation>Open the pipeline editor</translation>
     </message>
     <message>
-        <location filename="../gui/ModePicker.py" line="256"/>
+        <location filename="../gui/ModePicker.py" line="267"/>
         <source>New</source>
         <translation>New</translation>
     </message>
     <message>
-        <location filename="../gui/ModePicker.py" line="313"/>
+        <location filename="../gui/ModePicker.py" line="325"/>
         <source>Custom pipeline “{name}”.</source>
         <translation>Custom pipeline “{name}”.</translation>
     </message>
     <message>
-        <location filename="../gui/ModePicker.py" line="324"/>
+        <location filename="../gui/ModePicker.py" line="336"/>
         <source>Edit pipeline</source>
         <translation>Edit pipeline</translation>
     </message>
     <message>
-        <location filename="../gui/ModePicker.py" line="344"/>
+        <location filename="../gui/ModePicker.py" line="356"/>
         <source>New pipeline</source>
         <translation>New pipeline</translation>
     </message>
@@ -3199,38 +3266,88 @@ Per-page step disables are a different thing and are NOT cleared: keep using the
 <context>
     <name>PluginSettingsDialog</name>
     <message>
-        <location filename="../gui/PluginsTab.py" line="194"/>
+        <location filename="../gui/PluginsTab.py" line="186"/>
         <source>{name} — settings</source>
-        <extracomment>A card&apos;s fixed width. The list is browsed, not read line by line, so a column of full-width rows wastes the pane and makes six plugins look like sixty. What a plugin kind is CALLED. &quot;destinations&quot; is what the code calls the folder; &quot;export&quot; is what the thing does, which is what a user is looking for in a list. One word for each failure kind a plugin can report. Deliberately not the enum&apos;s own name: &quot;auth&quot; is our vocabulary, &quot;Wrong credentials&quot; is theirs. False once this dialog is gone, so a test that answers late does not write into a deleted widget.</extracomment>
+        <extracomment>A card&apos;s fixed width. The list is browsed, not read line by line, so a column of full-width rows wastes the pane and makes six plugins look like sixty. What a plugin kind is CALLED. &quot;destinations&quot; is what the code calls the folder; &quot;export&quot; is what the thing does, which is what a user is looking for in a list. False once this dialog is gone, so a test that answers late does not write into a deleted widget.</extracomment>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="220"/>
+        <location filename="../gui/PluginsTab.py" line="226"/>
         <source>Stored in your keychain.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="221"/>
+        <location filename="../gui/PluginsTab.py" line="227"/>
         <source>No keychain available — these are stored as plain text in the app&apos;s data folder.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="237"/>
+        <location filename="../gui/PluginsTab.py" line="245"/>
         <source>Test connection</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="285"/>
+        <location filename="../gui/PluginsTab.py" line="301"/>
+        <source>This setting needs a newer version of Aglaïa.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="312"/>
         <source>•••• stored — type to replace</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="329"/>
+        <location filename="../gui/PluginsTab.py" line="369"/>
+        <source>Example: X-Api-Token</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="370"/>
+        <source>The header&apos;s name, as the server expects it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="372"/>
+        <source>Kept secret</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="374"/>
+        <source>Stored in your keychain, and never shown again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="378"/>
+        <source>Add</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="384"/>
+        <source>Name</source>
+        <translation type="unfinished">Name</translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="385"/>
+        <source>Value</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="424"/>
+        <source>Remove {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="447"/>
+        <source>A header needs both a name and a value.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="505"/>
         <source>Testing…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="339"/>
+        <location filename="../gui/PluginsTab.py" line="515"/>
         <source>The server did not answer.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3238,179 +3355,184 @@ Per-page step disables are a different thing and are NOT cleared: keep using the
 <context>
     <name>PluginsTab</name>
     <message>
-        <location filename="../gui/PluginsTab.py" line="577"/>
+        <location filename="../gui/PluginsTab.py" line="754"/>
         <source>Plugins</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="585"/>
+        <location filename="../gui/PluginsTab.py" line="762"/>
         <source>Install from file…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="589"/>
+        <location filename="../gui/PluginsTab.py" line="766"/>
         <source>Refresh</source>
         <translation type="unfinished">Refresh</translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="620"/>
-        <location filename="../gui/PluginsTab.py" line="692"/>
+        <location filename="../gui/PluginsTab.py" line="797"/>
+        <location filename="../gui/PluginsTab.py" line="875"/>
         <source>Checking the registry…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="632"/>
+        <location filename="../gui/PluginsTab.py" line="809"/>
         <source>Checking the registry… {n}s</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="635"/>
+        <location filename="../gui/PluginsTab.py" line="812"/>
         <source>Fetching index.json from GitHub. Slow here is usually the network, not the registry — it will fall back to the last copy it saw.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="651"/>
+        <location filename="../gui/PluginsTab.py" line="828"/>
         <source>{n} in the registry</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="674"/>
+        <location filename="../gui/PluginsTab.py" line="857"/>
         <source>Installed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="676"/>
+        <location filename="../gui/PluginsTab.py" line="859"/>
         <source>Nothing installed yet.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="686"/>
+        <location filename="../gui/PluginsTab.py" line="869"/>
         <source>Available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="696"/>
+        <location filename="../gui/PluginsTab.py" line="879"/>
         <source>Everything in the registry is installed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="741"/>
+        <location filename="../gui/PluginsTab.py" line="924"/>
         <source>UNREVIEWED</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="744"/>
+        <location filename="../gui/PluginsTab.py" line="927"/>
         <source>UPDATE</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="769"/>
+        <location filename="../gui/PluginsTab.py" line="952"/>
         <source>Disabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="776"/>
+        <location filename="../gui/PluginsTab.py" line="959"/>
         <source>Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="780"/>
+        <location filename="../gui/PluginsTab.py" line="967"/>
+        <source>Update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="968"/>
         <source>Update to {v}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="784"/>
+        <location filename="../gui/PluginsTab.py" line="972"/>
         <source>Uninstall</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="813"/>
+        <location filename="../gui/PluginsTab.py" line="1001"/>
         <source>Could not update {name}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="823"/>
+        <location filename="../gui/PluginsTab.py" line="1011"/>
         <source>{name} updated</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="824"/>
+        <location filename="../gui/PluginsTab.py" line="1012"/>
         <source>Updated to {v}. Restart Aglaïa for it to take effect.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="849"/>
+        <location filename="../gui/PluginsTab.py" line="1037"/>
         <source>Installing…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="850"/>
+        <location filename="../gui/PluginsTab.py" line="1038"/>
         <source>Install…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="863"/>
+        <location filename="../gui/PluginsTab.py" line="1051"/>
         <source>by Aglaïa</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="864"/>
+        <location filename="../gui/PluginsTab.py" line="1052"/>
         <source>by {who}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="865"/>
+        <location filename="../gui/PluginsTab.py" line="1053"/>
         <source>an unnamed author</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="896"/>
+        <location filename="../gui/PluginsTab.py" line="1084"/>
         <source>Installing {name}…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="910"/>
-        <location filename="../gui/PluginsTab.py" line="949"/>
+        <location filename="../gui/PluginsTab.py" line="1098"/>
+        <location filename="../gui/PluginsTab.py" line="1137"/>
         <source>Install failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="934"/>
+        <location filename="../gui/PluginsTab.py" line="1122"/>
         <source>Install a plugin archive</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="935"/>
+        <location filename="../gui/PluginsTab.py" line="1123"/>
         <source>Aglaïa plugin (*.aglplugin *.zip)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="940"/>
+        <location filename="../gui/PluginsTab.py" line="1128"/>
         <source>Not a usable plugin</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="941"/>
+        <location filename="../gui/PluginsTab.py" line="1129"/>
         <source>unreadable archive</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="960"/>
+        <location filename="../gui/PluginsTab.py" line="1148"/>
         <source>Remove {slug}?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="961"/>
+        <location filename="../gui/PluginsTab.py" line="1149"/>
         <source>This deletes the plugin, its settings, its files and any password it stored in your keychain.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="987"/>
+        <location filename="../gui/PluginsTab.py" line="1175"/>
         <source>{slug} cannot be used</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="988"/>
+        <location filename="../gui/PluginsTab.py" line="1176"/>
         <source>This plugin is damaged. Remove it below, or report it to whoever wrote it.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3464,42 +3586,42 @@ Many bugs are already fixed upstream — filing one from an old build can waste 
 <context>
     <name>RegistryInstallDialog</name>
     <message>
-        <location filename="../gui/PluginsTab.py" line="383"/>
+        <location filename="../gui/PluginsTab.py" line="560"/>
         <source>Install {name}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="400"/>
+        <location filename="../gui/PluginsTab.py" line="577"/>
         <source>It declares: </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="405"/>
+        <location filename="../gui/PluginsTab.py" line="582"/>
         <source>It imports: </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="418"/>
+        <location filename="../gui/PluginsTab.py" line="595"/>
         <source>Written and maintained by Aglaïa, and installed through the same reviewed registry as everything else. Like any plugin, it runs with the same access to your files as Aglaïa itself.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="423"/>
+        <location filename="../gui/PluginsTab.py" line="600"/>
         <source>Reviewed and merged into the Aglaïa plugin registry. It was written and submitted by &lt;b&gt;{who}&lt;/b&gt;, not by Aglaïa, and it runs with the same access to your files as Aglaïa itself.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="426"/>
+        <location filename="../gui/PluginsTab.py" line="603"/>
         <source>its author</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="433"/>
+        <location filename="../gui/PluginsTab.py" line="610"/>
         <source>Read the source on GitHub</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="448"/>
+        <location filename="../gui/PluginsTab.py" line="625"/>
         <source>I trust the code and/or its author</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3507,87 +3629,87 @@ Many bugs are already fixed upstream — filing one from an old build can waste 
 <context>
     <name>ScanItemWidget</name>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="452"/>
+        <location filename="../gui/ScanItemWidget.py" line="388"/>
         <source>Discard scan</source>
         <extracomment>Re-run this one scan from its raw capture.</extracomment>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="456"/>
-        <location filename="../gui/ScanItemWidget.py" line="1378"/>
+        <location filename="../gui/ScanItemWidget.py" line="401"/>
+        <location filename="../gui/ScanItemWidget.py" line="1363"/>
         <source>Scan {idx}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="489"/>
+        <location filename="../gui/ScanItemWidget.py" line="423"/>
         <source>Re-run this scan</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="971"/>
+        <location filename="../gui/ScanItemWidget.py" line="956"/>
         <source>Show page</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="971"/>
+        <location filename="../gui/ScanItemWidget.py" line="956"/>
         <source>Hide page</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="983"/>
+        <location filename="../gui/ScanItemWidget.py" line="968"/>
         <source>OCR up to date</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="985"/>
+        <location filename="../gui/ScanItemWidget.py" line="970"/>
         <source>OCR is stale — selected page changed since OCR ran. Re-run OCR.</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1074"/>
+        <location filename="../gui/ScanItemWidget.py" line="1059"/>
         <source>Pending
 Image…</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1213"/>
+        <location filename="../gui/ScanItemWidget.py" line="1198"/>
         <source>Step disabled for this page — click to re-enable</source>
         <translation>Step disabled for this page — click to re-enable</translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1215"/>
+        <location filename="../gui/ScanItemWidget.py" line="1200"/>
         <source>Click to disable this step for this page</source>
         <translation>Click to disable this step for this page</translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1230"/>
+        <location filename="../gui/ScanItemWidget.py" line="1215"/>
         <source>This step can&apos;t be disabled per page</source>
         <translation>This step can&apos;t be disabled per page</translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1400"/>
+        <location filename="../gui/ScanItemWidget.py" line="1385"/>
         <source> (Input)</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1405"/>
+        <location filename="../gui/ScanItemWidget.py" line="1390"/>
         <source> [{idx}/{total}]</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1409"/>
+        <location filename="../gui/ScanItemWidget.py" line="1394"/>
         <source> ({step})</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1421"/>
+        <location filename="../gui/ScanItemWidget.py" line="1406"/>
         <source>{dpi} dpi</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/ScanItemWidget.py" line="1429"/>
-        <source> (No page detected)</source>
-        <translation></translation>
+        <location filename="../gui/ScanItemWidget.py" line="1418"/>
+        <source>No page detected in this scan</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

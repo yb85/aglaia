@@ -48,6 +48,24 @@ _QM_DIR = _I18N_DIR / "qm"
 _installed: list[QTranslator] = []
 
 
+def _log(msg: str) -> None:
+    """To the Log tab when the GUI has installed its sink, else stderr. This
+    runs before any widget exists, so the sink is usually not up yet."""
+    try:
+        from aglaia.gui import gui_log
+        gui_log.log("warning", msg)
+    except Exception:  # noqa: BLE001 — headless / no GUI extra
+        import sys
+        print(msg, file=sys.stderr)
+
+
+def has_catalog(locale: str) -> bool:
+    """Whether a compiled catalogue for `locale` is on disk. Used by the
+    loader to tell "we do not translate that language" (fine, silent) from
+    "we do, and it is missing" (a packaging fault)."""
+    return (_QM_DIR / f"{CATALOG}_{locale}.qm").is_file()
+
+
 def resolve_locale(preferred: Optional[str]) -> str:
     """Map a user preference to a concrete locale string.
 
@@ -85,6 +103,14 @@ def install_translator(app, preferred: Optional[str] = None) -> str:
     if app_t.load(f"{CATALOG}_{locale}", str(_QM_DIR)):
         app.installTranslator(app_t)
         _installed.append(app_t)
+    elif has_catalog(locale) or preferred:
+        # A locale we ship, or one the user chose, that would not load. The
+        # packaged app shipped no catalogue at all for a release: `load()`
+        # returned False, nothing checked it, and every string quietly came
+        # back in English while Settings still said Français (#170). A
+        # fallback the user did not ask for is worth one line.
+        _log(f"i18n: no catalogue loaded for {locale} "
+             f"(looked in {_QM_DIR}); using the source strings.")
 
     # 2. Stock Qt strings (qtbase_<lang>.qm) — covers stock dialog
     # buttons (Cancel / OK), QMessageBox titles, etc. Best-effort.
