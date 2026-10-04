@@ -337,10 +337,22 @@ def config(
     slug: Annotated[str, typer.Argument()],
     set_: Annotated[Optional[list[str]], typer.Option("--set", help="key=value; repeatable. Scripted alternative to the interactive view.")] = None,
     test: Annotated[bool, typer.Option("--test", help="Test the connection after setting.")] = False,
+    export: Annotated[Optional[Path], typer.Option("--export", help="Write this plugin's settings to a file and exit.")] = None,
+    with_secrets: Annotated[bool, typer.Option("--with-secrets", help="Include stored passwords in --export, as readable text.")] = False,
+    import_: Annotated[Optional[Path], typer.Option("--import", help="Read settings from a file written by --export, and exit.")] = None,
 ) -> None:
     """Configure an export plugin: a small interactive view, or --set key=value."""
     d = _load_dest(slug)
     fields = {f.key: f for f in _fields(d)}
+    if export is not None and import_ is not None:
+        _err("--export and --import are two errands; run one at a time.")
+        raise typer.Exit(2)
+    if export is not None:
+        _export_settings(d, export, with_secrets)
+        return
+    if import_ is not None:
+        _import_settings(d, import_)
+        return
     if set_:
         for item in set_:
             if "=" not in item:
@@ -378,6 +390,66 @@ def config(
         typer.echo("\nNot a terminal — use --set key=value to change settings.")
         return
     _tui(d)
+
+
+def _export_settings(d, path: Path, with_secrets: bool) -> None:
+    """`--export FILE`. Secrets are opt-in and the warning is printed after
+    the fact as well as before: the file is the thing to act on, and the user
+    reading this is often a script's log a week later."""
+    from aglaia.app_data import plugin_transfer as xfer
+
+    ctx = getattr(d, "ctx", None)
+    if ctx is None:
+        _err(f"{d.name} keeps no settings to export.")
+        raise typer.Exit(1)
+    names = xfer.exported_secret_names(ctx) if with_secrets else []
+    unreadable = xfer.unreadable_secret_names(ctx) if with_secrets else []
+    try:
+        written = xfer.write(ctx, path, include_secrets=with_secrets,
+                             plugin_version=str(getattr(d, "version", "") or ""))
+    except Exception as e:  # noqa: BLE001
+        _err(f"could not write {path}: {e}")
+        raise typer.Exit(1) from e
+    typer.echo(f"Wrote {written}")
+    if names:
+        typer.secho(
+            f"! It contains {len(names)} password(s) as readable text "
+            f"({', '.join(names)}). The file is 0600; treat it like the "
+            f"passwords and delete it once the other machine is set up.",
+            fg="yellow")
+    if unreadable:
+        # Said out loud: the file looks complete and is not.
+        typer.secho(
+            f"! {len(unreadable)} password(s) could not be read here and are "
+            f"NOT in the file ({', '.join(unreadable)}). Set them on the "
+            f"other machine with: aglaia plugins config {d.name} --set "
+            f"{unreadable[0]}=…", fg="red")
+    if not with_secrets and xfer.exported_secret_names(ctx):
+        typer.echo("Passwords were NOT included. Re-run with --with-secrets "
+                   "to carry them too.")
+
+
+def _import_settings(d, path: Path) -> None:
+    """`--import FILE`. Provisioning a headless box from the same bundle the
+    GUI writes."""
+    from aglaia.app_data import plugin_transfer as xfer
+
+    ctx = getattr(d, "ctx", None)
+    if ctx is None:
+        _err(f"{d.name} keeps no settings to import.")
+        raise typer.Exit(1)
+    try:
+        bundle = xfer.read(path)
+        report = xfer.apply(ctx, bundle)
+    except xfer.TransferError as e:
+        _err(str(e))
+        raise typer.Exit(1) from e
+    typer.echo(f"Imported {len(report.settings)} setting(s)"
+               + (f" and {len(report.secrets)} password(s)"
+                  if report.secrets else ""))
+    if report.skipped:
+        typer.secho(f"! skipped: {', '.join(report.skipped)}", fg="yellow")
+    _show(d)
 
 
 def _show(d) -> None:
