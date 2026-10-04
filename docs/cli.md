@@ -33,7 +33,7 @@ These apply to both `gui` and `run`:
 
 | Option | Meaning |
 |---|---|
-| `-p`, `--pipeline NAME\|PATH` | Pipeline name (e.g. `book_curved_x2`) or a `.yaml` path. |
+| `-p`, `--pipeline NAME\|PATH` | Pipeline name (e.g. `book_curved_x2`) or a `.yaml` path. A bare name is looked up in `<APP_DATA>/pipelines/` first, then in the bundled `aglaia/config/pipelines/`. The bundled files are seeded into the first dir so they can be edited, so an edit wins; every name `aglaia list pipelines` prints resolves. |
 | `--workers N` | Pipeline worker processes (overrides config). `0` = auto. |
 | `--force-proc` | Reprocess every active scan on open (wipe branches/intermediates). |
 
@@ -155,6 +155,9 @@ aglaia list {pipelines|ocr|exports|destinations}
 List available pipelines, OCR engines, export formats (`pdf`, `md`,
 `textpack`), or installed export destinations with their state (`ready`, or
 the settings each still needs).
+
+`list pipelines` reads `<APP_DATA>/pipelines/` — the same directory `-p NAME`
+searches first — so every name it prints can be passed to `-p`.
 
 ```bash
 aglaia list pipelines

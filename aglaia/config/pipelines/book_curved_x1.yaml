@@ -1,0 +1,93 @@
+name: book_curved_x1
+# One book page per photo, page curling toward the spine: keystone-corrected
+# then dewarped (cubic sheet). The binding side is unknown for a single page
+# (no PageDetector page_side meta), so PageDewarper runs without spine-zone
+# weighting — set binding_side: left|right by hand for a one-sided run.
+# One layout with facing-page text discarded (over_cap: discard) so margin
+# text bleeding in from the opposite page is dropped rather than merged.
+pipeline:
+- name: dpi_clamp_input
+  processor: DPIfixer
+  options:
+    min_dpi: 100
+    max_dpi: 300
+- name: capture_deskew
+  processor: SkewFinder
+  options:
+    max_angle: 30
+    min_angle: 0.5
+    accuracy: 0.1
+    apply_rotation: true
+    k_cluster: 0
+- name: page_1ppf
+  processor: PageDetector
+  options:
+    margin_mm: 5
+    max_pages: 1
+    over_cap: discard
+    rescale_threshold: 0.01
+    processing_dpi: 150
+    backend: auto
+    min_contrast: 0.5
+- name: dpi_normalize_output
+  processor: DPIfixer
+  options:
+    min_dpi: 300
+    max_dpi: 300
+- name: page_bw
+  processor: Binarizer
+  options:
+    method: wolf++
+    window_mm_wolf: 5
+    k_wolf: 0.25
+    roi_shrink: 2
+    morpho_close: 2
+- name: page_deskew
+  processor: SkewFinder
+  options:
+    max_angle: 10
+    min_angle: 0.1
+    accuracy: 0.05
+    apply_rotation: true
+    k_cluster: 0
+- name: page_keystone
+  processor: TrapezoidalCorrection
+  options:
+    line_source: connectivity
+    min_line_count: 4
+    line_join_mm: 4.0
+    kernel_char_mult: 1.5
+    thickness_char_mult: 3.0
+    edge_max_length_char_mult: 3.0
+    margin_mm: 3
+    max_baseline_tilt_deg: 35
+- name: page_dewarp
+  processor: PageDewarper
+  options:
+    backend: auto
+    binding_side: auto
+    principal_point: true
+    spine_weight_boost: 4.0
+    spine_weight_zone: 0.25
+    spine_gammas: 0.02, 0.05, 0.10
+    spine_gamma_scale: 0.15
+    slope_emphasis: 1.0
+    max_oob: 400
+    min_spans: 3
+    min_span_width_ratio: 0.2
+    kernel_char_mult: 1.5
+    thickness_char_mult: 3.0
+    edge_max_length_char_mult: 3.0
+    page_margin_mm: 5
+    dewarp_margin: 5.0
+    remap_decimate: 4
+    shear_cost: 40.0
+    cubic_cost: 0.0
+    focal_length: 1.3
+    processing_dpi: 150
+    baseline_source: bottom
+- name: output_margin
+  processor: MarginSetter
+  options:
+    margin_mm: 2
+replay: true
