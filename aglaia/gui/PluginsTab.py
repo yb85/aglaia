@@ -651,14 +651,21 @@ class PluginSettingsDialog(QDialog):
                 self.tr("This file holds the settings of {other}.")
                 .format(other=str(bundle.get("slug") or "another plugin")))
             return
-        if QMessageBox.question(
-                self, self.tr("Import settings"),
-                self.tr("Replace the current settings with {what}?")
-                .format(what=xfer.describe(bundle)),
-                QMessageBox.StandardButton.Ok
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel
-        ) != QMessageBox.StandardButton.Ok:
+        n_set, n_sec = xfer.counts(bundle)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(self.tr("Import settings"))
+        box.setText(self.tr("Replace the current settings and passwords?")
+                    if n_sec else
+                    self.tr("Replace the current settings?"))
+        box.setInformativeText(
+            self.tr("This file holds {s} setting(s) and {p} password(s).")
+            .format(s=n_set, p=n_sec) if n_sec else
+            self.tr("This file holds {s} setting(s).").format(s=n_set))
+        box.setStandardButtons(QMessageBox.StandardButton.Ok
+                               | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if box.exec() != QMessageBox.StandardButton.Ok:
             return
         try:
             report = xfer.apply(ctx, bundle)

@@ -197,13 +197,16 @@ def default_filename(slug: str) -> str:
     return f"{slug}{SUFFIX}"
 
 
-def describe(bundle: dict[str, Any]) -> str:
-    """One line for a confirmation dialog: what is in this file."""
-    n_set = len(bundle.get("settings") or {})
-    n_sec = len(bundle.get("secrets") or {})
-    if n_sec:
-        return f"{n_set} setting(s) and {n_sec} password(s)"
-    return f"{n_set} setting(s)"
+def counts(bundle: dict[str, Any]) -> tuple[int, int]:
+    """How many settings and how many secrets are in this bundle.
+
+    Numbers, not a sentence. The sentence belongs to whichever front-end is
+    asking — the dialog wraps it in `tr()`, and a phrase built here would be
+    interpolated into a translated string as an English fragment, which is how
+    a French dialog ends up reading "… par 3 setting(s) and 2 password(s) ?".
+    """
+    return (len(bundle.get("settings") or {}),
+            len(bundle.get("secrets") or {}))
 
 
 def exported_secret_names(ctx) -> list[str]:

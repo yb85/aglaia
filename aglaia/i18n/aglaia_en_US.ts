@@ -18,67 +18,67 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="638"/>
+        <location filename="../gui/PluginsTab.py" line="827"/>
         <source>Unreviewed plugin</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="643"/>
+        <location filename="../gui/PluginsTab.py" line="832"/>
         <source>UNREVIEWED PLUGIN</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="649"/>
+        <location filename="../gui/PluginsTab.py" line="838"/>
         <source>This plugin did not come from the Aglaïa registry. Nobody has reviewed it. Once installed it runs with the same access to your files as Aglaïa itself.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="656"/>
+        <location filename="../gui/PluginsTab.py" line="845"/>
         <source>(no author given)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="662"/>
+        <location filename="../gui/PluginsTab.py" line="851"/>
         <source>It declares:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="663"/>
+        <location filename="../gui/PluginsTab.py" line="852"/>
         <source>nothing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="667"/>
+        <location filename="../gui/PluginsTab.py" line="856"/>
         <source>It imports:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="668"/>
+        <location filename="../gui/PluginsTab.py" line="857"/>
         <source>nothing beyond the plugin API</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="674"/>
+        <location filename="../gui/PluginsTab.py" line="863"/>
         <source>Undeclared:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="675"/>
+        <location filename="../gui/PluginsTab.py" line="864"/>
         <source>not in its manifest</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="679"/>
+        <location filename="../gui/PluginsTab.py" line="868"/>
         <source>Worth a look:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="683"/>
+        <location filename="../gui/PluginsTab.py" line="872"/>
         <source>Type the sentence below to install it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="701"/>
+        <location filename="../gui/PluginsTab.py" line="890"/>
         <source>Install</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3287,252 +3287,367 @@ Per-page step disables are a different thing and are NOT cleared: keep using the
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="301"/>
+        <location filename="../gui/PluginsTab.py" line="250"/>
+        <source>Export…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="251"/>
+        <source>Import…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="313"/>
         <source>This setting needs a newer version of Aglaïa.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="312"/>
+        <location filename="../gui/PluginsTab.py" line="324"/>
+        <location filename="../gui/PluginsTab.py" line="731"/>
         <source>•••• stored — type to replace</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="369"/>
+        <location filename="../gui/PluginsTab.py" line="381"/>
         <source>Example: X-Api-Token</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="370"/>
+        <location filename="../gui/PluginsTab.py" line="382"/>
         <source>The header&apos;s name, as the server expects it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="372"/>
+        <location filename="../gui/PluginsTab.py" line="384"/>
         <source>Kept secret</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="374"/>
+        <location filename="../gui/PluginsTab.py" line="386"/>
         <source>Stored in your keychain, and never shown again.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="378"/>
+        <location filename="../gui/PluginsTab.py" line="390"/>
         <source>Add</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="384"/>
+        <location filename="../gui/PluginsTab.py" line="396"/>
         <source>Name</source>
         <translation type="unfinished">Name</translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="385"/>
+        <location filename="../gui/PluginsTab.py" line="397"/>
         <source>Value</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="424"/>
+        <location filename="../gui/PluginsTab.py" line="436"/>
         <source>Remove {name}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="447"/>
+        <location filename="../gui/PluginsTab.py" line="459"/>
         <source>A header needs both a name and a value.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="505"/>
+        <location filename="../gui/PluginsTab.py" line="520"/>
         <source>Testing…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="515"/>
+        <location filename="../gui/PluginsTab.py" line="530"/>
         <source>The server did not answer.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="578"/>
+        <location filename="../gui/PluginsTab.py" line="586"/>
+        <location filename="../gui/PluginsTab.py" line="608"/>
+        <location filename="../gui/PluginsTab.py" line="620"/>
+        <source>Export settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="579"/>
+        <source>This plugin keeps no settings to export.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="588"/>
+        <source>Include the stored passwords in the file?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="590"/>
+        <source>They are written as readable text: {names}. Anyone who opens the file, and any backup or sync folder it lands in, can read them. Keep it like the passwords themselves, and delete it once the other machine is set up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="595"/>
+        <source>Include passwords</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="597"/>
+        <source>Settings only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="599"/>
+        <source>Cancel</source>
+        <translation type="unfinished">Cancel</translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="610"/>
+        <location filename="../gui/PluginsTab.py" line="640"/>
+        <source>Aglaïa settings (*.json)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="621"/>
+        <source>The file could not be written. See the Log tab.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="624"/>
+        <source>Exported to {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="635"/>
+        <location filename="../gui/PluginsTab.py" line="639"/>
+        <location filename="../gui/PluginsTab.py" line="646"/>
+        <location filename="../gui/PluginsTab.py" line="650"/>
+        <location filename="../gui/PluginsTab.py" line="657"/>
+        <location filename="../gui/PluginsTab.py" line="673"/>
+        <source>Import settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="636"/>
+        <source>This plugin keeps no settings to import.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="651"/>
+        <source>This file holds the settings of {other}.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="658"/>
+        <source>Replace the current settings and passwords?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="660"/>
+        <source>Replace the current settings?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="662"/>
+        <source>This file holds {s} setting(s) and {p} password(s).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="664"/>
+        <source>This file holds {s} setting(s).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="681"/>
+        <source>Imported {n} setting(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../gui/PluginsTab.py" line="683"/>
+        <source>Imported {n}, skipped {k}</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>PluginsTab</name>
     <message>
-        <location filename="../gui/PluginsTab.py" line="754"/>
+        <location filename="../gui/PluginsTab.py" line="943"/>
         <source>Plugins</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="762"/>
+        <location filename="../gui/PluginsTab.py" line="951"/>
         <source>Install from file…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="766"/>
+        <location filename="../gui/PluginsTab.py" line="955"/>
         <source>Refresh</source>
         <translation type="unfinished">Refresh</translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="797"/>
-        <location filename="../gui/PluginsTab.py" line="875"/>
+        <location filename="../gui/PluginsTab.py" line="986"/>
+        <location filename="../gui/PluginsTab.py" line="1064"/>
         <source>Checking the registry…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="809"/>
+        <location filename="../gui/PluginsTab.py" line="998"/>
         <source>Checking the registry… {n}s</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="812"/>
+        <location filename="../gui/PluginsTab.py" line="1001"/>
         <source>Fetching index.json from GitHub. Slow here is usually the network, not the registry — it will fall back to the last copy it saw.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="828"/>
+        <location filename="../gui/PluginsTab.py" line="1017"/>
         <source>{n} in the registry</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="857"/>
+        <location filename="../gui/PluginsTab.py" line="1046"/>
         <source>Installed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="859"/>
+        <location filename="../gui/PluginsTab.py" line="1048"/>
         <source>Nothing installed yet.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="869"/>
+        <location filename="../gui/PluginsTab.py" line="1058"/>
         <source>Available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="879"/>
+        <location filename="../gui/PluginsTab.py" line="1068"/>
         <source>Everything in the registry is installed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="924"/>
+        <location filename="../gui/PluginsTab.py" line="1113"/>
         <source>UNREVIEWED</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="927"/>
+        <location filename="../gui/PluginsTab.py" line="1116"/>
         <source>UPDATE</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="952"/>
+        <location filename="../gui/PluginsTab.py" line="1141"/>
         <source>Disabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="959"/>
+        <location filename="../gui/PluginsTab.py" line="1148"/>
         <source>Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="967"/>
+        <location filename="../gui/PluginsTab.py" line="1156"/>
         <source>Update</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="968"/>
+        <location filename="../gui/PluginsTab.py" line="1157"/>
         <source>Update to {v}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="972"/>
+        <location filename="../gui/PluginsTab.py" line="1161"/>
         <source>Uninstall</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1001"/>
+        <location filename="../gui/PluginsTab.py" line="1190"/>
         <source>Could not update {name}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1011"/>
+        <location filename="../gui/PluginsTab.py" line="1200"/>
         <source>{name} updated</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1012"/>
+        <location filename="../gui/PluginsTab.py" line="1201"/>
         <source>Updated to {v}. Restart Aglaïa for it to take effect.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1037"/>
+        <location filename="../gui/PluginsTab.py" line="1226"/>
         <source>Installing…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1038"/>
+        <location filename="../gui/PluginsTab.py" line="1227"/>
         <source>Install…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1051"/>
+        <location filename="../gui/PluginsTab.py" line="1240"/>
         <source>by Aglaïa</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1052"/>
+        <location filename="../gui/PluginsTab.py" line="1241"/>
         <source>by {who}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1053"/>
+        <location filename="../gui/PluginsTab.py" line="1242"/>
         <source>an unnamed author</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1084"/>
+        <location filename="../gui/PluginsTab.py" line="1273"/>
         <source>Installing {name}…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1098"/>
-        <location filename="../gui/PluginsTab.py" line="1137"/>
+        <location filename="../gui/PluginsTab.py" line="1287"/>
+        <location filename="../gui/PluginsTab.py" line="1326"/>
         <source>Install failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1122"/>
+        <location filename="../gui/PluginsTab.py" line="1311"/>
         <source>Install a plugin archive</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1123"/>
+        <location filename="../gui/PluginsTab.py" line="1312"/>
         <source>Aglaïa plugin (*.aglplugin *.zip)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1128"/>
+        <location filename="../gui/PluginsTab.py" line="1317"/>
         <source>Not a usable plugin</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1129"/>
+        <location filename="../gui/PluginsTab.py" line="1318"/>
         <source>unreadable archive</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1148"/>
+        <location filename="../gui/PluginsTab.py" line="1337"/>
         <source>Remove {slug}?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1149"/>
+        <location filename="../gui/PluginsTab.py" line="1338"/>
         <source>This deletes the plugin, its settings, its files and any password it stored in your keychain.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1175"/>
+        <location filename="../gui/PluginsTab.py" line="1364"/>
         <source>{slug} cannot be used</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="1176"/>
+        <location filename="../gui/PluginsTab.py" line="1365"/>
         <source>This plugin is damaged. Remove it below, or report it to whoever wrote it.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3586,42 +3701,42 @@ Many bugs are already fixed upstream — filing one from an old build can waste 
 <context>
     <name>RegistryInstallDialog</name>
     <message>
-        <location filename="../gui/PluginsTab.py" line="560"/>
+        <location filename="../gui/PluginsTab.py" line="749"/>
         <source>Install {name}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="577"/>
+        <location filename="../gui/PluginsTab.py" line="766"/>
         <source>It declares: </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="582"/>
+        <location filename="../gui/PluginsTab.py" line="771"/>
         <source>It imports: </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="595"/>
+        <location filename="../gui/PluginsTab.py" line="784"/>
         <source>Written and maintained by Aglaïa, and installed through the same reviewed registry as everything else. Like any plugin, it runs with the same access to your files as Aglaïa itself.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="600"/>
+        <location filename="../gui/PluginsTab.py" line="789"/>
         <source>Reviewed and merged into the Aglaïa plugin registry. It was written and submitted by &lt;b&gt;{who}&lt;/b&gt;, not by Aglaïa, and it runs with the same access to your files as Aglaïa itself.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="603"/>
+        <location filename="../gui/PluginsTab.py" line="792"/>
         <source>its author</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="610"/>
+        <location filename="../gui/PluginsTab.py" line="799"/>
         <source>Read the source on GitHub</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../gui/PluginsTab.py" line="625"/>
+        <location filename="../gui/PluginsTab.py" line="814"/>
         <source>I trust the code and/or its author</source>
         <translation type="unfinished"></translation>
     </message>
