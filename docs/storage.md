@@ -33,7 +33,7 @@ aglaia/storage/
 | `branches` | One row per terminal branch. `chosen_node_id` (the export node) now always tracks `terminal_node_id` — per-page output is shaped by `step_overrides`, not by moving the chosen node. Soft-delete via `trashed_at`. |
 | `step_overrides` | Per-page-layout processor disable. A row `(scan_id, branch_path, step_idx, disabled)` makes the chain bypass that step for that layout. |
 | `manual_overrides` | Per-page-layout parameter override. One JSON payload per `(scan_id, branch_path)`: the value the user set where the pipeline would have estimated. |
-| `ocr_runs` | One row per OCR pass over a branch: engine, languages, status, `result_json`, timestamps. `is_stale` flags a result that no longer matches the branch's current node. |
+| `ocr_runs` | One row per OCR pass over a branch: engine, languages, status, `result_json`, timestamps. `is_stale` flags a result that no longer matches the branch's current node; `OcrRepo.finish` computes it (node gone, or not `chosen_node_id`) rather than clearing it, since a batch lands after the fact (#159). |
 | `mistral_batch_jobs` | One row per submitted Mistral batch job: status, `run_ids` (page i of the output → `run_ids[i]`), `imported_at`. |
 | `mistral_batch_outputs` | The job's output JSONL **byte for byte** as downloaded (`raw`, `sha256`, `size`, `output_file_id`, `completed_at`), stored at import (#147). No FK to `mistral_batch_jobs`: deleting a job row keeps the paid result. Read with `MistralBatchRepo.output(job_id)` / `.outputs()`. |
 | `debug_artifacts` | Optional debug images attached to a node (e.g. PageDewarper span overlays). |

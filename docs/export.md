@@ -53,10 +53,13 @@ How the layer is laid out (`pdf_export.ocr_text_lines` / `inject_ocr_layer`):
 
 **The export fails rather than ship a layer it could not write** (#149).
 With the layer requested, `create_pdf_from_db` raises `OcrLayerError`
-(`expected`, `written`, `missing` 1-based page numbers) and deletes the
+(`expected`, `written`, `missing` 1-based page numbers, each named by the
+scan the list shows — `271 (scan 149 A)`, #159) and deletes the
 file when no page matches a completed OCR run of the selected engine, or
 when a page with OCR text got no text on it. A page with no OCR run is not
-owed a layer and is not an error. The GUI shows the message in the status
+owed a layer and is not an error. A run stored with a 0 × 0 frame (a batch
+imported after its node was replaced, #159) is placed in Mistral's own
+`dimensions` frame rather than counted as missing. The GUI shows the message in the status
 bar; `--headless` prints `! PDF export failed: …` and counts a failure.
 
 Verification: `tests/workers/test_pdf_ocr_layer.py` reads the text with
