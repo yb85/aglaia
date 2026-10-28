@@ -4,6 +4,24 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **SkewFinder finds the text lines inside the book** (#184). A new `method`
+  option, `lines` by default: the book's outline is found first, a black-hat
+  keeps the strokes whatever the lighting, and the angle is the median of the
+  fitted text lines — falling back to the outline, then to Postl, and saying
+  which in `meta["skew_method"]`. On a camera frame where the book is a small,
+  low-contrast part of a cluttered scene, the old estimate was 1.1°–1.5° off
+  on four of five scans that needed a manual angle.
+
+### Fixed
+
+- **Postl skipped the true angle** (#184). Its coarse grid stepped 1°, wider
+  than the score peak, and its bilinear shear favoured exactly 0°. The grid now
+  steps 0.25° and the shear is nearest-neighbour.
+
 ## [0.1.0rc10] — 2026-10-28
 
 ### Fixed
