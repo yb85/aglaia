@@ -4,6 +4,24 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc10] — 2026-10-28
+
+### Fixed
+
+- **An OCR export refused pages that had their text** (#159, #160). A Mistral
+  batch that landed after its branch was reprocessed stored the page with a
+  0 × 0 frame. The PDF layer then placed nothing on it, and the export (PDF or
+  textpack) failed with "OCR layer incomplete" although every page had OCR. The
+  layer now falls back to Mistral's own page dimensions, such a run stays
+  stale instead of deleting the current layer, and the error names each
+  missing page by its scan.
+
+### Changed
+
+- **The test suite runs Qt offscreen by default.** A local `pytest` opened
+  real Capture windows on the desktop. `QT_QPA_PLATFORM` set explicitly still
+  wins.
+
 ## [0.1.0rc9] — 2026-10-04
 
 rc8's release build failed on Windows, which is where it was always going to:

@@ -14,6 +14,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Widget tests must not paint on the developer's desktop: a local run opened
+# real, half-built Capture windows over whatever was on screen. Set before any
+# Qt import; an explicit QT_QPA_PLATFORM still wins.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import pytest
 
 from aglaia.storage.db import open_db
