@@ -18,6 +18,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **New project: Apply in the pipeline properties dropped the edits** (#188).
+  The panel reselected the pipeline's card after Apply, and reselecting
+  reloaded the YAML from its file — which Apply does not write. The project
+  was created with the pipeline as it was on disk. The edited YAML is now
+  kept; Update and Save as, which do write the file, behave as before.
+- **A local test run reached outside its sandbox** (#185). It deleted the
+  real Mistral key from the OS keychain, and drew Qt windows on a desktop
+  whose session exports `QT_QPA_PLATFORM`. Tests now get an in-memory
+  keychain and a forced offscreen platform.
 - **Postl skipped the true angle** (#184). Its coarse grid stepped 1°, wider
   than the score peak, and its bilinear shear favoured exactly 0°. The grid now
   steps 0.25° and the shear is nearest-neighbour.
