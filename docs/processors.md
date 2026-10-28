@@ -48,11 +48,12 @@ Estimates the skew, then rotates. Two estimators, chosen by `method`.
 ### `method: lines` (default, #184)
 
 Built for a camera capture where the book is a small, low-contrast part of a
-cluttered frame (a table, hands, a remote, a sun patch). Measured on
-`delbrel oc 14`: the Postl estimate on the whole frame was 1.1° to 1.5° off on
-four of five corrected scans, and left one spread that `PageDetector` could not
-split; `lines` was within 0.55° of the user's angle on all seven test scans,
-and every spread split into its two pages.
+cluttered frame (a table, hands, a remote, a sun patch). On `delbrel oc 14`,
+five scans needed a hand-set angle before `PageDetector` split them; the Postl
+estimate returned +0.2°/+0.3° on four of them whatever the page did. With
+`lines`, every spread of the seven test scans splits into its two pages
+without a hand-set angle. (The hand-set angles were eyeballed, just enough for
+the split: they bound the estimate within 1°, they are not ground truth.)
 
 1. **Book outline.** Otsu at 1/8 scale; the largest bright region is the book.
    Its box is the crop, and its minimum-area rectangle gives an *outline angle*.

@@ -13,8 +13,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps the strokes whatever the lighting, and the angle is the median of the
   fitted text lines — falling back to the outline, then to Postl, and saying
   which in `meta["skew_method"]`. On a camera frame where the book is a small,
-  low-contrast part of a cluttered scene, the old estimate was 1.1°–1.5° off
-  on four of five scans that needed a manual angle.
+  low-contrast part of a cluttered scene, five scans needed a hand-set angle
+  before the page split worked; with `lines` they split without one.
 
 ### Fixed
 
