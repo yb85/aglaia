@@ -4,7 +4,10 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0rc11] — 2026-10-28
+
+A deskew that holds on a small book in a cluttered camera frame, edits on the
+new-project screen that stick, and a test suite that stays in its sandbox.
 
 ### Changed
 
