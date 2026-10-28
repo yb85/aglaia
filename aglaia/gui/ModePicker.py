@@ -286,7 +286,10 @@ class ModePickerPanel(QWidget):
         self._list.insertWidget(self._list.count() - 1, card)
 
     # ── selection ──────────────────────────────────────────────────────
-    def _select(self, key: str) -> None:
+    def _select(self, key: str, yaml_text: Optional[str] = None) -> None:
+        """Select a card. Its YAML comes from its file, unless `yaml_text`
+        is given: an edit applied without saving is not in the file, and
+        reloading it there threw the edit away (#188)."""
         if key == _NEW_KEY or key not in self._cards:
             return
         self._current_key = key
@@ -294,7 +297,7 @@ class ModePickerPanel(QWidget):
             c.set_selected(k == key)
         path: Path = getattr(self._cards[key], "_path")
         try:
-            self._yaml = load_yaml_text(path)
+            self._yaml = yaml_text if yaml_text is not None else load_yaml_text(path)
             self._path = path
         except OSError:
             return
@@ -335,15 +338,18 @@ class ModePickerPanel(QWidget):
             initial_yaml=self._yaml, parent=self,
             allow_reprocess=False, title=self.tr("Edit pipeline"))
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._yaml = dlg.yaml_text()
-            name = (parse_yaml(self._yaml).get("name") or "").strip()
+            edited = dlg.yaml_text()
+            name = (parse_yaml(edited).get("name") or "").strip()
             # A Save-as creates a new yaml in PIPELINES_DIR — rebuild + try
             # to reselect it; otherwise just refresh the current detail.
+            # The rebuild reselects from the files, and Apply does not write
+            # one: the edit is kept aside and handed back (#188).
             self._rebuild_strip()
+            self._yaml = edited
             for k, c in self._cards.items():
                 p = getattr(c, "_path", None)
                 if p is not None and name and parse_yaml_name(p) == name:
-                    self._select(k)
+                    self._select(k, yaml_text=edited)
                     break
             else:
                 if self._current_key:
