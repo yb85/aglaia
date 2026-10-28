@@ -13,8 +13,102 @@ from aglaia.ImageBuffer import ImageBuffer, ImageType
 from aglaia.processors import erase as _erase
 from aglaia.processors.abstraction import AbstractImageProcessor, AbstractProcessorOption, ReplayTrait
 from aglaia.processors.manual import manual_value, stamp_manual
-from aglaia.processors.option_specs import _b, _f, _i
+from aglaia.processors.option_specs import _b, _e, _f, _i
 from aglaia.processors.utils import to_gray, is_binary
+
+# ── the `lines` estimate (#184) ──────────────────────────────────────
+
+#: Postl's coarse step. Below the width of its score peak — see `_find_skew_angle`.
+_COARSE_STEP = 0.25
+#: Height the book's crop is analysed at. The 400 px of the whole frame left
+#: 2-3 px per text line on a capture where the book is half the frame.
+_ANALYSIS_H = 1000
+#: Line-blob filters and confidence, all at `_ANALYSIS_H`.
+_MIN_LINES = 8
+_MAX_SPREAD_DEG = 1.5
+
+
+def _book_outline(gray):
+    """``((x, y, w, h), outline_angle)``: the box the book is searched in,
+    and the angle of its edges — or the whole frame and None.
+
+    The book is the largest bright region at 1/8 scale. A region under a
+    tenth of the frame is no book, and one whose box fills the frame is a
+    page already cropped, whose "outline" is the frame itself: both keep the
+    whole frame, with no outline angle."""
+    H, W = gray.shape[:2]
+    k = 8
+    small = cv2.resize(gray, (max(1, W // k), max(1, H // k)),
+                       interpolation=cv2.INTER_AREA)
+    _, m = cv2.threshold(small, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m)
+    if n < 2:
+        return (0, 0, W, H), None
+    i = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+    frac = st[i, cv2.CC_STAT_AREA] / float(small.size)
+    if frac < 0.1:
+        return (0, 0, W, H), None
+    x, y, w, h = (int(v) * k for v in st[i, :4])
+    if w * h >= 0.9 * W * H:
+        return (0, 0, W, H), None
+    ys, xs = np.nonzero(lab == i)
+    _, _, a = cv2.minAreaRect(np.c_[xs, ys].astype(np.float32))
+    a = float(a)
+    while a > 45:
+        a -= 90
+    while a <= -45:
+        a += 90
+    return (x, y, min(w, W - x), min(h, H - y)), -a
+
+
+def _text_mask(gray):
+    """Ink as white on black: strokes darker than their surroundings.
+
+    A black-hat subtracts the page from itself closed by a kernel wider than
+    a stroke, so a slow gradient, a shadow or a sun patch drops out and only
+    the strokes are left for Otsu."""
+    k = max(3, round(15 * gray.shape[0] / _ANALYSIS_H) | 1)
+    bh = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT,
+                          cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    _, b = cv2.threshold(bh, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return b
+
+
+def _line_angle(mask) -> tuple[float, bool]:
+    """``(skew, confident)`` from the text lines in `mask`.
+
+    Glyphs are closed into line blobs and a line is fitted through each. The
+    skew is their length-weighted median, and it is trusted when there are
+    enough lines and the middle half of them agree within `_MAX_SPREAD_DEG`."""
+    f = mask.shape[0] / _ANALYSIS_H
+    kx, ky = max(3, int(25 * f)), max(1, int(3 * f))
+    blobs = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                             cv2.getStructuringElement(cv2.MORPH_RECT, (kx, ky)))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(blobs)
+    angles, weights = [], []
+    for i in range(1, n):
+        x, y, w, h, _ = st[i]
+        if w < 80 * f or h > 40 * f or w < 4 * h:
+            continue
+        ys, xs = np.nonzero(lab[y:y + h, x:x + w] == i)
+        vx, vy, _, _ = cv2.fitLine(np.c_[xs, ys].astype(np.float32),
+                                   cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+        if vx < 0:
+            vx, vy = -vx, -vy
+        angles.append(math.degrees(math.atan2(vy, vx)))
+        weights.append(w)
+    if len(angles) < _MIN_LINES:
+        return 0.0, False
+    a = np.asarray(angles)
+    o = np.argsort(a)
+    c = np.cumsum(np.asarray(weights, np.float64)[o])
+    q = lambda p: float(a[o][min(len(a) - 1, np.searchsorted(c, c[-1] * p))])
+    # Image y runs down: a line falling to the right is a positive atan2 and a
+    # page turned clockwise, which `meta["skew"]` counts as negative.
+    return -q(0.5), (q(0.75) - q(0.25)) <= _MAX_SPREAD_DEG
+
+
 
 @dataclass
 class SkewFinderOption(AbstractProcessorOption):
@@ -25,6 +119,9 @@ class SkewFinderOption(AbstractProcessorOption):
     # Defaulting to True to act as a processor.
     apply_rotation: bool = True
     k_cluster: int = 0
+    # "lines" (#184): fit the text lines inside the book's outline. "postl":
+    # the projection-profile search over the whole frame.
+    method: str = "lines"
 
 class SkewFinder(AbstractImageProcessor):
     name: str = "SkewFinder"
@@ -33,18 +130,23 @@ class SkewFinder(AbstractImageProcessor):
     OPTION_CLASS = SkewFinderOption
     PROVIDES_META = {
         "skew": "estimated page skew angle in degrees",
+        "skew_method": "which estimate gave meta.skew: lines | outline | postl | none",
         "roi": "page quad polygon [[x,y],...] rotated into output coords",
     }
-    _ESSENTIAL_PARAMS = ("max_angle", "apply_rotation", "k_cluster")
+    _ESSENTIAL_PARAMS = ("max_angle", "apply_rotation", "k_cluster", "method")
     OPTIONS = {
         "max_angle": _f(30.0, 0.1, 45.0, 0.5,
-                        "Search range in degrees (±). Coarse search runs in 1° steps then refines."),
+                        "Search range in degrees (±)."),
         "min_angle": _f(0.1, 0.0, 5.0, 0.05,
                         "Apply rotation only when detected skew exceeds this (degrees)."),
         "accuracy": _f(0.1, 0.01, 1.0, 0.01,
                        "Fine-search angle step in degrees."),
         "apply_rotation": _b(True,
                              "If false, only records meta.skew without rotating."),
+        "method": _e("lines", ["lines", "postl"],
+                     "lines: fit the text lines inside the book's outline — holds "
+                     "on a small, low-contrast book in a cluttered frame. "
+                     "postl: projection profile over the whole frame."),
         "k_cluster": _i(0, 0, 8,
                         "0 = white border. >1 = k-means cluster count for background colour detection.",
                         advanced=True),
@@ -77,6 +179,7 @@ class SkewFinder(AbstractImageProcessor):
         self.accuracy = options.accuracy
         self.apply_rotation = options.apply_rotation
         self.k_cluster = options.k_cluster
+        self.method = getattr(options, "method", "lines")
 
     def process(self, img_buf: ImageBuffer) -> ImageBuffer:
         """
@@ -104,32 +207,15 @@ class SkewFinder(AbstractImageProcessor):
             return self._finish(img_buf, current_skew)
 
         try:
-            # 1. Estimation — downscale FIRST so the gray conversion and
-            # Otsu run on the 400-px analysis image instead of the full
-            # frame (estimation only; the output buffer is untouched).
-            h, w = image.shape[:2]
-            target_h = 400
-            small = image
-            if h > target_h:
-                scale = target_h / h
-                small = cv2.resize(image, (int(w * scale), target_h),
-                                   interpolation=cv2.INTER_AREA)
-            if len(small.shape) == 3:
-                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            gray = to_gray(image)
+            if self.method == "postl":
+                current_skew, used = self._postl(gray), "postl"
             else:
-                gray = small
+                current_skew, used = self._estimate_lines(gray)
 
-            # Threshold to binary for detection
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            
-            angle = self._find_skew_angle(binary)
-            current_skew = angle
-            
-            # Update Meta
             if not img_buf.meta: img_buf.meta = {}
             img_buf.meta["skew"] = current_skew
-
-            # 2. Application
+            img_buf.meta["skew_method"] = used
             self._rotate(img_buf, current_skew)
 
         except Exception:
@@ -214,12 +300,49 @@ class SkewFinder(AbstractImageProcessor):
                 _, img_buf.buffer = cv2.threshold(img_buf.to_gray(), 127, 255, cv2.THRESH_BINARY)
                 img_buf.type = ImageType.BW
 
+    def _postl(self, gray) -> float:
+        """Projection profile over the whole frame, 400 px tall, global Otsu."""
+        h, w = gray.shape[:2]
+        if h > 400:
+            gray = cv2.resize(gray, (int(w * 400 / h), 400),
+                              interpolation=cv2.INTER_AREA)
+        _, binary = cv2.threshold(gray, 0, 255,
+                                  cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        return float(self._find_skew_angle(binary))
+
+    def _estimate_lines(self, gray) -> tuple[float, str]:
+        """The `lines` estimate (#184) → (angle, which estimate was used).
+
+        The book is found first, so the table, the hands and the light around
+        it never reach the estimate. Inside it a black-hat keeps the strokes
+        against their local surroundings, whatever the contrast of the page.
+        The text lines give the angle; when they are too few or disagree, the
+        book's own outline does, then Postl."""
+        box, outline = _book_outline(gray)
+        x, y, w, h = box
+        crop = gray[y:y + h, x:x + w]
+        s = min(1.0, _ANALYSIS_H / max(1, crop.shape[0]))
+        if s < 1.0:
+            crop = cv2.resize(crop, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        angle, ok = _line_angle(_text_mask(crop))
+        if ok and abs(angle) <= self.max_angle:
+            return angle, "lines"
+        if outline is not None and abs(outline) <= self.max_angle:
+            return outline, "outline"
+        try:
+            return self._postl(gray), "postl"
+        except Exception:
+            return 0.0, "none"
+
     def _find_skew_angle(self, binary):
-        # 3. Coarse Search
+        # 3. Coarse Search. The step must stay below the width of the score
+        # peak (~0.2-0.3° on a 400 px frame): in 1° steps the grid landed
+        # off the peak and the refinement settled on noise (#184).
         best_angle = 0
         max_score = -1
         
-        for angle in np.arange(-self.max_angle, self.max_angle + 1.0, 1.0):
+        for angle in np.arange(-self.max_angle, self.max_angle + _COARSE_STEP,
+                               _COARSE_STEP):
             score = self._calc_score(binary, angle)
             if score > max_score:
                 max_score = score
@@ -228,8 +351,8 @@ class SkewFinder(AbstractImageProcessor):
         # 4. Fine Search
         refined_angle = best_angle
         # optimize range
-        start = best_angle - 1.0
-        end = best_angle + 1.0
+        start = best_angle - _COARSE_STEP
+        end = best_angle + _COARSE_STEP
         if start < -self.max_angle: start = -self.max_angle
         if end > self.max_angle: end = self.max_angle
         
@@ -251,7 +374,10 @@ class SkewFinder(AbstractImageProcessor):
             [tg, 1, -center_x * tg]
         ])
         
-        sheared = cv2.warpAffine(binary, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        # NEAREST: a bilinear shear blurs the rows at every angle but 0°, which
+        # then out-scored the true angle — Postl returned exactly 0.00 (#184).
+        sheared = cv2.warpAffine(binary, M, (w, h), flags=cv2.INTER_NEAREST,
+                                 borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         projections = np.sum(sheared, axis=1, dtype=np.int32) // 255
         diffs = np.diff(projections)
         score = np.sum(diffs**2)

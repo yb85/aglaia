@@ -85,6 +85,7 @@ META_SCHEMA: dict[str, MetaKind] = {
     # scalars
     "skew_angle": MetaKind.SCALAR,
     "skew": MetaKind.SCALAR,             # SkewFinder writes the GUI's name directly
+    "skew_method": MetaKind.SCALAR,      # which SkewFinder estimate gave "skew" (#184)
     "success": MetaKind.SCALAR,          # PageDewarper, likewise
     "oob": MetaKind.SCALAR,              # PageDewarper: out-of-bounds fraction
     "char_h_frac": MetaKind.SCALAR,

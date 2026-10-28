@@ -52,6 +52,7 @@ and checks this table lists every declared key — neither the code nor this pag
 | `mode_used` | label — copied | TrapezoidalCorrection |
 | `skew_angle` | scalar — copied | SkewFinder |
 | `skew` | scalar — copied | SkewFinder (the GUI's name, written directly) |
+| `skew_method` | scalar — copied | SkewFinder: which estimate gave `skew` (`lines`, `outline`, `postl`, `none`) |
 | `success` | scalar — copied | PageDewarper |
 | `oob` | scalar — copied | PageDewarper (out-of-bounds fraction) |
 | `char_h_frac` | scalar — copied | TrapezoidalCorrection, PageDewarper |

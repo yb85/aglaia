@@ -1,11 +1,12 @@
 element_name	param_name	param_type	description	isAdvanced	default_value
 DPIfixer	min_dpi	bounded_int	If the buffer's DPI is below this, upsample to it.	false	100
 DPIfixer	max_dpi	bounded_int	If the buffer's DPI is above this, downsample to it.	false	300
-SkewFinder	max_angle	bounded_float	Search range in degrees (±). Coarse search runs in 1° steps then refines.	false	30.0
+SkewFinder	max_angle	bounded_float	Search range in degrees (±).	false	30.0
 SkewFinder	min_angle	bounded_float	Apply rotation only when detected skew exceeds this (degrees).	false	0.1
 SkewFinder	accuracy	bounded_float	Fine-search angle step in degrees.	false	0.1
 SkewFinder	apply_rotation	bool	If false, only records meta.skew without rotating.	false	true
 SkewFinder	k_cluster	bounded_int	0 = white border. >1 = k-means cluster count for background colour detection.	false	0
+SkewFinder	method	enum	lines: fit the text lines inside the book's outline — holds on a small, low-contrast book in a cluttered frame. postl: projection profile over the whole frame.	false	lines
 PageDetector	margin_mm	bounded_float	Padding around each detected text bbox before cropping.	false	2.0
 PageDetector	max_layouts	bounded_int	Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap).	false	2
 PageDetector	rescale_threshold	bounded_float	Minimum DPI scale-factor delta to trigger a resize.	false	0.01

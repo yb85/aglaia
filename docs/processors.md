@@ -43,12 +43,55 @@ Use it both as **input clamp** (early) and **normalize** (e.g. force exactly 300
 
 ## SkewFinder (`aglaia/processors/SkewFinder.py`)
 
-Two-pass projection-profile deskew:
+Estimates the skew, then rotates. Two estimators, chosen by `method`.
 
-1. Downscale to 400px tall, then binarize (Otsu) — estimation only; the output buffer is untouched by this downscale.
-2. Coarse search: ±`max_angle` in 1° steps. Score = `sum(diff(row_sums)^2)` on a sheared copy (rows align when angle matches).
-3. Fine search: ±1° around best angle in `accuracy` steps.
-4. If `apply_rotation` and `|angle| ≥ min_angle`, rotate via `cv2.warpAffine`. Border value = white for color, configurable via `k_cluster`.
+### `method: lines` (default, #184)
+
+Built for a camera capture where the book is a small, low-contrast part of a
+cluttered frame (a table, hands, a remote, a sun patch). On `delbrel oc 14`,
+five scans needed a hand-set angle before `PageDetector` split them; the Postl
+estimate returned +0.2°/+0.3° on four of them whatever the page did. With
+`lines`, every spread of the seven test scans splits into its two pages
+without a hand-set angle. (The hand-set angles were eyeballed, just enough for
+the split: they bound the estimate within 1°, they are not ground truth.)
+
+1. **Book outline.** Otsu at 1/8 scale; the largest bright region is the book.
+   Its box is the crop, and its minimum-area rectangle gives an *outline angle*.
+   A region under 10 % of the frame is no book; a box over 90 % of it is a page
+   already cropped, whose outline is the frame — both keep the whole frame and
+   give no outline angle.
+2. **Text mask.** A morphological black-hat on the crop, scaled to 1000 px
+   high: strokes darker than their surroundings, whatever the lighting.
+3. **Line fit.** Glyphs closed into line blobs; a line fitted through each
+   blob; the length-weighted median angle. Trusted with at least 8 lines whose
+   middle half agrees within 1.5°.
+4. **Fallback**, when the lines are not trusted: the outline angle, then Postl.
+
+`meta["skew_method"]` records which one gave the angle. On an undewarped page
+whose lines curve, the lines disagree and Postl answers — as it did before.
+
+A spread is not flat: the two pages of an open book differ by up to ~1° (the
+curved one reads lower). The capture deskew only has to be good enough for the
+split; `pages_deskew` corrects each page after it.
+
+### `method: postl`
+
+Projection profile over the whole frame:
+
+1. Downscale to 400 px tall, then binarize (Otsu) — estimation only.
+2. Coarse search: ±`max_angle` in 0.25° steps. Score = `sum(diff(row_sums)^2)`
+   on a sheared copy (rows align when the angle matches). The shear is
+   nearest-neighbour: a bilinear one blurred the rows at every angle but 0°,
+   and Postl returned exactly 0.00 on pages that were not straight (#184).
+3. Fine search: ±0.25° around the best angle in `accuracy` steps.
+
+The coarse step was 1°: wider than the score peak (~0.2–0.3° at 400 px), so the
+grid landed off the peak and the refinement settled on noise (#184).
+
+### Rotation
+
+If `apply_rotation` and `|angle| ≥ min_angle`, rotate via `cv2.warpAffine`.
+Border value = white for color, configurable via `k_cluster`.
 
 Stored as `meta["skew"]`. `meta["roi"]` polygon is transformed by the same matrix.
 
@@ -59,6 +102,7 @@ options:
   accuracy: 0.1        # Fine-search step
   apply_rotation: true
   k_cluster: 0         # 0 = white background. >1 = k-means cluster count for bg color detection
+  method: lines        # lines (book outline + text lines) | postl (projection profile)
 ```
 
 `estimate_skew(image)` is a module-level helper used by `ImageBuffer.deskew`.
