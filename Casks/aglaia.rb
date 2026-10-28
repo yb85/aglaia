@@ -7,11 +7,11 @@
 # - Needs a published GitHub release: the `vX.Y.Z` tag's DMG asset
 #   (`Aglaia-X.Y.Z.dmg`) and its real sha256. Until a release is cut this
 #   cask can't install — replace the placeholder sha256 below per tag:
-#     shasum -a 256 dist/Aglaia-0.1.0rc9.dmg   (or read SHA256SUMS.txt in the release)
+#     shasum -a 256 dist/Aglaia-0.1.0rc10.dmg   (or read SHA256SUMS.txt in the release)
 #   (The release CI already builds + uploads the DMG + SHA256SUMS.txt.)
 cask "aglaia" do
-  version "0.1.0rc9"
-  sha256 "b1ae0c3fbd291023126f7986dbeb948e491939d37918d572ad9b1bffba34fa98"
+  version "0.1.0rc10"
+  sha256 "47524f70a7dde035490bf5e0a291ee62f84e4faa38a4dde11d0d3512f4046d77"
 
   url "https://github.com/yb85/aglaia/releases/download/v#{version}/Aglaia-#{version}.dmg",
       verified: "github.com/yb85/aglaia/"
