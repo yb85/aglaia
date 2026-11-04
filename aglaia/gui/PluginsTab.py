@@ -322,6 +322,14 @@ class PluginSettingsDialog(QDialog):
                 if self.dest.secret(field.key):
                     w.setPlaceholderText(
                         self.tr("•••• stored — type to replace"))
+                elif self._secret_listed(field.key):
+                    # The ledger says a value was saved, but this build
+                    # cannot read it back (no keychain module, denied
+                    # access, …). Showing the field as unset here is what
+                    # made a user conclude updates eat his API key (#192):
+                    # the box must say the truth instead of looking empty.
+                    w.setPlaceholderText(
+                        self.tr("Saved, but unreadable here — update Aglaïa"))
                 elif field.placeholder:
                     w.setPlaceholderText(field.placeholder)
             else:
@@ -478,6 +486,15 @@ class PluginSettingsDialog(QDialog):
         box._repaint = _repaint
         _repaint()
         return box
+
+    def _secret_listed(self, key: str) -> bool:
+        """The ledger's word that a value was saved — consulted only when
+        the value itself cannot be read, so a stored-but-unreachable secret
+        never masquerades as an unset one (#192)."""
+        try:
+            return key in (self.dest.ctx.secrets.keys() or [])
+        except Exception:
+            return False
 
     def _collect(self) -> None:
         for key, (field, w, is_secret) in self._widgets.items():
