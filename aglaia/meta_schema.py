@@ -95,6 +95,7 @@ META_SCHEMA: dict[str, MetaKind] = {
     "oob_forced": MetaKind.SCALAR,
     "oob_pct": MetaKind.SCALAR,
     "status": MetaKind.SCALAR,
+    "blank_page": MetaKind.SCALAR,       # PageDetector: white page for a textless side (#196)
     "elapsed_ms": MetaKind.SCALAR,
     "disabled": MetaKind.SCALAR,
     "gpu": MetaKind.SCALAR,
