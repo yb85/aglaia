@@ -139,3 +139,74 @@ def test_every_shipped_pipeline_asks_for_two_millimetres(path):
     for s in steps:
         assert float(s["options"]["margin_mm"]) == 2.0
         assert not s["options"].get("width_floor")
+
+
+# ── fixed page size (#197) ───────────────────────────────────────────
+
+A5 = (_mm_px(148), _mm_px(210))
+
+
+def _fixed(**kw):
+    return MarginSetter(MarginSetterOption(margin_mm="2", fixed_size=True, **kw))
+
+
+def test_fixed_size_defaults_to_a5_centred():
+    out = _fixed().process(_page(content=(200, 300))).buffer
+    assert out.shape[::-1] == A5
+    l, r, t, b = _borders(out)
+    assert abs(l - r) <= 1 and abs(t - b) <= 1
+
+
+@pytest.mark.parametrize("h,v,expect", [
+    ("left", "top", lambda l, r, t, b: (l, t) == (_mm_px(2), _mm_px(2))),
+    ("right", "bottom", lambda l, r, t, b: (r, b) == (_mm_px(2), _mm_px(2))),
+])
+def test_alignment_puts_the_block_against_the_named_edges(h, v, expect):
+    out = _fixed(h_align=h, v_align=v).process(_page()).buffer
+    assert out.shape[::-1] == A5
+    assert expect(*_borders(out))
+
+
+def _big():
+    # Content wider than A5 (148 mm = 1748 px at 300 dpi), height fits.
+    return _page(content=(400, 2000), canvas=(800, 2400))
+
+
+def test_overflow_without_clip_grows_the_page_on_that_axis_only():
+    out = _fixed().process(_big()).buffer
+    assert out.shape[1] == 2000 + 2 * _mm_px(2)
+    assert out.shape[0] == A5[1]
+
+
+@pytest.mark.parametrize("h", ["left", "center", "right"])
+def test_overflow_with_clip_keeps_the_page_size(h):
+    out = _fixed(clip=True, h_align=h).process(_big()).buffer
+    assert out.shape[::-1] == A5
+    l, r, _, _ = _borders(out)
+    if h == "left":
+        assert l == _mm_px(2) and r == 0       # cut on the right
+    elif h == "right":
+        assert r == _mm_px(2) and l == 0       # cut on the left
+    else:
+        assert l == r == 0                     # cut on both sides
+
+
+def test_fixed_size_ignores_the_width_floor():
+    out = _fixed(width_floor=True).process(_page(canvas=(1200, 3000))).buffer
+    assert out.shape[::-1] == A5
+
+
+def test_replay_reproduces_the_fixed_page():
+    buf = _page(content=(200, 300))
+    src = buf.buffer.copy()
+    out = _fixed(h_align="left", v_align="bottom").process(buf)
+    mask = np.full(src.shape, 255, dtype=np.uint8)
+    rep, rep_mask = MarginSetter.apply_replay(
+        src, mask, out.meta["replay_params"], None)
+    assert np.array_equal(rep, out.buffer)
+    assert rep_mask.shape == rep.shape
+
+
+def test_a_bad_page_size_is_refused():
+    with pytest.raises(ValueError):
+        _fixed(page_size_mm="148")
