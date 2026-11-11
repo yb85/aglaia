@@ -12,8 +12,8 @@ Every page of a book at the same size, and the blank pages of a spread kept.
 
 - **MarginSetter: fixed page size** (#197). `fixed_size` (off by default)
   places the content and its margin on a page of `page_size_mm` — A5,
-  `"148 210"`, by default — positioned by `h_align` (left/center/right) and
-  `v_align` (top/center/bottom). When the content overflows the page, `clip`
+  `"148 210"`, by default — positioned by `h_align` (left/center/right,
+  default center) and `v_align` (top/center/bottom, default top). When the content overflows the page, `clip`
   off grows the page on that axis, and `clip` on cuts the content following
   the alignment. A page with no ink always comes out at exactly the page size.
 - **PageDetector: blank pages of a spread** (#196). A page with no text has no

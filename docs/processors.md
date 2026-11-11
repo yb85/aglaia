@@ -678,8 +678,8 @@ old unconditional value and still replays as it ran.
 and padded block is placed on a white page of `page_size_mm` — `"W H"` in mm,
 default **A5** `"148 210"` — at the step's DPI, so every page of the book comes
 out the same size. `margin_mm` is then the *minimum* margin. `h_align`
-(`left|center|right`) and `v_align` (`top|center|bottom`, both default
-`center`) place the block. When the block overflows the page on an axis,
+(`left|center|right`, default `center`) and `v_align` (`top|center|bottom`,
+default `top`) place the block. When the block overflows the page on an axis,
 `clip` decides: off (default), the page grows to the block on that axis only;
 on, the page keeps its size and the block is cut following the alignment —
 `left` cuts on the right, `center` on both sides, `right` on the left (same for
@@ -694,8 +694,8 @@ places the page the same way.
     margin_mm: "2"
     fixed_size: true
     page_size_mm: "148 210"   # A5
-    h_align: center
-    v_align: top
+    h_align: center           # default
+    v_align: top              # default
     clip: false
 ```
 

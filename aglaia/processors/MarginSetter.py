@@ -57,7 +57,7 @@ class MarginSetterOption(AbstractProcessorOption):
     fixed_size: bool = False
     page_size_mm: str = "148 210"   # A5
     h_align: str = "center"         # left | center | right
-    v_align: str = "center"         # top | center | bottom
+    v_align: str = "top"            # top | center | bottom
     clip: bool = False              # overflow: cut to the page, not grow it
 
 
@@ -168,7 +168,7 @@ class MarginSetter(AbstractImageProcessor):
         "h_align": _e("center", ["left", "center", "right"],
                       "Horizontal position of the content on the page.",
                       visible_when=_FIXED),
-        "v_align": _e("center", ["top", "center", "bottom"],
+        "v_align": _e("top", ["top", "center", "bottom"],
                       "Vertical position of the content on the page.",
                       visible_when=_FIXED),
         "clip": _b(False,

@@ -150,11 +150,11 @@ def _fixed(**kw):
     return MarginSetter(MarginSetterOption(margin_mm="2", fixed_size=True, **kw))
 
 
-def test_fixed_size_defaults_to_a5_centred():
+def test_fixed_size_defaults_to_a5_centred_and_top_aligned():
     out = _fixed().process(_page(content=(200, 300))).buffer
     assert out.shape[::-1] == A5
     l, r, t, b = _borders(out)
-    assert abs(l - r) <= 1 and abs(t - b) <= 1
+    assert abs(l - r) <= 1 and t == _mm_px(2) and b > t
 
 
 @pytest.mark.parametrize("h,v,expect", [
