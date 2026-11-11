@@ -73,8 +73,12 @@ def test_one_step_chain_persists_branch(tmp_path, mp_ctx):
     skew_opts = SkewFinderOption(max_angle=20, min_angle=0.5, apply_rotation=True)
     el = SimpleChainElement("SkewFinder", skew_opts,
                             instance_name="01_skew")
+    # No replay pass: it adds a third node whenever SkewFinder stamps a
+    # rotation, and whether it does on this synthetic line differs by runner
+    # (macos-15 CI: 3 nodes). This test is about the one step's persistence.
     chain = IntegratedProcessingChain([el], num_workers=1,
-                                       log_queue=log_q, db_path=str(db_path))
+                                       log_queue=log_q, db_path=str(db_path),
+                                       replay_enabled=False)
     chain.start()
 
     buf = ImageBuffer(raw.copy(), ImageType.COLOR, dpi=72.0,
