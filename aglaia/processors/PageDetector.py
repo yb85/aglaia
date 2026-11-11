@@ -40,6 +40,9 @@ class PageOption(AbstractProcessorOption):
     # (default), or "discard" the extras (keep the largest) — single-page
     # modes use discard so marginal text from the facing page is dropped.
     over_cap: str = "merge"
+    # A spread page with no text (#196): "delete" it (no child), keep a
+    # "1px" white placeholder, or a white page that "match"es the others.
+    blank_page: str = "delete"
     rescale_threshold: float = 0.01
     binarize_threshold: int = 127
     processing_dpi: Optional[float] = None
@@ -463,6 +466,41 @@ def smart_merge(pages, *, max_pages, page_w, page_h,
     return sorted(pages, key=lambda l: (l[0], l[1]))
 
 
+#: A gap narrower than this × the median page width takes no blank page.
+BLANK_MIN_GAP = 0.75
+
+
+def blank_slots(pages, *, frame_w, target, min_gap=BLANK_MIN_GAP):
+    """Rects for the blank pages a spread lost to having no text (#196).
+
+    Each blank page goes into the largest empty area: the widest of the gaps
+    left of the first page, between two pages and right of the last one. It
+    takes the median page width (less, if the gap is narrower) and the joint
+    height of the pages, centred in the gap; the gap is then split around it.
+    Stops at `target` pages, or when no gap holds `min_gap` × a page width —
+    so a single page shot in the middle of the frame (a cover) gets none."""
+    if not pages or len(pages) >= target:
+        return []
+    widths = sorted(p[2] - p[0] for p in pages)
+    pw = widths[len(widths) // 2]
+    y1, y2 = min(p[1] for p in pages), max(p[3] for p in pages)
+    xs = sorted((p[0], p[2]) for p in pages)
+    gaps = [(0, xs[0][0])]
+    gaps += [(a[1], b[0]) for a, b in zip(xs, xs[1:])]
+    gaps.append((xs[-1][1], int(frame_w)))
+    out = []
+    while len(pages) + len(out) < target:
+        g0, g1 = max(gaps, key=lambda g: g[1] - g[0])
+        if g1 - g0 < min_gap * pw:
+            break
+        w = min(pw, g1 - g0)
+        x0 = g0 + (g1 - g0 - w) // 2
+        out.append((x0, y1, x0 + w, y2))
+        gaps.remove((g0, g1))
+        gaps += [(g0, x0), (x0 + w, g1)]
+    return out
+
+
 def reduce_pages(pages, target_count=2, *, page_w=None, page_h=None):
     """Legacy shim. Forwards to `smart_merge` with default weights."""
     if not pages:
@@ -504,8 +542,14 @@ class PageDetector(AbstractImageProcessor):
                        "perspective capture, where a rect swallows the "
                        "corners — and with them the fingers holding the book. "
                        "The Binarizer erases everything outside it."),
-        "max_pages": _i(2, 0, 8,
-                          "Max child crops per page (1 = single page, 2 = two-page spread, 0 = no cap)."),
+        "max_pages": _i(2, 1, 3,
+                          "Max child crops per page (1 = single page, 2 = two-page spread, 3 = three pages)."),
+        "blank_page": _e("delete", ["delete", "1px", "match"],
+                         "A page of the spread with no text: delete it, keep a "
+                         "1 px white placeholder, or a white page that matches "
+                         "the size of the others. It goes into the largest "
+                         "empty area of the frame.",
+                         visible_when={"max_pages": [2, 3]}),
         "over_cap": _e("merge", ["merge", "discard"],
                        "When more pages than max_pages are found: merge them "
                        "into one, or discard the extras (keep the largest). "
@@ -579,7 +623,10 @@ class PageDetector(AbstractImageProcessor):
         self.margin_mm = options.margin_mm
         self.roi_margin_mm = options.roi_margin_mm
         self.roi_hull = bool(getattr(options, "roi_hull", True))
-        self.max_pages = options.max_pages
+        # 1-3 only (#196). A saved 0 meant "no cap": the widest layout left.
+        mp = int(options.max_pages)
+        self.max_pages = 3 if mp <= 0 else min(mp, 3)
+        self.blank_page = str(getattr(options, "blank_page", "delete"))
         self.over_cap = str(getattr(options, "over_cap", "merge"))
         self.rescale_threshold = options.rescale_threshold
         self.processing_dpi = options.processing_dpi
@@ -655,6 +702,30 @@ class PageDetector(AbstractImageProcessor):
         pts[:, 0] = np.clip(pts[:, 0] - cx1, lo_x, hi_x)
         pts[:, 1] = np.clip(pts[:, 1] - cy1, lo_y, hi_y)
         return pts.tolist()
+
+    def _blank_child(self, parent, rect, suffix, filestem, side):
+        """A white page for a blank side of the spread (#196): 1×1 for
+        `1px`, the rect's size for `match`. No crop of the scan — the paper
+        there carries only bleed-through, which the Binarizer would turn
+        into specks."""
+        x1, y1, x2, y2 = (int(v) for v in rect)
+        w, h = (1, 1) if self.blank_page == "1px" else (x2 - x1, y2 - y1)
+        shape = (h, w) + parent.buffer.shape[2:]
+        buf = ImageBuffer(
+            np.full(shape, 255, dtype=parent.buffer.dtype),
+            ImageType.COLOR, dpi=parent.dpi, path=None, parent=parent,
+            filestem=filestem, out_dir=parent.out_dir,
+            scan_id=parent.scan_id,
+            pipeline_version_id=parent.pipeline_version_id,
+            branch_label=suffix,
+        )
+        buf.meta["roi"] = [[0.0, 0.0], [float(w), 0.0],
+                           [float(w), float(h)], [0.0, float(h)]]
+        buf.meta["blank_page"] = True
+        if side is not None:
+            buf.meta["page_side"] = side
+        buf.meta["parent_crop_xywh"] = [x1, y1, x2 - x1, y2 - y1]
+        return buf
 
     def process(self, input_buf: ImageBuffer) -> ImageBuffer:
         if not self.detector:
@@ -827,6 +898,18 @@ class PageDetector(AbstractImageProcessor):
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             self.debug_save(vis, "1_layouts", input_buf)
         
+        # Blank pages (#196): detection found fewer pages than the spread
+        # holds. Placed by the largest empty area, then sorted in with the
+        # rest so suffixes and page_side follow reading order.
+        blanks: set = set()
+        if (manual_layouts is None and self.blank_page != "delete"
+                and self.max_pages > 1):
+            blanks = set(blank_slots(pages, frame_w=w_orig,
+                                     target=self.max_pages))
+            if blanks:
+                pages = sorted([*pages, *blanks], key=lambda b: (b[0], b[1]))
+                self.last_stats["blank"] = len(blanks)
+
         margin_px = int((self.margin_mm / 25.4) * dpi)
         base = input_buf.filestem or "capture"
 
@@ -862,6 +945,12 @@ class PageDetector(AbstractImageProcessor):
         for idx, (lx1, ly1, lx2, ly2) in enumerate(pages):
             suffix = next(suffixes)
             filestem = f"{base}_{suffix}"
+
+            if (lx1, ly1, lx2, ly2) in blanks:
+                input_buf.children.append(self._blank_child(
+                    input_buf, (lx1, ly1, lx2, ly2), suffix, filestem,
+                    spread_sides[idx] if spread_sides else None))
+                continue
 
             # A left page is bound on its RIGHT edge, and vice versa.
             spine_side = None

@@ -62,6 +62,7 @@ and checks this table lists every declared key — neither the code nor this pag
 | `oob_forced` | scalar — copied | PageDewarper |
 | `oob_pct` | scalar — copied | PageDewarper / manual quad path |
 | `status` | scalar — copied | chain / PageDewarper |
+| `blank_page` | scalar — copied | PageDetector (white page for a textless side, #196) |
 | `elapsed_ms` | scalar — copied | chain |
 | `disabled` | scalar — copied | chain |
 | `gpu` | scalar — copied | chain |

@@ -46,7 +46,7 @@ from aglaia.processors.utils import binarize_fixed, to_gray
 # flat_spline's knot flip + outer penalty, PageDewarper's spine-zone weighting
 # and spine-curl search, and the per-side warm-start ring, which fell back to
 # one shared "single" history for both halves of every spread.
-_CARRIED_META = ("page_side", "parent_crop_xywh")
+_CARRIED_META = ("page_side", "parent_crop_xywh", "blank_page")
 
 #: Curl zone as a fraction of page width — the band nearest the binding whose
 #: baseline evidence is down-weighted. 0.30 matches the iOS port.
