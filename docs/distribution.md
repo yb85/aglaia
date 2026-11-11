@@ -17,7 +17,7 @@ git tag v0.2.0 -m "Aglaïa 0.2.0"
 git push origin v0.2.0
 ```
 
-The `macos-14` runner then:
+The `macos-15` runner (Apple Silicon) then:
 
 1. derives the version from the tag (`v0.2.0` → `0.2.0`),
 2. vendors `llama-server` (`scripts/fetch_llama_server.py`, Surya backend),

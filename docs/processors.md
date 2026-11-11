@@ -143,7 +143,8 @@ options:
   margin_mm: 2.0           # crop margin around each page bbox
   roi_margin_mm: 4.0       # ROI padding for the Binarizer; raise if margins clip
   roi_hull: true           # ROI = convex hull of the text boxes (false = bbox)
-  max_pages: 2           # 0 = infinity
+  max_pages: 2             # 1, 2 or 3
+  blank_page: delete       # delete | 1px | match (textless spread page)
   over_cap: merge          # over-cap reduction: merge | discard (drop smallest)
   processing_dpi: 150.0    # null = no downscale
   rescale_threshold: 0.01
@@ -152,6 +153,27 @@ options:
   merge_width_weight: 0.6  # width-similarity term weight
   merge_gap_norm_cap: 0.15 # cap on the normalized inter-box gap
 ```
+
+**Blank pages (#196).** A page with no text yields no boxes, so a spread with
+a blank verso comes out one page short. `blank_page` decides what happens:
+`delete` (default) emits nothing for it; `1px` emits a 1×1 white placeholder,
+which keeps the page count at no cost; `match` emits a white page the size of
+the detected ones (median width, joint height). Positioning follows the
+**largest empty area**: `blank_slots` takes the widest of the gaps left of the
+first page, between two pages and right of the last page, centres the blank
+there, splits that gap, and repeats until `max_pages`. A gap narrower than
+`BLANK_MIN_GAP` (0.75) × the median page width takes nothing, so a cover shot
+in the middle of the frame stays a single page. Blanks are sorted in with the
+detected pages, so suffixes and `page_side` keep reading order. The child is
+white, not a crop of the scan (that paper carries only bleed-through, which the
+Binarizer would turn into specks), its ROI is the full image, and it carries
+`meta["blank_page"] = True`. A hand-drawn layout set never gets blanks.
+Downstream steps pass a white page through; `MarginSetter` still adds its
+margin, so a `1px` page leaves the chain at roughly 1 px + 2 × margin — or at
+the fixed page size when that mode is on.
+
+`max_pages` takes **1, 2 or 3** (was 0-8). A pipeline that saved `0` (no cap)
+or a value above 3 runs with 3.
 
 The default `auto` backend resolves **dbnet → apple_vision (macOS) → east**. The projection-profile `heuristic` is no longer an `auto` fallback — `auto` raises `LayoutModelUnavailable` if no ML model is installed (download one with `aglaia setup` or the in-app downloader); pick `heuristic` explicitly to use it.
 
@@ -651,6 +673,31 @@ least as wide as the dewarp made it.
 The forward pass stamps `min_width_px` (0 = no floor) so `apply_replay`
 reproduces it exactly; a chain stamped before the option existed carries the
 old unconditional value and still replays as it ran.
+
+**Fixed page size (#197).** With `fixed_size` on (default off), the cropped
+and padded block is placed on a white page of `page_size_mm` — `"W H"` in mm,
+default **A5** `"148 210"` — at the step's DPI, so every page of the book comes
+out the same size. `margin_mm` is then the *minimum* margin. `h_align`
+(`left|center|right`, default `center`) and `v_align` (`top|center|bottom`,
+default `top`) place the block. When the block overflows the page on an axis,
+`clip` decides: off (default), the page grows to the block on that axis only;
+on, the page keeps its size and the block is cut following the alignment —
+`left` cuts on the right, `center` on both sides, `right` on the left (same for
+top/center/bottom). A page with **no ink** — a blank page from `PageDetector.blank_page` (#196), `1px` or `match` — always comes out at exactly the page size, whatever `clip` says: there is no content to keep, and a large blank must not grow the page. `width_floor` does not apply in this mode. The forward pass
+stamps `replay_params["page"]` (`wh_px`, alignments, `clip`) so `apply_replay`
+places the page the same way.
+
+```yaml
+- name: output_margin
+  processor: MarginSetter
+  options:
+    margin_mm: "2"
+    fixed_size: true
+    page_size_mm: "148 210"   # A5
+    h_align: center           # default
+    v_align: top              # default
+    clip: false
+```
 
 Note the ROI margins never reach the output: because this step crops to ink,
 `PageDetector.roi_margin_mm` and the hull ROI govern what the Binarizer keeps,

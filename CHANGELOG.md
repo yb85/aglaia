@@ -4,6 +4,39 @@ All notable changes to Aglaïa are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0rc12] — 2026-11-11
+
+Every page of a book at the same size, and the blank pages of a spread kept.
+
+### Added
+
+- **MarginSetter: fixed page size** (#197). `fixed_size` (off by default)
+  places the content and its margin on a page of `page_size_mm` — A5,
+  `"148 210"`, by default — positioned by `h_align` (left/center/right,
+  default center) and `v_align` (top/center/bottom, default top). When the content overflows the page, `clip`
+  off grows the page on that axis, and `clip` on cuts the content following
+  the alignment. A page with no ink always comes out at exactly the page size.
+- **PageDetector: blank pages of a spread** (#196). A page with no text has no
+  boxes, so a spread with a blank verso came out one page short.
+  `blank_page` now chooses: `delete` (default, as before), `1px` (a 1×1 white
+  placeholder) or `match` (a white page the size of the others). The blank
+  page goes into the largest empty area of the frame. A cover shot in the
+  middle of the frame gets none.
+
+### Changed
+
+- **`max_pages` takes 1, 2 or 3** (#196), was 0-8. A pipeline saved with 0
+  (no cap) or more than 3 runs with 3. `--max-pages` takes 1, 2 or 3.
+
+### Fixed
+
+- **CI and release ran on a retired runner.** GitHub no longer serves
+  `macos-14`, so the macOS job was cancelled before it started. CI and the
+  release build now run on `macos-15`.
+- **Destination plugin tests drifted from the plugins** — a keychain stub
+  without the `for_write` argument, a response stub without headers, and
+  send-to-corpus outcomes that now require the corpus's JSON `status` reply.
+
 ## [0.1.0rc11] — 2026-10-28
 
 A deskew that holds on a small book in a cluttered camera frame, edits on the

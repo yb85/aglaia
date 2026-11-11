@@ -154,10 +154,13 @@ def test_a_missing_file_is_refused_locally_by_all_three(dests, tmp_path):
 # ── calibre: raw body, parameters in the path ────────────────────────
 
 class _Resp:
-    def __init__(self, status=200, payload=None, text=""):
+    def __init__(self, status=200, payload=None, text="", headers=None):
         self.status_code = status
         self._payload = payload
         self.text = text
+        # send-to-corpus reads these to spot an auth wall (a redirect, an
+        # HTML page where JSON was promised). A plain API reply has neither.
+        self.headers = headers or {"content-type": "application/json"}
 
     def json(self):
         if self._payload is None:
@@ -309,7 +312,7 @@ def test_corpus_sends_multipart_with_the_key_header(dests, monkeypatch, pdf):
                    {"api_key": "zk-123"})
     calls = []
     _patch_client(monkeypatch, d, calls,
-                  {"POST": _Resp(201, {"id": 42, "bytes": 400})})
+                  {"POST": _Resp(201, {"status": "created", "id": 42, "bytes": 400})})
     r = d.send(pdf, _meta(title="Le Corps mystique", author="Mersch",
                           year="1936", pages=412))
     assert r.ok and "#42" in r.message
@@ -359,15 +362,18 @@ def test_corpus_prefers_the_projects_own_metadata_over_the_default(
 
 
 @pytest.mark.parametrize("status,ok,needle", [
-    (201, True, "Uploaded"), (200, True, "Already in the corpus"),
-    (400, False, "refused"), (413, False, "2 GiB"), (401, False, "API key")])
+    (201, True, "Uploaded"), (200, True, "already has"),
+    (400, False, "refused"), (413, False, "too large"), (401, False, "API key")])
 def test_corpus_keeps_the_apis_four_outcomes_distinct(
         dests, monkeypatch, pdf, status, ok, needle):
     d = _configure(dests.get("send-to-corpus"),
                    {"base_url": "https://corpus.example.org"},
                    {"api_key": "k"})
     _patch_client(monkeypatch, d, [],
-                  {"POST": _Resp(status, {"id": 1, "detail": "bad ext"})})
+                  # A corpus answer is JSON carrying `status`: anything else is read as
+                  # a proxy answering in its place.
+                  {"POST": _Resp(status, {"status": "x", "id": 1,
+                                          "detail": "bad ext"})})
     r = d.send(pdf, _meta())
     assert r.ok is ok and needle in r.message
     if status == 200:

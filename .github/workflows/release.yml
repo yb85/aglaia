@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14   # Apple Silicon (arm64) — tier-1 target
+    runs-on: macos-15   # Apple Silicon (arm64) — tier-1 target. macos-14 was retired by GitHub (2026-11).
     env:
       AGLAIA_NOTARY_PROFILE: aglaia-notary
     steps:

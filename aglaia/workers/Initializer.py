@@ -339,7 +339,7 @@ def initialize(mode="capture"):
 
     # Common Processing Arguments
     parser.add_argument("--workers", type=int, default=current_args["workers"], help="Number of workers for the processing chain. 0 = auto (sized to the CPU).")
-    parser.add_argument("--max-pages", type=int, default=current_args["max_pages"], help="Max layouts per page (merging small ones). 0=Infinity. Default 2.")
+    parser.add_argument("--max-pages", type=int, default=current_args["max_pages"], choices=(1, 2, 3), help="Max layouts per page (merging small ones): 1, 2 or 3. Default 2.")
     parser.add_argument("--make-pdf", action="store_true", default=current_args["make_pdf"], help="Create a PDF from the extracted layouts")
     parser.add_argument("--debug", action="store_true", default=current_args["debug"], help="Save debug images for analysis")
     parser.add_argument("--input-dpi", type=float, default=current_args["input_dpi"], help="Input DPI override (Default: 100 for Cam / Auto for PDF)")

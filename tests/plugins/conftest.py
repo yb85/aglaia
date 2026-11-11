@@ -76,7 +76,7 @@ def dests(tmp_path, monkeypatch):
             _zip_plugin(src, tmp_path / f"{slug}.aglplugin"), "destinations")
         assert res.ok, f"{slug} would not install: {res.message}"
     # Secrets go to a dict, not the developer's real keychain.
-    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self: None)
+    monkeypatch.setattr(pc.PluginSecrets, "_keyring", lambda self, for_write=False: None)
     D.reset_for_tests()
     yield D
     for slug in FIRST_PARTY:
