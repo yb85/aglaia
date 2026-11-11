@@ -28,6 +28,15 @@ Every page of a book at the same size, and the blank pages of a spread kept.
 - **`max_pages` takes 1, 2 or 3** (#196), was 0-8. A pipeline saved with 0
   (no cap) or more than 3 runs with 3. `--max-pages` takes 1, 2 or 3.
 
+### Fixed
+
+- **CI and release ran on a retired runner.** GitHub no longer serves
+  `macos-14`, so the macOS job was cancelled before it started. CI and the
+  release build now run on `macos-15`.
+- **Destination plugin tests drifted from the plugins** — a keychain stub
+  without the `for_write` argument, a response stub without headers, and
+  send-to-corpus outcomes that now require the corpus's JSON `status` reply.
+
 ## [0.1.0rc11] — 2026-10-28
 
 A deskew that holds on a small book in a cluttered camera frame, edits on the

@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: macos-14   # Apple Silicon
+    runs-on: macos-15   # Apple Silicon. macos-14 was retired by GitHub (2026-11).
     steps:
       - uses: actions/checkout@v4
 
