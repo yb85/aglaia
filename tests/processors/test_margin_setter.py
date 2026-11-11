@@ -210,3 +210,17 @@ def test_replay_reproduces_the_fixed_page():
 def test_a_bad_page_size_is_refused():
     with pytest.raises(ValueError):
         _fixed(page_size_mm="148")
+
+
+@pytest.mark.parametrize("shape", [(1, 1), (3000, 2500)])
+def test_an_empty_page_always_comes_out_at_the_page_size(shape):
+    """A blank page (#196) — 1 px placeholder or larger than A5 — matches the
+    fixed size even with clip off: there is no content to keep."""
+    buf = ImageBuffer(np.full(shape, 255, np.uint8), ImageType.BW, dpi=DPI)
+    src = buf.buffer.copy()
+    out = _fixed().process(buf)
+    assert out.buffer.shape[::-1] == A5
+    assert (out.buffer == 255).all()
+    rep, _ = MarginSetter.apply_replay(
+        src, np.full(src.shape, 255, np.uint8), out.meta["replay_params"], None)
+    assert rep.shape == out.buffer.shape

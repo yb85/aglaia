@@ -27,7 +27,8 @@ Pure number values work too (`margin_mm: 5` → 5 on all sides).
 `fixed_size` (off) places that block on a page of `page_size_mm` (default A5,
 "148 210") instead, aligned by `h_align` / `v_align`. The margin is then the
 minimum margin. A block larger than the page grows the page on that axis, or
-with `clip` is cut to the page following the alignment (#197).
+with `clip` is cut to the page following the alignment (#197). A page with no
+ink always comes out at exactly the page size, whatever `clip` says.
 """
 from __future__ import annotations
 
@@ -241,12 +242,18 @@ class MarginSetter(AbstractImageProcessor):
         page = None
         if self.fixed_size:
             scale = buf.dpi / 25.4
+            # A page with no ink (a blank page, #196) has nothing to protect
+            # from the cut: it always comes out at exactly the page size, so
+            # a large blank never grows the page. Stamped as the clip the
+            # replay applies.
+            empty = not _has_ink(cropped)
+            clip = self.clip or empty
             page = {"wh_px": [int(round(self.page_mm[0] * scale)),
                               int(round(self.page_mm[1] * scale))],
                     "h_align": self.h_align, "v_align": self.v_align,
-                    "clip": self.clip}
+                    "clip": clip}
             out = _place(out, tuple(page["wh_px"]), self.h_align,
-                         self.v_align, self.clip, fill=255)
+                         self.v_align, clip, fill=255)
         # The floor is about the dewarp canvas width; a fixed page replaces it.
         floor_px = int(in_w) if self.width_floor and page is None else 0
         if floor_px:
@@ -297,6 +304,12 @@ def _enforce_width_floor(arr: np.ndarray, min_w: int,
     border_val = fill if arr.ndim == 2 else (fill, fill, fill)
     return cv2.copyMakeBorder(arr, 0, 0, pad_l, pad_r,
                               cv2.BORDER_CONSTANT, value=border_val)
+
+
+def _has_ink(arr: np.ndarray) -> bool:
+    """Same ink test as `_crop_to_content`: any pixel darker than 250."""
+    gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY) if arr.ndim == 3 else arr
+    return bool((gray < 250).any())
 
 
 def _crop_to_content(arr: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int]]:

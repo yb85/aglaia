@@ -661,7 +661,7 @@ out the same size. `margin_mm` is then the *minimum* margin. `h_align`
 `clip` decides: off (default), the page grows to the block on that axis only;
 on, the page keeps its size and the block is cut following the alignment —
 `left` cuts on the right, `center` on both sides, `right` on the left (same for
-top/center/bottom). `width_floor` does not apply in this mode. The forward pass
+top/center/bottom). A page with **no ink** — a blank page from `PageDetector.blank_page` (#196), `1px` or `match` — always comes out at exactly the page size, whatever `clip` says: there is no content to keep, and a large blank must not grow the page. `width_floor` does not apply in this mode. The forward pass
 stamps `replay_params["page"]` (`wh_px`, alignments, `clip`) so `apply_replay`
 places the page the same way.
 
