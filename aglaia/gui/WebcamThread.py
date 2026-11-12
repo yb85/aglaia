@@ -8,7 +8,7 @@
 import cv2
 import sys
 import threading
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 
@@ -117,6 +117,22 @@ class WebcamThread(QThread):
         thread-safe and quick (sub-frame budget)."""
         self._overlay_fn = fn
 
+    def _apply_transform(self, cv_img):
+        """Apply the configured rotation then mirror/flip. Shared by the real
+        and fake capture loops and by ``BridgeCameraThread`` so all three treat
+        orientation identically."""
+        if self.rotation == 90:
+            cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_CLOCKWISE)
+        elif self.rotation == 180:
+            cv_img = cv2.rotate(cv_img, cv2.ROTATE_180)
+        elif self.rotation == 270:
+            cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        if self.mirror:
+            cv_img = cv2.flip(cv_img, 1)
+        if self.flip:
+            cv_img = cv2.flip(cv_img, 0)
+        return cv_img
+
     def set_transform(self, transform_str):
         transform_str = str(transform_str).lower()
         
@@ -218,19 +234,8 @@ class WebcamThread(QThread):
                           f"aspect={fw / max(fh, 1):.2f}",
                           flush=True)
                     first_frame_logged = True
-                # Apply rotation
-                if self.rotation == 90:
-                    cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_CLOCKWISE)
-                elif self.rotation == 180:
-                    cv_img = cv2.rotate(cv_img, cv2.ROTATE_180)
-                elif self.rotation == 270:
-                    cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                
-                if self.mirror:
-                    cv_img = cv2.flip(cv_img, 1)
-                if self.flip:
-                    cv_img = cv2.flip(cv_img, 0)
-                    
+                cv_img = self._apply_transform(cv_img)
+
                 with self.lock:
                     self.latest_frame = cv_img.copy()
 
@@ -260,17 +265,7 @@ class WebcamThread(QThread):
         print(f"[WebcamThread] FAKE camera: {path} "
               f"shape={img.shape[1]}x{img.shape[0]}", flush=True)
         while self._run_flag:
-            cv_img = img.copy()
-            if self.rotation == 90:
-                cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_CLOCKWISE)
-            elif self.rotation == 180:
-                cv_img = cv2.rotate(cv_img, cv2.ROTATE_180)
-            elif self.rotation == 270:
-                cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            if self.mirror:
-                cv_img = cv2.flip(cv_img, 1)
-            if self.flip:
-                cv_img = cv2.flip(cv_img, 0)
+            cv_img = self._apply_transform(img.copy())
             with self.lock:
                 self.latest_frame = cv_img.copy()
             self._emit_preview(cv_img)
