@@ -292,6 +292,16 @@ An edited pipeline also has to reach the live cards: `_spawn_widget` passes
 stage rail with the new step names appended at the end, and `is_final` — which
 decides the final-step zoom and where the OCR badge sits — stops matching.
 
+`update_pipeline_context` is also where the window gets the **new chain's input
+queue**. The apply runs on a plain `threading.Thread`, so the hand-off uses
+`QTimer.singleShot(0, window, _swap)`: the `window` context queues `_swap` on the
+GUI thread. Without a context object the timer belongs to the worker thread,
+which has no Qt event loop, and never fires. The window then kept the stopped
+chain's queue, and every capture after an Apply was lost, while card reprocess
+(which goes through the live chain) still worked (#204). Any `singleShot` from a
+`threading.Thread` target in `app.py` must pass a context —
+`tests/gui/test_thread_singleshot.py` enforces it.
+
 When the chain goes idle, `_reconcile_progress_if_idle` forces the bar to 100 %
 and clears stuck spinners (it exists to rescue a dropped `branch_ready`). That
 is also how a run that genuinely lost work reports itself complete, so it now
