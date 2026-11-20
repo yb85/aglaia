@@ -30,6 +30,14 @@ def app_data(tmp_path, monkeypatch):
     import aglaia.app_data.secrets as sec
     for m in (ad, sec, pc):
         importlib.reload(m)
+    # NEVER let these tests reach the real OS keychain. `delete()` goes
+    # through `_keyring()` even in plaintext mode (reads must, #166) — and
+    # these tests use the REAL plugin slug and key names, so on a dev
+    # machine the suite deleted the developer's actual corpus API key: the
+    # first run destroyed it then failed its assert against the still-live
+    # keychain value; the second run passed over the wreckage.
+    monkeypatch.setattr(pc.PluginSecrets, "_keyring",
+                        lambda self, *, for_write=False: None)
     yield tmp_path, sec, pc
     sec.use_plaintext_store(False)
 
