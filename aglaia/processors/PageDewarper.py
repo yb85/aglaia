@@ -672,6 +672,28 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
                        0.0)
         return np.concatenate([[0.0], np.cumsum(ds * (1.0 + zp2) ** (k / 2.0))])
 
+    # Bounds on the scale-preserving zoom (#202). A fit that moved the page
+    # height by more than this is not a scale error worth following.
+    _ZOOM_MIN, _ZOOM_MAX = 0.5, 2.0
+
+    @staticmethod
+    def _scale_zoom(rough_dims, page_dims) -> float:
+        """Zoom that keeps the remap at the input's pixel scale (#202).
+
+        The output height is `0.5 * page_dims_h * zoom * max(h, w)`. The fit
+        trades camera depth against page size, so the fitted `page_dims_h`
+        drifts page to page (1.76 vs 2.13 on two facing pages of one book)
+        while the page height measured in the image, `rough_dims_h`, does not
+        (1.96 on both). With zoom 1.0 each page came out rescaled by its own
+        arbitrary factor while still stamped at the input DPI. Scaling by
+        `rough_h / page_h` sizes the output from the measured height instead.
+        """
+        rough_h, page_h = float(rough_dims[1]), float(page_dims[1])
+        if not (rough_h > 0 and page_h > 0):
+            return 1.0
+        return float(np.clip(rough_h / page_h, PageDewarper._ZOOM_MIN,
+                             PageDewarper._ZOOM_MAX))
+
     @staticmethod
     def _sample_grid(ref_h, ref_w, *, params, page_dims_w, page_dims_h,
                      decimate, zoom, focal, n_cam=8, spine=None,
@@ -1724,7 +1746,7 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             page_dims = rough_dims
         # 5. Remapping — shared arc-length grid (same code path replay
         # uses, so the live remap and a replayed remap are pixel-identical).
-        zoom = 1.0
+        zoom = self._scale_zoom(rough_dims, page_dims)
         decimate = self.cfg.REMAP_DECIMATE
         image_points, grid_shape, target_w, target_h, w_small, h_small = \
             self._sample_grid(
@@ -1885,7 +1907,8 @@ class PageDewarper(AbstractImageProcessor, BatchableTrait):
             "page_dims": [float(page_dims[0]), float(page_dims[1])],
             "src_shape": [int(img.shape[0]), int(img.shape[1])],
             "pad_px": int(pad_px),
-            "zoom": float(1.0),
+            # Stamps before #202 carry 1.0 and replay at that scale.
+            "zoom": float(zoom),
             "decimate": int(self.cfg.REMAP_DECIMATE),
             "sheet_model": "cylindrical",
             "model_dims": [float(model_dims[0]), float(model_dims[1])],
