@@ -714,7 +714,10 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
                     pipeline_version_id=new_pvid,
                     reprocess=reprocess,
                 )
-            QTimer.singleShot(0, _swap)
+            # `window` as context: this runs on a plain thread, where a
+            # context-less singleShot never fires — the window then kept the
+            # stopped chain's queue and every later capture was lost (#204).
+            QTimer.singleShot(0, window, _swap)
 
             if reprocess:
                 from aglaia.workers.ImportHelpers import reprocess_active_scans
@@ -814,7 +817,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
                 processing_queue=new_chain.get_input_queue(),
                 pipeline_version_id=state["pipeline_version_id"],
             )
-        QTimer.singleShot(0, _swap)
+        QTimer.singleShot(0, window, _swap)
         return int(dropped)
 
     # ── window ────────────────────────────────────────────────────
@@ -886,7 +889,7 @@ def _bootstrap_with_choice(app, choice, cfg: CliConfig) -> int:
                 return
             if n > 0 and hasattr(window, "status_bar_widget"):
                 kind = "Force rerun" if cfg.force_proc else "Catch-up"
-                QTimer.singleShot(0, lambda: window.toast(
+                QTimer.singleShot(0, window, lambda: window.toast(
                     f"{kind}: reprocessing {n} scan(s)…"))
         _threading.Thread(target=_catchup, daemon=True,
                           name="Catchup").start()
